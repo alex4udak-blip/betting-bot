@@ -4,6 +4,7 @@ import requests
 import json
 import sqlite3
 import asyncio
+import time
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
@@ -28,6 +29,13 @@ if CLAUDE_API_KEY:
 # Live mode subscribers
 live_subscribers = set()
 inplay_subscribers = set()
+
+# Matches cache to reduce API calls
+matches_cache = {
+    "data": [],
+    "updated_at": None,
+    "ttl_seconds": 120  # Cache for 2 minutes
+}
 
 COMPETITIONS = {
     "PL": "Premier League",
@@ -336,9 +344,18 @@ Return ONLY JSON."""
 
 # ===== API FUNCTIONS =====
 
-def get_matches(competition=None, days=7, date_filter=None):
-    """Get matches from all leagues"""
+def get_matches(competition=None, days=7, date_filter=None, use_cache=True):
+    """Get matches from all leagues with rate limit handling and caching"""
+    global matches_cache
+    
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    # Check cache first (only for default params)
+    if use_cache and not competition and not date_filter and days == 7:
+        if (matches_cache["updated_at"] and 
+            (datetime.now() - matches_cache["updated_at"]).total_seconds() < matches_cache["ttl_seconds"]):
+            logger.info(f"Using cached matches: {len(matches_cache['data'])} matches")
+            return matches_cache["data"]
     
     if date_filter == "today":
         date_from = datetime.now().strftime("%Y-%m-%d")
@@ -361,24 +378,54 @@ def get_matches(competition=None, days=7, date_filter=None):
                 matches = r.json().get("matches", [])
                 logger.info(f"Got {len(matches)} from {competition}")
                 return matches
+            elif r.status_code == 429:
+                logger.warning(f"Rate limit hit for {competition}, waiting...")
+                time.sleep(6)  # Wait and retry
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                if r.status_code == 200:
+                    return r.json().get("matches", [])
+            else:
+                logger.error(f"API error {r.status_code} for {competition}")
         except Exception as e:
             logger.error(f"Error getting matches for {competition}: {e}")
         return []
     
-    # Get from all leagues
+    # Get from all leagues with rate limit awareness
     all_matches = []
     for code in ["PL", "PD", "BL1", "SA", "FL1"]:
         try:
             url = f"{FOOTBALL_API_URL}/competitions/{code}/matches"
             r = requests.get(url, headers=headers, params=params, timeout=10)
+            
             if r.status_code == 200:
                 matches = r.json().get("matches", [])
                 all_matches.extend(matches)
                 logger.info(f"Got {len(matches)} from {code}")
+            elif r.status_code == 429:
+                logger.warning(f"Rate limit hit at {code}, waiting 6s...")
+                time.sleep(6)  # Wait 6 seconds before retry
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                if r.status_code == 200:
+                    matches = r.json().get("matches", [])
+                    all_matches.extend(matches)
+                    logger.info(f"Retry got {len(matches)} from {code}")
+            else:
+                logger.error(f"API error {r.status_code} for {code}: {r.text[:100]}")
+            
+            # Small delay between requests to avoid rate limit
+            time.sleep(0.5)
+            
         except Exception as e:
             logger.error(f"Error: {e}")
     
     logger.info(f"Total: {len(all_matches)} matches")
+    
+    # Update cache (only for default params)
+    if not competition and not date_filter:
+        matches_cache["data"] = all_matches
+        matches_cache["updated_at"] = datetime.now()
+        logger.info("Matches cache updated")
+    
     return all_matches
 
 
@@ -1963,19 +2010,20 @@ def main():
     # Error handler
     app.add_error_handler(error_handler)
     
-    # Job Queue - Live Alerts
+    # Job Queue - Live Alerts (increased intervals to avoid API rate limit)
     job_queue = app.job_queue
-    job_queue.run_repeating(check_live_matches, interval=300, first=60)  # Every 5 min
-    job_queue.run_repeating(send_daily_digest, interval=7200, first=120)  # Every 2 hours
-    job_queue.run_repeating(check_predictions_results, interval=3600, first=180)  # Every hour
+    job_queue.run_repeating(check_live_matches, interval=600, first=120)  # Every 10 min
+    job_queue.run_repeating(send_daily_digest, interval=7200, first=300)  # Every 2 hours
+    job_queue.run_repeating(check_predictions_results, interval=3600, first=600)  # Every hour
     
     print("\n✅ Bot v10 running!")
     print("   📊 Enhanced analysis with form + H2H + home/away")
     print("   💾 SQLite database for user settings")
     print("   ⚙️ Personalization (odds, risk level)")
     print("   🎛️ Inline buttons for better UX")
-    print("   🔔 Live alerts every 5 min (use /live)")
+    print("   🔔 Live alerts every 10 min (use /live)")
     print("   📈 Prediction tracking + auto-results check")
+    print("   💾 Matches cache (2 min TTL)")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
