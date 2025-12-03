@@ -403,6 +403,74 @@ Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
 
 # ===== LIVE ALERTS =====
 
+# Track recommendations for stats
+recommendations_history = []
+
+async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
+    """Send stats summary every 2 hours to subscribers"""
+    
+    if not live_subscribers:
+        return
+    
+    logger.info("Sending stats summary...")
+    
+    # Get today's matches
+    matches = get_matches(days=1)
+    
+    # Count by status
+    scheduled = 0
+    in_play = 0
+    finished = 0
+    
+    for m in matches:
+        status = m.get("status", "")
+        if status == "SCHEDULED" or status == "TIMED":
+            scheduled += 1
+        elif status == "IN_PLAY" or status == "PAUSED":
+            in_play += 1
+        elif status == "FINISHED":
+            finished += 1
+    
+    # Build stats message
+    now = datetime.now().strftime("%H:%M")
+    
+    text = f"📊 **Статистика ({now})**\n\n"
+    text += f"⚽ **Матчи сегодня:**\n"
+    text += f"   • Ожидается: {scheduled}\n"
+    text += f"   • Сейчас идёт: {in_play}\n"
+    text += f"   • Завершено: {finished}\n\n"
+    
+    # Recent recommendations
+    if recommendations_history:
+        text += f"🎯 **Последние рекомендации:** {len(recommendations_history)}\n"
+        for rec in recommendations_history[-3:]:
+            text += f"   • {rec}\n"
+        text += "\n"
+    
+    # Upcoming interesting matches
+    upcoming = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
+    if upcoming:
+        text += "⏰ **Ближайшие матчи:**\n"
+        for m in upcoming[:3]:
+            h = m.get("homeTeam", {}).get("name", "?")
+            a = m.get("awayTeam", {}).get("name", "?")
+            try:
+                dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
+                time_str = dt.strftime("%H:%M")
+            except:
+                time_str = "?"
+            text += f"   • {time_str} - {h} vs {a}\n"
+    
+    text += "\n💡 /recommend - получить рекомендации"
+    
+    # Send to all subscribers
+    for chat_id in live_subscribers:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logger.error(f"Failed to send stats to {chat_id}: {e}")
+
+
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     """Check for high-confidence matches and alert subscribers"""
     
@@ -465,6 +533,11 @@ Be brief. Russian."""
                 response = message.content[0].text
                 
                 if "NO_ALERT" not in response and "LIVE ALERT" in response:
+                    # Track recommendation
+                    recommendations_history.append(f"{home} vs {away}")
+                    if len(recommendations_history) > 20:
+                        recommendations_history.pop(0)
+                    
                     # Send to all subscribers
                     for chat_id in live_subscribers:
                         try:
@@ -475,6 +548,83 @@ Be brief. Russian."""
                             
             except Exception as e:
                 logger.error(f"Live analysis error: {e}")
+
+
+async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
+    """Send stats summary every 2 hours to subscribers"""
+    
+    if not live_subscribers:
+        return
+    
+    logger.info(f"Sending stats summary to {len(live_subscribers)} subscribers...")
+    
+    matches = get_matches(days=1)
+    
+    if not matches:
+        return
+    
+    # Count matches by league
+    by_league = {}
+    for m in matches:
+        league = m.get("competition", {}).get("name", "Other")
+        by_league[league] = by_league.get(league, 0) + 1
+    
+    # Get top picks
+    top_picks = ""
+    if claude_client and matches:
+        matches_text = ""
+        for i, m in enumerate(matches[:6], 1):
+            h = m.get("homeTeam", {}).get("name", "?")
+            a = m.get("awayTeam", {}).get("name", "?")
+            matches_text += f"{i}. {h} vs {a}\n"
+        
+        try:
+            prompt = f"""Quick analysis of today's matches:
+
+{matches_text}
+
+Give TOP 3 bets with 70%+ confidence ONLY.
+Format:
+1. [Match] - [Bet] - X% 
+2. [Match] - [Bet] - X%
+3. [Match] - [Bet] - X%
+
+If less than 3 good bets, say how many.
+Be very brief. Russian."""
+
+            message = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            top_picks = message.content[0].text
+        except:
+            top_picks = "Анализ недоступен"
+    
+    # Build summary
+    summary = f"""📊 **СТАТИСТИКА (каждые 2 часа)**
+
+⚽ **Матчей сегодня:** {len(matches)}
+
+🏆 **По лигам:**
+"""
+    for league, count in list(by_league.items())[:5]:
+        summary += f"• {league}: {count}\n"
+    
+    summary += f"""
+🎯 **Топ ставки (70%+):**
+{top_picks}
+
+💡 Напиши название команды для полного анализа!
+"""
+    
+    # Send to subscribers
+    for chat_id in live_subscribers:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=summary)
+            logger.info(f"Sent stats to {chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to send stats to {chat_id}: {e}")
 
 
 # ===== TELEGRAM HANDLERS =====
@@ -763,11 +913,17 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
     
-    # Live alerts job - every hour
+    # Live alerts - every 5 minutes (test mode)
+    # Stats summary - every 2 hours
     job_queue = app.job_queue
-    job_queue.run_repeating(check_live_matches, interval=3600, first=60)
+    if job_queue:
+        job_queue.run_repeating(check_live_matches, interval=300, first=60)  # 5 min
+        job_queue.run_repeating(send_stats_summary, interval=7200, first=120)  # 2 hours
+        print("✅ Job queue enabled: live alerts (5 min), stats (2 hours)")
+    else:
+        print("⚠️ Job queue not available - install python-telegram-bot[job-queue]")
     
-    print("✅ Bot v4 running with live alerts!")
+    print("✅ Bot v4 running!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
