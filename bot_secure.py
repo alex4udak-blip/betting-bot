@@ -751,51 +751,46 @@ User preferences:
 - Risk level: {user_settings.get('risk_level', 'medium')}
 """
     
-    prompt = f"""You are an expert betting analyst. Analyze this match with ALL available data:
+    prompt = f"""You are an expert betting analyst. Analyze this match with available data:
 
 {analysis_data}
 
 {filter_info}
 
-IMPORTANT:
-- Respond in the SAME LANGUAGE as user's query (detect from team names/competition)
-- Use ALL data provided (form, H2H, home/away stats, odds)
-- Be confident but realistic
-- Consider the user's risk preferences if provided
+CRITICAL RULES:
+1. ALWAYS give a prediction even if some data is missing
+2. If opponent data is missing - still analyze based on what you have
+3. If it's a cup match or lower division team - acknowledge it but still predict
+4. Respond in the SAME LANGUAGE as team names (Russian for Russian teams, etc.)
+5. NEVER say "cannot analyze" or "need more data" - work with what's available
+6. Use common football knowledge if specific stats are missing (e.g., Liverpool is historically strong at home)
 
 PROVIDE ANALYSIS IN THIS FORMAT:
 
 📊 **СТАТИСТИКА:**
-• Форма хозяев: [краткий анализ]
-• Форма гостей: [краткий анализ]
-• H2H тренд: [что показывает история]
-• Дома/В гостях: [как команды играют дома/в гостях]
+• Форма хозяев: [анализ или "данные недоступны"]
+• Форма гостей: [анализ или "данные недоступны - команда из низшего дивизиона"]
+• H2H тренд: [если есть] 
+• Контекст: [кубковый матч / лига / дерби и т.д.]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
-[Тип ставки] @ [коэфф]
+[Тип ставки] @ [примерный коэфф если нет точного]
 💰 Банк: X%
-📝 Почему: [2-3 предложения с конкретными фактами из данных]
+📝 Почему: [2-3 предложения - используй общие знания о командах если нет статистики]
 
 📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
-1. [Тотал больше/меньше X.5] - X% - коэфф X.XX
-   Причина: [факт из H2H или формы]
-2. [Обе забьют / Не забьют] - X% - коэфф X.XX
-   Причина: [факт]
-3. [Точный счёт X:X] - X% - коэфф X.XX
-   Причина: [почему этот счёт вероятен]
-4. [Голы в 1-м тайме / Гол до X мин] - X% - коэфф X.XX
-   Причина: [факт]
+1. [Тотал] - X% - коэфф ~X.XX
+2. [BTTS] - X% - коэфф ~X.XX  
+3. [Точный счёт] - X% - коэфф ~X.XX
+4. [Голы в тайме] - X% - коэфф ~X.XX
 
 ⚠️ **РИСКИ:**
-[Конкретные риски на основе данных]
+[Риски включая неполные данные если применимо]
 
-✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК / ПРОПУСТИТЬ]
+✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК]
 
-RULES:
-- Use actual data from the analysis, not generic statements
-- Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%
-- Be specific about WHY you recommend each bet
-- Include exact score prediction based on goal-scoring patterns"""
+NOTE: If data is limited, use lower confidence (55-65%) but STILL make a prediction.
+Bank %: 75%+=4-5%, 70-75%=3%, 65-70%=2%, 60-65%=1%, <60%=0.5%"""
 
     try:
         message = claude_client.messages.create(
@@ -1858,10 +1853,17 @@ async def testalert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Match: {home} vs {away}
 Competition: {comp}
-Form: {form_text}
-Odds: {odds_text}
+Form (if available): {form_text if form_text else "Limited data"}
+Odds (if available): {odds_text if odds_text else "Not available"}
 
-If you find a bet with 70%+ confidence, respond with:
+RULES:
+1. ALWAYS try to find a betting opportunity
+2. If one team's data is missing - analyze with what you have  
+3. Use general football knowledge about teams
+4. For cup matches against lower league teams - favorites usually win
+5. If data is limited, give 65-70% confidence for obvious favorites
+
+If you find a reasonable bet (65%+ confidence), respond with:
 
 🚨 LIVE ALERT!
 
@@ -1871,13 +1873,11 @@ If you find a bet with 70%+ confidence, respond with:
 
 ⚡ СТАВКА: [bet type]
 📊 Уверенность: X%
-💰 Коэфф: X.XX
+💰 Коэфф: ~X.XX
 🎯 Банк: X%
-📝 Почему: [1 sentence based on form]
+📝 Почему: [1 sentence - can use general knowledge]
 
-If NO good bet (all <70%), respond exactly: NO_ALERT
-
-Be reasonably selective but not too strict!"""
+ONLY respond "NO_ALERT" if both teams are unknown AND no clear favorite exists."""
 
     try:
         message = claude_client.messages.create(
@@ -1961,10 +1961,17 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
 
 Match: {home} vs {away}
 Competition: {comp}
-Form: {form_text}
-Odds: {odds_text}
+Form (if available): {form_text if form_text else "Limited data"}
+Odds (if available): {odds_text if odds_text else "Not available"}
 
-If you find a bet with 70%+ confidence, respond with:
+RULES:
+1. ALWAYS try to find a betting opportunity
+2. If one team's data is missing - that's OK, analyze with what you have
+3. Use general football knowledge (team strength, historical performance)
+4. For cup matches against lower league teams - favorites usually win
+5. If data is limited, you can still give 65-70% confidence for obvious favorites
+
+If you find a reasonable bet (65%+ confidence), respond with:
 
 🚨 LIVE ALERT!
 
@@ -1974,13 +1981,13 @@ If you find a bet with 70%+ confidence, respond with:
 
 ⚡ СТАВКА: [bet type]
 📊 Уверенность: X%
-💰 Коэфф: X.XX
+💰 Коэфф: ~X.XX
 🎯 Банк: X%
-📝 Почему: [1 sentence based on form]
+📝 Почему: [1 sentence - can use general knowledge]
 
-If NO good bet (all <70%), respond exactly: NO_ALERT
+ONLY respond "NO_ALERT" if both teams are unknown AND no clear favorite exists.
 
-Be reasonably selective but not too strict - if there's a decent opportunity, alert!"""
+For matches like Liverpool vs lower league team - this IS a clear opportunity!"""
 
         try:
             message = claude_client.messages.create(
