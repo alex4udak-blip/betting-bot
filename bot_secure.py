@@ -48,7 +48,7 @@ COMPETITIONS = {
 
 # ===== DATABASE =====
 
-DB_PATH = "/home/claude/betting_bot.db" if os.path.exists("/home/claude") else "betting_bot.db"
+DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db"
 
 def init_db():
     """Initialize SQLite database"""
@@ -222,19 +222,44 @@ def update_prediction_result(pred_id, result, is_correct):
 def check_bet_result(bet_type, home_score, away_score):
     """Check if bet was correct based on score"""
     total_goals = home_score + away_score
+    bet_lower = bet_type.lower() if bet_type else ""
     
-    if bet_type == "П1":
+    # Home win
+    if bet_type == "П1" or "победа хозя" in bet_lower or "home win" in bet_lower or bet_type == "1":
         return home_score > away_score
-    elif bet_type == "П2":
+    
+    # Away win
+    elif bet_type == "П2" or "победа гост" in bet_lower or "away win" in bet_lower or bet_type == "2":
         return away_score > home_score
-    elif bet_type == "Х" or bet_type == "ничья":
+    
+    # Draw
+    elif bet_type == "Х" or "ничья" in bet_lower or "draw" in bet_lower:
         return home_score == away_score
-    elif bet_type == "ТБ 2.5" or bet_type == "Over 2.5":
+    
+    # Over 2.5
+    elif "ТБ" in bet_type or "тотал больше" in bet_lower or "over" in bet_lower or "больше 2" in bet_lower:
         return total_goals > 2.5
-    elif bet_type == "ТМ 2.5" or bet_type == "Under 2.5":
+    
+    # Under 2.5
+    elif "ТМ" in bet_type or "тотал меньше" in bet_lower or "under" in bet_lower or "меньше 2" in bet_lower:
         return total_goals < 2.5
-    elif bet_type == "BTTS" or bet_type == "обе забьют":
+    
+    # BTTS
+    elif "BTTS" in bet_type.upper() or "обе забьют" in bet_lower or "both teams" in bet_lower:
         return home_score > 0 and away_score > 0
+    
+    # Double chance 1X
+    elif "1X" in bet_type or "двойной шанс 1" in bet_lower:
+        return home_score >= away_score
+    
+    # Double chance X2
+    elif "X2" in bet_type or "двойной шанс 2" in bet_lower:
+        return away_score >= home_score
+    
+    # If we can't determine bet type but it's something like "match_analysis"
+    # Try to guess based on the result - home team usually favored
+    elif "analysis" in bet_lower or bet_type == "":
+        return home_score > away_score  # Default to home win check
     
     # Default - can't determine
     return None
@@ -1689,7 +1714,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Try to extract confidence from response
         confidence = 70  # default
-        bet_type = "match_analysis"
+        bet_type = "П1"  # default to home win (most common)
         odds_value = 1.5
         
         # Look for confidence percentage
@@ -1698,20 +1723,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if conf_match:
             confidence = int(conf_match.group(1))
         
-        # Look for bet type
-        if "П1" in analysis or "победа" in analysis.lower():
-            bet_type = "П1"
-        elif "П2" in analysis:
-            bet_type = "П2"
-        elif "ТБ" in analysis or "больше" in analysis.lower():
+        # Look for bet type - check from most specific to least
+        analysis_lower = analysis.lower()
+        
+        if "тб 2.5" in analysis_lower or "тотал больше 2.5" in analysis_lower or "over 2.5" in analysis_lower:
             bet_type = "ТБ 2.5"
-        elif "ТМ" in analysis or "меньше" in analysis.lower():
+        elif "тм 2.5" in analysis_lower or "тотал меньше 2.5" in analysis_lower or "under 2.5" in analysis_lower:
             bet_type = "ТМ 2.5"
-        elif "обе забьют" in analysis.lower():
+        elif "обе забьют" in analysis_lower or "btts" in analysis_lower:
             bet_type = "BTTS"
+        elif "п2" in analysis_lower or "победа гостей" in analysis_lower:
+            bet_type = "П2"
+        elif "п1" in analysis_lower or "победа хозя" in analysis_lower or "победа " + home.lower()[:5] in analysis_lower:
+            bet_type = "П1"
+        elif "ничья" in analysis_lower or " х " in analysis_lower:
+            bet_type = "Х"
+        elif "1x" in analysis_lower or "двойной шанс" in analysis_lower:
+            bet_type = "1X"
         
         # Look for odds
-        odds_match = re.search(r'@\s*(\d+\.?\d*)', analysis)
+        odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
         if odds_match:
             odds_value = float(odds_match.group(1))
         
@@ -1896,6 +1927,86 @@ ONLY respond "NO_ALERT" if both teams are unknown AND no clear favorite exists."
     
     if not was_subscribed:
         live_subscribers.discard(user_id)
+
+
+async def check_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually check prediction results"""
+    user_id = update.effective_user.id
+    
+    await update.message.reply_text("🔄 Проверяю результаты матчей...")
+    
+    pending = get_pending_predictions()
+    user_pending = [p for p in pending if p.get("user_id") == user_id]
+    
+    if not user_pending:
+        await update.message.reply_text(
+            "✅ Нет прогнозов, ожидающих результата.\n\n"
+            "Напиши название команды чтобы получить прогноз, например: `Liverpool`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    text = f"📊 **Твои прогнозы ({len(user_pending)}):**\n\n"
+    
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    checked = 0
+    
+    for pred in user_pending[:5]:  # Check max 5
+        match_id = pred.get("match_id")
+        home = pred.get("home", "?")
+        away = pred.get("away", "?")
+        bet_type = pred.get("bet_type", "?")
+        
+        text += f"⚽ {home} vs {away}\n"
+        text += f"   📊 Ставка: {bet_type}\n"
+        
+        if not match_id:
+            text += f"   ⚠️ Нет match_id\n\n"
+            continue
+        
+        try:
+            url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+            r = requests.get(url, headers=headers, timeout=10)
+            
+            if r.status_code != 200:
+                text += f"   ⚠️ API error: {r.status_code}\n\n"
+                continue
+            
+            match_data = r.json()
+            status = match_data.get("status")
+            
+            text += f"   📍 Статус: {status}\n"
+            
+            if status == "FINISHED":
+                score = match_data.get("score", {}).get("fullTime", {})
+                home_score = score.get("home", 0)
+                away_score = score.get("away", 0)
+                
+                is_correct = check_bet_result(bet_type, home_score, away_score)
+                
+                if is_correct is not None:
+                    result_str = f"{home_score}:{away_score}"
+                    update_prediction_result(pred["id"], result_str, 1 if is_correct else 0)
+                    
+                    emoji = "✅" if is_correct else "❌"
+                    text += f"   {emoji} Результат: {result_str} → {'верно!' if is_correct else 'неверно'}\n"
+                    checked += 1
+                else:
+                    text += f"   ⚠️ Не могу определить результат для ставки '{bet_type}'\n"
+            else:
+                text += f"   ⏳ Матч ещё не завершён\n"
+            
+            text += "\n"
+            time.sleep(0.5)  # Rate limit
+            
+        except Exception as e:
+            text += f"   ❌ Ошибка: {e}\n\n"
+    
+    text += f"{'─'*25}\n"
+    text += f"✅ Обновлено: {checked} прогнозов\n"
+    text += f"Напиши /stats для статистики"
+    
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
@@ -2200,6 +2311,7 @@ def main():
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("live", live_cmd))
     app.add_handler(CommandHandler("testalert", testalert_cmd))
+    app.add_handler(CommandHandler("checkresults", check_results_cmd))
     
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -2216,14 +2328,15 @@ def main():
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)  # Every 2 hours
     job_queue.run_repeating(check_predictions_results, interval=3600, first=600)  # Every hour
     
-    print("\n✅ Bot v10 running!")
+    print("\n✅ Bot v12 running!")
+    print(f"   💾 Database: {DB_PATH}")
     print("   📊 Enhanced analysis with form + H2H + home/away")
-    print("   💾 SQLite database for user settings")
     print("   ⚙️ Personalization (odds, risk level)")
     print("   🎛️ Inline buttons for better UX")
     print("   🔔 Live alerts every 10 min (use /live)")
     print("   📈 Prediction tracking + auto-results check")
     print("   💾 Matches cache (2 min TTL)")
+    print("   🔧 Commands: /testalert, /checkresults")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
