@@ -74,7 +74,6 @@ Return ONLY valid JSON, no other text."""
         )
         
         response_text = message.content[0].text.strip()
-        # Clean up response if needed
         if response_text.startswith("```"):
             response_text = response_text.split("```")[1]
             if response_text.startswith("json"):
@@ -145,13 +144,10 @@ def search_match_smart(teams, matches=None):
             team_lower = team.lower()
             team_words = team_lower.split()
             
-            # Check full name match
             if team_lower in home_team or team_lower in away_team:
                 score += 10
-            # Check short name
             if team_lower in home_short or team_lower in away_short:
                 score += 8
-            # Check partial word match
             for word in team_words:
                 if len(word) >= 3:
                     if word in home_team or word in home_short:
@@ -261,11 +257,11 @@ def format_form(matches, team_id):
             continue
         
         if home_id == team_id:
-            form.append("✅" if hs > aws else "❌" if hs < aws else "➖")
+            form.append("W" if hs > aws else "L" if hs < aws else "D")
         else:
-            form.append("✅" if aws > hs else "❌" if aws < hs else "➖")
+            form.append("W" if aws > hs else "L" if aws < hs else "D")
     
-    return "".join(form) if form else "N/A"
+    return "-".join(form) if form else "N/A"
 
 
 # ===== CLAUDE ANALYSIS =====
@@ -274,7 +270,7 @@ def analyze_match_full(match_data, odds=None, h2h=None, home_form=None, away_for
     """Full match analysis with all bet types and confidence levels"""
     
     if not claude_client:
-        return "❌ AI analysis unavailable"
+        return "AI analysis unavailable"
     
     home = match_data.get("homeTeam", {}).get("name", "Unknown")
     away = match_data.get("awayTeam", {}).get("name", "Unknown")
@@ -287,7 +283,6 @@ def analyze_match_full(match_data, odds=None, h2h=None, home_form=None, away_for
     except:
         date_fmt = date
     
-    # Build odds info
     odds_text = "Odds: not available"
     if odds:
         home_odds = odds.get(home) or odds.get(odds.get("home_team", ""), "N/A")
@@ -295,21 +290,19 @@ def analyze_match_full(match_data, odds=None, h2h=None, home_form=None, away_for
         draw_odds = odds.get("Draw", "N/A")
         
         odds_text = f"""Current odds (1X2):
-• {home}: {home_odds}
-• Draw: {draw_odds}  
-• {away}: {away_odds}"""
+- {home}: {home_odds}
+- Draw: {draw_odds}  
+- {away}: {away_odds}"""
         
         over = odds.get("total_Over_2.5")
         under = odds.get("total_Under_2.5")
         if over and under:
             odds_text += f"\n\nTotal 2.5: Over {over} | Under {under}"
         
-        # Handicaps
         for key, val in odds.items():
             if key.startswith("spread_"):
                 odds_text += f"\nHandicap {key.replace('spread_', '')}: {val}"
     
-    # H2H info
     h2h_text = ""
     if h2h:
         agg = h2h.get("aggregates", {})
@@ -320,7 +313,6 @@ def analyze_match_full(match_data, odds=None, h2h=None, home_form=None, away_for
             d = agg.get("homeTeam", {}).get("draws", 0)
             h2h_text = f"\nH2H last {total}: {home} {hw}W - {d}D - {aw}W {away}"
     
-    # Form info
     form_text = ""
     if home_form or away_form:
         form_text = f"\nForm (last 5): {home} {home_form or 'N/A'} | {away} {away_form or 'N/A'}"
@@ -329,55 +321,55 @@ def analyze_match_full(match_data, odds=None, h2h=None, home_form=None, away_for
 Analyze this match and provide betting recommendations.
 
 MATCH DATA:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🏆 {comp}
-📅 {date_fmt}
-🏠 Home: {home}
-✈️ Away: {away}
+==============================
+Competition: {comp}
+Date: {date_fmt}
+Home: {home}
+Away: {away}
 
 {odds_text}
 {h2h_text}
 {form_text}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+==============================
 
 TASK: Provide comprehensive betting analysis with multiple bet types.
 
 FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
 
-📊 **PROBABILITIES:**
-• {home}: X%
-• Draw: X%
-• {away}: X%
+PROBABILITIES:
+- {home}: X%
+- Draw: X%
+- {away}: X%
 
-🎯 **BEST BET (Confidence: X%):**
+BEST BET (Confidence: X%):
 [Your main recommendation - can be: Win, Double Chance, Handicap, Total, BTTS, etc.]
 [1-2 sentences why]
 
-📈 **ALL RECOMMENDATIONS:**
+ALL RECOMMENDATIONS:
 
-1️⃣ **[Bet Type]** - Confidence: X%
+1. [Bet Type] - Confidence: X%
    Odds: X.XX | Expected Value: [positive/negative]
    [Why this bet]
 
-2️⃣ **[Bet Type]** - Confidence: X%
+2. [Bet Type] - Confidence: X%
    Odds: X.XX | Expected Value: [positive/negative]
    [Why this bet]
 
-3️⃣ **[Bet Type]** - Confidence: X%
+3. [Bet Type] - Confidence: X%
    Odds: X.XX | Expected Value: [positive/negative]
    [Why this bet]
 
-⚠️ **RISKS:**
+RISKS:
 [Key risks for this match]
 
-💡 **VERDICT:**
+VERDICT:
 [Final recommendation: STRONG BET / MEDIUM RISK / SKIP if confidence < 65%]
 
 RULES:
 - Include different bet types: 1X2, Double Chance (1X, X2, 12), Handicap/Spread, Total Over/Under, BTTS
 - Confidence must be realistic (50-90% range)
 - If ALL bets have confidence < 65%, recommend to SKIP this match
-- Mark bets with confidence >= 70% as "⭐ VALUE BET"
+- Mark bets with confidence >= 70% as "VALUE BET"
 - Respond in the same language as the user's query (Russian if unclear)
 
 User's language preference: {"Russian" if user_lang == "ru" else "English"}"""
@@ -391,7 +383,7 @@ User's language preference: {"Russian" if user_lang == "ru" else "English"}"""
         return message.content[0].text
     except Exception as e:
         logger.error(f"Claude error: {e}")
-        return f"❌ Analysis error: {e}"
+        return f"Analysis error: {e}"
 
 
 def get_smart_recommendations(matches, user_lang="ru"):
@@ -422,16 +414,16 @@ For EACH recommended match provide:
 
 FORMAT:
 
-🔥 **TOP PICKS:**
+TOP PICKS:
 
-1️⃣ **[Team] vs [Team]**
-   ✅ Bet: [specific bet]
-   📊 Confidence: X%
-   💡 Why: [reason]
+1. [Team] vs [Team]
+   Bet: [specific bet]
+   Confidence: X%
+   Why: [reason]
 
-2️⃣ ...
+2. ...
 
-⚠️ **Matches to AVOID:**
+MATCHES TO AVOID:
 [List 1-2 matches that are too unpredictable]
 
 Respond in {"Russian" if user_lang == "ru" else "English"}."""
@@ -452,101 +444,100 @@ Respond in {"Russian" if user_lang == "ru" else "English"}."""
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message with examples"""
-    text = """🤖 **AI Betting Analyzer**
+    text = """AI Betting Analyzer
 
 I analyze football matches using AI and real data to give you smart betting recommendations.
 
-**💬 Just write naturally:**
-• "Who will win Arsenal vs Chelsea?"
-• "What do you think about Liverpool?"
-• "Bayern Munich analysis"
-• "Give me betting tips"
-• "Best bets for today"
+Just write naturally:
+- "Who will win Arsenal vs Chelsea?"
+- "What do you think about Liverpool?"
+- "Bayern Munich analysis"
+- "Give me betting tips"
+- "Best bets for today"
 
-**📋 Commands:**
-/recommend — AI picks best bets
-/matches — upcoming matches
-/leagues — browse by league
-/help — how to use
+Commands:
+/recommend - AI picks best bets
+/matches - upcoming matches
+/leagues - browse by league
+/help - how to use
 
-**🎯 I analyze:**
-• Win / Draw / Lose (1X2)
-• Double Chance
-• Handicaps / Spreads
-• Total Goals (Over/Under)
-• Both Teams to Score
+I analyze:
+- Win / Draw / Lose (1X2)
+- Double Chance
+- Handicaps / Spreads
+- Total Goals (Over/Under)
+- Both Teams to Score
 
-**🌍 Works in English & Russian!**
+Works in English and Russian!
 
-⚠️ _Betting involves risk. Gamble responsibly._
+Betting involves risk. Gamble responsibly.
 """
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """📚 **How to Use**
+    text = """How to Use
 
-**Ask me anything about football matches:**
+Ask me anything about football matches:
 
-✅ "Who wins Liverpool vs Man City?"
-✅ "Barcelona match analysis"  
-✅ "What's good to bet on today?"
-✅ "Бавария прогноз" (Russian works too!)
-✅ "Arsenal" (just team name)
+- "Who wins Liverpool vs Man City?"
+- "Barcelona match analysis"  
+- "What's good to bet on today?"
+- "Bayern prediction" 
+- "Arsenal" (just team name)
 
-**I'll give you:**
-• Win probabilities
-• Best bet with confidence %
-• Multiple bet options (1X2, handicap, totals, BTTS)
-• Risks analysis
-• Clear verdict: BET or SKIP
+I will give you:
+- Win probabilities
+- Best bet with confidence %
+- Multiple bet options (1X2, handicap, totals, BTTS)
+- Risks analysis
+- Clear verdict: BET or SKIP
 
-**Commands:**
-/recommend — My top picks
-/matches — All upcoming matches
-/leagues — Filter by league
+Commands:
+/recommend - My top picks
+/matches - All upcoming matches
+/leagues - Filter by league
 
-**Tips:**
-• I search 14 days ahead to find matches
-• Confidence >= 65% = worth betting
-• Look for ⭐ VALUE BET markers
+Tips:
+- I search 14 days ahead to find matches
+- Confidence >= 65% = worth betting
+- Look for VALUE BET markers
 """
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text)
 
 
 async def recommend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Smart recommendations"""
-    await update.message.reply_text("🔍 Analyzing best betting opportunities...")
+    await update.message.reply_text("Analyzing best betting opportunities...")
     
     matches = get_upcoming_matches(days=7)
     
     if not matches:
-        await update.message.reply_text("❌ Couldn't fetch matches. Try again later.")
+        await update.message.reply_text("Couldn't fetch matches. Try again later.")
         return
     
-    # Detect language from user
-    user_lang = "ru"  # Default, could detect from context
+    user_lang = "ru"
     
     recs = get_smart_recommendations(matches, user_lang)
     
     if recs:
-        await update.message.reply_text(recs, parse_mode='Markdown')
+        await update.message.reply_text(recs)
     else:
-        text = "⚽ **Upcoming matches:**\n\n"
+        text = "Upcoming matches:\n\n"
         for m in matches[:5]:
-            text += f"• {m.get('homeTeam', {}).get('name')} vs {m.get('awayTeam', {}).get('name')}\n"
-        text += "\n_Write team name for detailed analysis_"
-        await update.message.reply_text(text, parse_mode='Markdown')
+            text += f"- {m.get('homeTeam', {}).get('name')} vs {m.get('awayTeam', {}).get('name')}\n"
+        text += "\nWrite team name for detailed analysis"
+        await update.message.reply_text(text)
 
 
 async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show upcoming matches"""
-    await update.message.reply_text("🔍 Loading matches...")
+    await update.message.reply_text("Loading matches...")
     
     matches = get_upcoming_matches(days=7)
     
     if not matches:
-        await update.message.reply_text("❌ No matches found.")
+        await update.message.reply_text("No matches found.")
         return
     
     by_comp = {}
@@ -556,10 +547,10 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
             by_comp[comp] = []
         by_comp[comp].append(m)
     
-    text = "⚽ **Upcoming Matches (7 days):**\n\n"
+    text = "Upcoming Matches (7 days):\n\n"
     
     for comp, comp_matches in list(by_comp.items())[:6]:
-        text += f"🏆 **{comp}**\n"
+        text += f"[{comp}]\n"
         for m in comp_matches[:3]:
             home = m.get("homeTeam", {}).get("name", "?")
             away = m.get("awayTeam", {}).get("name", "?")
@@ -568,24 +559,24 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ds = dt.strftime("%d.%m")
             except:
                 ds = ""
-            text += f"  • {home} vs {away} ({ds})\n"
+            text += f"  - {home} vs {away} ({ds})\n"
         text += "\n"
     
-    text += "_Write team name for analysis_"
-    await update.message.reply_text(text, parse_mode='Markdown')
+    text += "Write team name for analysis"
+    await update.message.reply_text(text)
 
 
 async def show_leagues(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """League selection"""
     keyboard = [
-        [InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", callback_data="league_PL")],
-        [InlineKeyboardButton("🇪🇸 La Liga", callback_data="league_PD")],
-        [InlineKeyboardButton("🇩🇪 Bundesliga", callback_data="league_BL1")],
-        [InlineKeyboardButton("🇮🇹 Serie A", callback_data="league_SA")],
-        [InlineKeyboardButton("🇫🇷 Ligue 1", callback_data="league_FL1")],
-        [InlineKeyboardButton("🇪🇺 Champions League", callback_data="league_CL")],
+        [InlineKeyboardButton("Premier League (ENG)", callback_data="league_PL")],
+        [InlineKeyboardButton("La Liga (ESP)", callback_data="league_PD")],
+        [InlineKeyboardButton("Bundesliga (GER)", callback_data="league_BL1")],
+        [InlineKeyboardButton("Serie A (ITA)", callback_data="league_SA")],
+        [InlineKeyboardButton("Ligue 1 (FRA)", callback_data="league_FL1")],
+        [InlineKeyboardButton("Champions League (EUR)", callback_data="league_CL")],
     ]
-    await update.message.reply_text("⚽ Select league:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("Select league:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 async def league_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -596,15 +587,15 @@ async def league_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = query.data.replace("league_", "")
     name = COMPETITIONS.get(code, code)
     
-    await query.edit_message_text(f"🔍 Loading {name} matches...")
+    await query.edit_message_text(f"Loading {name} matches...")
     
     matches = get_upcoming_matches(code, days=14)
     
     if not matches:
-        await query.edit_message_text(f"❌ No {name} matches in next 14 days")
+        await query.edit_message_text(f"No {name} matches in next 14 days")
         return
     
-    text = f"⚽ **{name}** — upcoming:\n\n"
+    text = f"{name} - upcoming:\n\n"
     
     for m in matches[:10]:
         home = m.get("homeTeam", {}).get("name", "?")
@@ -614,10 +605,10 @@ async def league_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ds = dt.strftime("%d.%m %H:%M")
         except:
             ds = ""
-        text += f"📅 {ds}\n   {home} vs {away}\n\n"
+        text += f"{ds}\n   {home} vs {away}\n\n"
     
-    text += "_Write team name for analysis_"
-    await query.edit_message_text(text, parse_mode='Markdown')
+    text += "Write team name for analysis"
+    await query.edit_message_text(text)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -627,22 +618,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(user_text) < 2:
         return
     
-    # Detect language (simple check)
     user_lang = "ru" if any(ord(c) > 1000 for c in user_text) else "en"
     
-    status = await update.message.reply_text("🔍 Understanding your request...")
+    status = await update.message.reply_text("Understanding your request...")
     
-    # Parse with Claude
     parsed = parse_user_query_with_claude(user_text)
     intent = parsed.get("intent", "unknown")
     teams = parsed.get("teams", [])
     
     logger.info(f"Parsed: intent={intent}, teams={teams}")
     
-    # Handle different intents
     if intent == "greeting":
         await status.edit_text(
-            "👋 Hello! I'm your AI betting analyst.\n\n"
+            "Hello! I'm your AI betting analyst.\n\n"
             "Ask me about any football match or write /recommend for today's best bets!"
         )
         return
@@ -662,43 +650,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_matches(update, context)
         return
     
-    # For team_search or unknown - try to find match
-    await status.edit_text("🔍 Searching for match...")
+    await status.edit_text("Searching for match...")
     
-    # Get all matches (14 days)
     all_matches = get_all_matches_extended(days=14)
     
-    # Search for match
     match = None
     if teams:
         match, _ = search_match_smart(teams, all_matches)
     
     if not match and user_text:
-        # Try with original text as fallback
         match, _ = search_match_smart([user_text], all_matches)
     
     if not match:
-        # No match found - offer alternatives
-        no_match_text = f"🤔 Couldn't find a match for: {', '.join(teams) if teams else user_text}\n\n"
+        no_match_text = f"Couldn't find a match for: {', '.join(teams) if teams else user_text}\n\n"
         
         if all_matches:
-            no_match_text += "**📋 But here are some interesting matches:**\n\n"
+            no_match_text += "But here are some interesting matches:\n\n"
             
             for m in all_matches[:5]:
                 home = m.get("homeTeam", {}).get("name", "?")
                 away = m.get("awayTeam", {}).get("name", "?")
                 comp = m.get("competition", {}).get("name", "")
-                no_match_text += f"• {home} vs {away}\n  🏆 {comp}\n\n"
+                no_match_text += f"- {home} vs {away} ({comp})\n"
             
-            no_match_text += "💡 **Try:**\n"
-            no_match_text += "• /recommend — get my best picks\n"
-            no_match_text += "• /leagues — browse by league\n"
-            no_match_text += "• Write exact team name in English"
+            no_match_text += "\nTry:\n"
+            no_match_text += "- /recommend - get my best picks\n"
+            no_match_text += "- /leagues - browse by league\n"
+            no_match_text += "- Write exact team name in English"
         
-        await status.edit_text(no_match_text, parse_mode='Markdown')
+        await status.edit_text(no_match_text)
         return
     
-    # Found match - analyze it
     home = match.get("homeTeam", {}).get("name", "Unknown")
     away = match.get("awayTeam", {}).get("name", "Unknown")
     home_id = match.get("homeTeam", {}).get("id")
@@ -707,13 +689,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comp = match.get("competition", {}).get("name", "")
     
     await status.edit_text(
-        f"✅ Found: **{home}** vs **{away}**\n"
-        f"🏆 {comp}\n\n"
-        "⏳ Gathering data...",
-        parse_mode='Markdown'
+        f"Found: {home} vs {away}\n"
+        f"League: {comp}\n\n"
+        "Gathering data..."
     )
     
-    # Get additional data
     odds = get_odds(home, away)
     h2h = get_head_to_head(match_id) if match_id else None
     
@@ -723,44 +703,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     away_form = format_form(away_matches, away_id) if away_matches else None
     
     await status.edit_text(
-        f"✅ **{home}** vs **{away}**\n"
-        f"🏆 {comp}\n\n"
-        "🤖 AI analyzing match...",
-        parse_mode='Markdown'
+        f"Found: {home} vs {away}\n"
+        f"League: {comp}\n\n"
+        "AI analyzing match..."
     )
     
-    # Full analysis
     analysis = analyze_match_full(match, odds, h2h, home_form, away_form, user_lang)
     
-    header = f"⚽ **{home}** vs **{away}**\n"
-    header += f"🏆 {comp}\n"
-    header += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    header = f"{home} vs {away}\n"
+    header += f"League: {comp}\n"
+    header += "==============================\n\n"
     
-    await status.edit_text(header + analysis, parse_mode='Markdown')
+    await status.edit_text(header + analysis)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle errors"""
     logger.error(f"Error: {context.error}")
     if update and update.message:
-        await update.message.reply_text("❌ Something went wrong. Try /start")
+        await update.message.reply_text("Something went wrong. Try /start")
 
 
 # ===== MAIN =====
 
 def main():
     if not TELEGRAM_TOKEN:
-        print("❌ TELEGRAM_TOKEN not set!")
+        print("TELEGRAM_TOKEN not set!")
         return
     if not FOOTBALL_API_KEY:
-        print("❌ FOOTBALL_API_KEY not set!")
+        print("FOOTBALL_API_KEY not set!")
         return
     
-    print("🚀 Starting AI Betting Analyzer Bot v2...")
-    print(f"   Telegram: ✅")
-    print(f"   Football Data: ✅")
-    print(f"   Odds API: {'✅' if ODDS_API_KEY else '⚠️'}")
-    print(f"   Claude AI: {'✅' if CLAUDE_API_KEY else '⚠️'}")
+    print("Starting AI Betting Analyzer Bot v2...")
+    print(f"   Telegram: OK")
+    print(f"   Football Data: OK")
+    print(f"   Odds API: {'OK' if ODDS_API_KEY else 'MISSING'}")
+    print(f"   Claude AI: {'OK' if CLAUDE_API_KEY else 'MISSING'}")
     
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
@@ -773,7 +751,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
     
-    print("✅ Bot v2 is running!")
+    print("Bot v2 is running!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
