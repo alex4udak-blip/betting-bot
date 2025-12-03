@@ -67,20 +67,33 @@ def parse_user_query(user_message):
 Message: "{user_message}"
 
 Return ONLY this JSON format:
-{{"intent": "X", "teams": ["Y"], "league": null}}
+{{"intent": "X", "teams": ["Y"], "league": "Z"}}
 
 INTENT RULES:
-- "team_search" = asks about specific team OR "who wins X" OR "X prediction" OR "analyze X" OR mentions any team name
-- "recommend" = ONLY if asks for general tips WITHOUT mentioning specific team (like "best bets", "what to bet", "give tips")
-- "matches_list" = wants to see all matches
+- "team_search" = asks about specific team OR "who wins X" OR mentions any team name
+- "recommend" = wants betting tips/recommendations
+- "matches_list" = wants to see matches
+- "next_match" = asks for closest/next/nearest match
 - "greeting" = just hello/hi
 - "help" = asks how to use
 
-IMPORTANT: 
-- "Who wins Bayern?" = team_search with teams=["Bayern Munich"]
-- "Bayern prediction" = team_search with teams=["Bayern Munich"]  
-- "What about Arsenal?" = team_search with teams=["Arsenal"]
-- Translate: Бавария=Bayern Munich, Арсенал=Arsenal, Ливерпуль=Liverpool, Реал=Real Madrid, Барселона=Barcelona, Челси=Chelsea, ПСЖ=PSG
+LEAGUE DETECTION (put in "league" field):
+- "немецкая лига" / "Bundesliga" / "бундеслига" = "BL1"
+- "английская лига" / "Premier League" / "АПЛ" = "PL"  
+- "испанская лига" / "La Liga" / "Ла Лига" = "PD"
+- "итальянская лига" / "Serie A" / "Серия А" = "SA"
+- "французская лига" / "Ligue 1" / "Лига 1" = "FL1"
+- "Лига чемпионов" / "Champions League" = "CL"
+- If no specific league mentioned = null
+
+TEAM TRANSLATIONS:
+Бавария=Bayern Munich, Арсенал=Arsenal, Ливерпуль=Liverpool, Реал=Real Madrid, Барселона=Barcelona, Дортмунд=Borussia Dortmund, ПСЖ=PSG
+
+EXAMPLES:
+- "рекомендуй ставки на немецкую лигу" = {{"intent": "recommend", "teams": [], "league": "BL1"}}
+- "ближайший матч" = {{"intent": "next_match", "teams": [], "league": null}}
+- "матчи Бундеслиги" = {{"intent": "matches_list", "teams": [], "league": "BL1"}}
+- "кто выиграет Бавария" = {{"intent": "team_search", "teams": ["Bayern Munich"], "league": null}}
 
 Return ONLY JSON, no other text."""
 
@@ -334,10 +347,10 @@ RULES:
         return f"Error: {e}"
 
 
-def get_recommendations(matches, user_query=""):
+def get_recommendations(matches, user_query="", league_filter=None):
     """Get AI recommendations"""
     
-    logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
+    logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches, league={league_filter}")
     
     if not claude_client:
         logger.error("Claude client not available!")
@@ -347,8 +360,25 @@ def get_recommendations(matches, user_query=""):
         logger.error("No matches provided!")
         return None
     
+    # Filter by league if specified
+    if league_filter:
+        league_names = {
+            "PL": "Premier League",
+            "PD": "Primera Division",
+            "BL1": "Bundesliga",
+            "SA": "Serie A",
+            "FL1": "Ligue 1",
+            "CL": "UEFA Champions League"
+        }
+        target_league = league_names.get(league_filter, league_filter)
+        matches = [m for m in matches if target_league.lower() in m.get("competition", {}).get("name", "").lower()]
+        logger.info(f"Filtered to {len(matches)} matches for {target_league}")
+    
+    if not matches:
+        return f"❌ Нет матчей для выбранной лиги в ближайшие дни."
+    
     matches_text = ""
-    for i, m in enumerate(matches[:8], 1):
+    for i, m in enumerate(matches[:10], 1):
         h = m.get("homeTeam", {}).get("name", "?")
         a = m.get("awayTeam", {}).get("name", "?")
         c = m.get("competition", {}).get("name", "?")
@@ -1147,8 +1177,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parsed = parse_user_query(user_text)
     intent = parsed.get("intent", "unknown")
     teams = parsed.get("teams", [])
+    league = parsed.get("league")
     
-    logger.info(f"Parsed: intent={intent}, teams={teams}")
+    logger.info(f"Parsed: intent={intent}, teams={teams}, league={league}")
     
     # Handle intents
     if intent == "greeting":
@@ -1161,13 +1192,74 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if intent == "recommend":
-        await status.delete()
-        await recommend_cmd(update, context)
+        await status.edit_text("🔍 Анализирую лучшие ставки...")
+        matches = get_matches(days=7)
+        if not matches:
+            await status.edit_text("❌ Не удалось загрузить матчи.")
+            return
+        recs = get_recommendations(matches, user_text, league)
+        if recs:
+            await status.edit_text(recs)
+        else:
+            await status.edit_text("❌ Ошибка анализа.")
         return
     
     if intent == "matches_list":
-        await status.delete()
-        await matches_cmd(update, context)
+        await status.edit_text("🔍 Загружаю матчи...")
+        matches = get_matches(league, days=14) if league else get_matches(days=14)
+        if not matches:
+            await status.edit_text("❌ Нет матчей.")
+            return
+        
+        text = "⚽ **Ближайшие матчи:**\n\n"
+        by_comp = {}
+        for m in matches:
+            c = m.get("competition", {}).get("name", "Other")
+            if c not in by_comp:
+                by_comp[c] = []
+            by_comp[c].append(m)
+        
+        for comp, ms in list(by_comp.items())[:5]:
+            text += f"🏆 **{comp}**\n"
+            for m in ms[:3]:
+                h = m.get("homeTeam", {}).get("name", "?")
+                a = m.get("awayTeam", {}).get("name", "?")
+                text += f"  • {h} vs {a}\n"
+            text += "\n"
+        
+        await status.edit_text(text)
+        return
+    
+    if intent == "next_match":
+        await status.edit_text("🔍 Ищу ближайший матч...")
+        matches = get_matches(league, days=3) if league else get_matches(days=3)
+        if not matches:
+            await status.edit_text("❌ Нет ближайших матчей.")
+            return
+        
+        # Sort by date and get first
+        try:
+            matches.sort(key=lambda m: m.get("utcDate", ""))
+            next_match = matches[0]
+            h = next_match.get("homeTeam", {}).get("name", "?")
+            a = next_match.get("awayTeam", {}).get("name", "?")
+            comp = next_match.get("competition", {}).get("name", "?")
+            
+            try:
+                dt = datetime.fromisoformat(next_match.get("utcDate", "").replace("Z", "+00:00"))
+                date_str = dt.strftime("%d.%m.%Y %H:%M")
+            except:
+                date_str = "?"
+            
+            text = f"⏰ **Ближайший матч:**\n\n"
+            text += f"⚽ {h} vs {a}\n"
+            text += f"🏆 {comp}\n"
+            text += f"📅 {date_str}\n\n"
+            text += f"💡 Напиши '{h}' для полного анализа!"
+            
+            await status.edit_text(text)
+        except:
+            await status.edit_text("❌ Ошибка при поиске матча.")
         return
     
     # Team search
