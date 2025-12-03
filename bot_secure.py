@@ -300,7 +300,7 @@ def analyze_match(match, odds=None, h2h=None, home_form=None, away_form=None, la
 
     lang_instr = "RESPOND IN RUSSIAN." if lang == "ru" else "RESPOND IN ENGLISH."
     
-    prompt = f"""Expert betting analyst. Analyze:
+    prompt = f"""You are a confident expert betting analyst. Analyze this match and ALWAYS give recommendations.
 
 {comp}: {home} vs {away}
 Odds: {odds_text}
@@ -309,7 +309,9 @@ Odds: {odds_text}
 
 {lang_instr}
 
-USE THIS EXACT FORMAT WITH EMOJIS:
+IMPORTANT: You MUST give betting recommendations. Use your knowledge about these teams (league position, typical performance, historical strength). Don't refuse to analyze - make your best prediction based on available info.
+
+USE THIS EXACT FORMAT:
 
 📊 ВЕРОЯТНОСТИ:
 • {home}: X%
@@ -327,16 +329,18 @@ USE THIS EXACT FORMAT WITH EMOJIS:
 3. [Bet] - X% уверенность - коэфф X.XX
 
 ⚠️ РИСКИ:
-[Key risks]
+[Key risks - 1-2 sentences]
 
 ✅ ВЕРДИКТ: [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ПРОПУСТИТЬ]
 
 RULES:
-- Include coefficients from odds data where available
-- Bank % based on confidence: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%
-- If confidence <65% for all bets, verdict = ПРОПУСТИТЬ
+- ALWAYS provide predictions - never refuse
+- Use your knowledge about teams if data is limited
+- Premier League vs Championship = clear favorite (75%+)
+- Include coefficients from odds data
+- Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%
 - Mark 70%+ bets as "⭐ VALUE"
-- Use emojis as shown above"""
+- Only ПРОПУСТИТЬ if genuinely unpredictable (both teams equal)"""
 
     try:
         message = claude_client.messages.create(
@@ -364,11 +368,16 @@ def get_recommendations(matches, lang="ru"):
     
     lang_instr = "RESPOND IN RUSSIAN." if lang == "ru" else "RESPOND IN ENGLISH."
     
-    prompt = f"""Expert analyst. Matches:
+    prompt = f"""You are a CONFIDENT betting expert. Analyze and give TOP 3-4 picks:
 
 {matches_text}
 
 {lang_instr}
+
+IMPORTANT: You MUST give recommendations. Use your football knowledge about these teams.
+- Premier League vs Championship = obvious favorite
+- Big teams at home = usually win
+- Form, history, class difference matters
 
 USE THIS FORMAT:
 
@@ -378,7 +387,7 @@ USE THIS FORMAT:
    ✅ Ставка: [specific bet] @ коэфф X.XX
    📊 Уверенность: X%
    💰 Банк: X%
-   💡 Почему: [reason]
+   💡 Почему: [1 sentence]
 
 2️⃣ ...
 
@@ -387,8 +396,10 @@ USE THIS FORMAT:
 ❌ ИЗБЕГАТЬ:
 • [Match] - [why risky]
 
-Only include bets with 65%+ confidence.
-Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
+RULES:
+- ALWAYS give 3-4 picks
+- Never refuse or say "not enough data"
+- Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
 
     try:
         message = claude_client.messages.create(
@@ -676,18 +687,22 @@ async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
             matches_text += f"{i}. {h} vs {a}\n"
         
         try:
-            prompt = f"""Quick analysis of today's matches:
+            prompt = f"""You are a confident betting analyst. Give TOP 3 picks from these matches:
 
 {matches_text}
 
-Give TOP 3 bets with 70%+ confidence ONLY.
-Format:
-1. [Match] - [Bet] - X% 
-2. [Match] - [Bet] - X%
-3. [Match] - [Bet] - X%
+RULES:
+- ALWAYS give 3 picks - never refuse
+- Use your football knowledge
+- Premier League team vs lower league = easy pick
+- Big team at home = usually good pick
 
-If less than 3 good bets, say how many.
-Be very brief. Russian."""
+Format (Russian):
+1. [Match] - [Bet] @ коэфф - X%
+2. [Match] - [Bet] @ коэфф - X%  
+3. [Match] - [Bet] @ коэфф - X%
+
+Be brief but ALWAYS provide 3 picks."""
 
             message = claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
@@ -736,6 +751,164 @@ Be very brief. Russian."""
             logger.error(f"Failed to send stats to {chat_id}: {e}")
 
 
+# ===== IN-PLAY LIVE BETTING =====
+
+# In-play subscribers (separate from pre-match)
+inplay_subscribers = set()
+
+# Track already alerted matches to avoid spam
+inplay_alerted = {}
+
+
+def get_live_matches():
+    """Get matches currently in play"""
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    live_matches = []
+    
+    for league in ["PL", "PD", "BL1", "SA", "FL1", "CL"]:
+        try:
+            url = f"{FOOTBALL_API_URL}/competitions/{league}/matches"
+            params = {"status": "IN_PLAY,PAUSED"}
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                matches = response.json().get("matches", [])
+                live_matches.extend(matches)
+        except Exception as e:
+            logger.error(f"Error getting live matches: {e}")
+    
+    return live_matches
+
+
+def analyze_inplay_opportunity(match):
+    """Analyze live match for betting opportunity"""
+    
+    if not claude_client:
+        return None
+    
+    home = match.get("homeTeam", {}).get("name", "?")
+    away = match.get("awayTeam", {}).get("name", "?")
+    
+    score = match.get("score", {})
+    home_score = score.get("fullTime", {}).get("home") or score.get("halfTime", {}).get("home") or 0
+    away_score = score.get("fullTime", {}).get("away") or score.get("halfTime", {}).get("away") or 0
+    
+    # Get match minute (approximate)
+    match_status = match.get("status", "")
+    minute = "?"
+    
+    # Try to get minute from match data
+    if match.get("minute"):
+        minute = match.get("minute")
+    elif match_status == "PAUSED":
+        minute = "HT"
+    
+    comp = match.get("competition", {}).get("name", "?")
+    
+    prompt = f"""You are a LIVE betting expert. Analyze this in-play match:
+
+🔴 LIVE: {home} {home_score}:{away_score} {away}
+⏱️ Minute: {minute}
+🏆 {comp}
+
+Based on the score and time, identify if there's a good IN-PLAY betting opportunity.
+
+Consider:
+- Current score vs expected (is there value?)
+- Time remaining (enough for goals?)
+- Match situation (team needs to score? parking the bus?)
+
+If you find opportunity with 70%+ confidence, respond with:
+
+🔴 IN-PLAY ALERT!
+
+⚽ {home} {home_score}:{away_score} {away} ({minute}')
+
+⚡ СТАВКА: [specific bet]
+📊 Уверенность: X%
+💰 Банк: X%
+🎯 Почему: [1 sentence]
+
+⏰ Действуй быстро!
+
+If NO good opportunity (all <70%), respond exactly: NO_OPPORTUNITY
+
+Be aggressive but smart. RUSSIAN language."""
+
+    try:
+        message = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response = message.content[0].text
+        
+        if "NO_OPPORTUNITY" in response:
+            return None
+        
+        if "IN-PLAY ALERT" in response:
+            return response
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"In-play analysis error: {e}")
+        return None
+
+
+async def check_inplay_matches(context: ContextTypes.DEFAULT_TYPE):
+    """Check live matches for betting opportunities - runs every minute"""
+    
+    if not inplay_subscribers:
+        return
+    
+    logger.info(f"Checking in-play matches for {len(inplay_subscribers)} subscribers...")
+    
+    live_matches = get_live_matches()
+    
+    if not live_matches:
+        logger.info("No live matches")
+        return
+    
+    logger.info(f"Found {len(live_matches)} live matches")
+    
+    for match in live_matches:
+        match_id = match.get("id")
+        
+        if not match_id:
+            continue
+        
+        # Check if already alerted for this match recently (within 10 minutes)
+        last_alert = inplay_alerted.get(match_id, 0)
+        now = datetime.now().timestamp()
+        
+        if now - last_alert < 600:  # 10 minutes cooldown
+            continue
+        
+        # Analyze opportunity
+        alert = analyze_inplay_opportunity(match)
+        
+        if alert:
+            home = match.get("homeTeam", {}).get("name", "?")
+            away = match.get("awayTeam", {}).get("name", "?")
+            
+            # Save prediction for tracking
+            save_prediction(match_id, home, away, "IN-PLAY", 70)
+            
+            # Mark as alerted
+            inplay_alerted[match_id] = now
+            
+            # Send to subscribers
+            for chat_id in inplay_subscribers:
+                try:
+                    await context.bot.send_message(chat_id=chat_id, text=alert)
+                    logger.info(f"Sent in-play alert to {chat_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send in-play alert: {e}")
+
+
 # ===== TELEGRAM HANDLERS =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -747,26 +920,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • "Арсенал" или "Arsenal"
 • "Кто выиграет Бавария?"
 • "Liverpool prediction"
-• "Посоветуй ставки"
 
 📋 **Команды:**
 /recommend - топ ставки
-/matches - все матчи
+/matches - все матчи  
 /leagues - по лигам
-/live - включить live-алерты
-/stats - моя статистика прогнозов
+/live - pre-match алерты (за 1-3ч до матча)
+/inplay - 🔴 LIVE ставки (во время матча!)
+/stats - моя статистика
 /help - помощь
 
-🎯 **Анализирую:**
-• 1X2, Двойной шанс
-• Форы, Тоталы
-• Обе забьют
-• % от банка
+🎯 **Режимы алертов:**
+
+📢 **/live** - Pre-match:
+• Проверяет каждые 5 минут
+• Алерт за 1-3 часа до матча
+• Успеешь спокойно поставить
+
+🔴 **/inplay** - Live:
+• Проверяет каждую минуту
+• Алерт ВО ВРЕМЯ матча
+• Реагируй быстро!
 
 📈 **Отслеживаю результаты:**
 • Проверяю угадал или нет
 • Считаю точность и ROI
-• /stats покажет статистику
 
 ⚠️ Ставки - это риск. Играйте ответственно.
 """
@@ -861,6 +1039,31 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"\n📊 Всего прогнозов: {stats['total']}"
     
     await update.message.reply_text(text)
+
+
+async def inplay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle in-play live alerts"""
+    chat_id = update.effective_chat.id
+    
+    if chat_id in inplay_subscribers:
+        inplay_subscribers.remove(chat_id)
+        await update.message.reply_text(
+            "🔕 **In-Play алерты выключены**\n\n"
+            "Напиши /inplay чтобы включить снова."
+        )
+    else:
+        inplay_subscribers.add(chat_id)
+        await update.message.reply_text(
+            "🔴 **In-Play режим включён!**\n\n"
+            "Я буду следить за LIVE матчами каждую минуту.\n"
+            "Когда найду хорошую возможность (70%+) — пришлю алерт.\n\n"
+            "**Типы ставок:**\n"
+            "• Тоталы (0:0 → ТБ0.5)\n"
+            "• Следующий гол\n"
+            "• Исход матча\n\n"
+            "⚡ Реагируй быстро - это LIVE!\n\n"
+            "Напиши /inplay чтобы выключить."
+        )
 
 
 async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1067,6 +1270,7 @@ def main():
     app.add_handler(CommandHandler("recommend", recommend_cmd))
     app.add_handler(CommandHandler("live", live_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("inplay", inplay_cmd))
     app.add_handler(CallbackQueryHandler(league_cb, pattern="^league_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
@@ -1075,11 +1279,12 @@ def main():
     # Stats summary - every 2 hours
     job_queue = app.job_queue
     if job_queue:
-        job_queue.run_repeating(check_live_matches, interval=300, first=60)  # 5 min
+        job_queue.run_repeating(check_live_matches, interval=300, first=60)  # 5 min - pre-match
         job_queue.run_repeating(send_stats_summary, interval=7200, first=120)  # 2 hours
-        print("✅ Job queue enabled: live alerts (5 min), stats (2 hours)")
+        job_queue.run_repeating(check_inplay_matches, interval=60, first=30)  # 1 min - in-play
+        print("✅ Jobs: pre-match(5m), stats(2h), in-play(1m)")
     else:
-        print("⚠️ Job queue not available - install python-telegram-bot[job-queue]")
+        print("⚠️ Job queue not available")
     
     print("✅ Bot v4 running!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
