@@ -130,7 +130,7 @@ Return ONLY JSON."""
 # ===== API FUNCTIONS =====
 
 def get_upcoming_matches(competition=None, days=7):
-    """Get upcoming matches"""
+    """Get upcoming matches - queries each league separately for free tier"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     
     date_from = datetime.now().strftime("%Y-%m-%d")
@@ -138,24 +138,43 @@ def get_upcoming_matches(competition=None, days=7):
     
     params = {"dateFrom": date_from, "dateTo": date_to}
     
-    try:
-        if competition:
+    # If specific competition requested
+    if competition:
+        try:
             url = f"{FOOTBALL_API_URL}/competitions/{competition}/matches"
-        else:
-            url = f"{FOOTBALL_API_URL}/matches"
-        
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            matches = response.json().get("matches", [])
-            logger.info(f"Got {len(matches)} matches from API")
-            return matches
-        else:
-            logger.error(f"Football API error: {response.status_code}")
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                matches = response.json().get("matches", [])
+                logger.info(f"Got {len(matches)} matches from {competition}")
+                return matches
+            else:
+                logger.error(f"Football API error for {competition}: {response.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"Error fetching {competition}: {e}")
             return []
-    except Exception as e:
-        logger.error(f"Error fetching matches: {e}")
-        return []
+    
+    # Free tier: query each league separately
+    all_matches = []
+    leagues = ["PL", "PD", "BL1", "SA", "FL1", "CL", "EL"]
+    
+    for league in leagues:
+        try:
+            url = f"{FOOTBALL_API_URL}/competitions/{league}/matches"
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                matches = response.json().get("matches", [])
+                all_matches.extend(matches)
+                logger.info(f"Got {len(matches)} matches from {league}")
+            else:
+                logger.warning(f"Could not get {league}: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error fetching {league}: {e}")
+        
+    logger.info(f"Total matches loaded: {len(all_matches)}")
+    return all_matches
 
 
 def search_match_flexible(search_teams, matches):
