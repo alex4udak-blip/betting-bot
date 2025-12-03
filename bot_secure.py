@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import re
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -26,6 +27,132 @@ if CLAUDE_API_KEY:
     claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
 
+# ===== TEAM NAME TRANSLATIONS =====
+TEAM_TRANSLATIONS = {
+    # Russian to English - Premier League
+    "арсенал": "arsenal",
+    "ливерпуль": "liverpool",
+    "манчестер юнайтед": "manchester united",
+    "манчестер сити": "manchester city",
+    "ман юнайтед": "manchester united",
+    "ман сити": "manchester city",
+    "челси": "chelsea",
+    "тоттенхэм": "tottenham",
+    "тоттенхем": "tottenham",
+    "шпоры": "tottenham",
+    "вест хэм": "west ham",
+    "ньюкасл": "newcastle",
+    "астон вилла": "aston villa",
+    "эвертон": "everton",
+    "брайтон": "brighton",
+    "фулхэм": "fulham",
+    "кристал пэлас": "crystal palace",
+    "вулверхэмптон": "wolverhampton",
+    "вулвз": "wolverhampton",
+    "борнмут": "bournemouth",
+    "ноттингем": "nottingham",
+    "брентфорд": "brentford",
+    "лестер": "leicester",
+    "саутгемптон": "southampton",
+    "ипсвич": "ipswich",
+    
+    # Spanish teams
+    "барселона": "barcelona",
+    "барса": "barcelona",
+    "реал мадрид": "real madrid",
+    "реал": "real madrid",
+    "атлетико": "atletico madrid",
+    "севилья": "sevilla",
+    "валенсия": "valencia",
+    "вильярреал": "villarreal",
+    "бетис": "betis",
+    "сосьедад": "real sociedad",
+    "атлетик бильбао": "athletic bilbao",
+    
+    # German teams
+    "бавария": "bayern",
+    "байерн": "bayern",
+    "боруссия дортмунд": "borussia dortmund",
+    "дортмунд": "dortmund",
+    "лейпциг": "leipzig",
+    "байер": "bayer leverkusen",
+    "леверкузен": "bayer leverkusen",
+    "вольфсбург": "wolfsburg",
+    "айнтрахт": "eintracht frankfurt",
+    "фрайбург": "freiburg",
+    "штутгарт": "stuttgart",
+    "гладбах": "gladbach",
+    "менхенгладбах": "monchengladbach",
+    
+    # Italian teams
+    "ювентус": "juventus",
+    "юве": "juventus",
+    "милан": "milan",
+    "интер": "inter",
+    "наполи": "napoli",
+    "рома": "roma",
+    "лацио": "lazio",
+    "аталанта": "atalanta",
+    "фиорентина": "fiorentina",
+    
+    # French teams
+    "пари сен жермен": "paris saint-germain",
+    "псж": "paris",
+    "марсель": "marseille",
+    "лион": "lyon",
+    "монако": "monaco",
+    "лилль": "lille",
+    
+    # Other
+    "аякс": "ajax",
+    "псв": "psv",
+    "порту": "porto",
+    "бенфика": "benfica",
+    "спортинг": "sporting",
+    "селтик": "celtic",
+    "рейнджерс": "rangers",
+}
+
+# ===== INTENT PATTERNS =====
+RECOMMEND_PATTERNS = [
+    r"посоветуй",
+    r"рекоменд",
+    r"на что поставить",
+    r"что поставить",
+    r"лучшие? ставк",
+    r"интересные? матч",
+    r"топ матч",
+    r"suggest",
+    r"recommend",
+    r"best bet",
+    r"good bet",
+]
+
+MATCHES_PATTERNS = [
+    r"какие матчи",
+    r"все матчи",
+    r"список матч",
+    r"матчи сегодня",
+    r"матчи на выходн",
+    r"what matches",
+    r"show matches",
+    r"list matches",
+]
+
+ANALYSIS_PATTERNS = [
+    r"кто выиграет",
+    r"кто победит",
+    r"что думаешь про",
+    r"анализ матча",
+    r"прогноз на",
+    r"шансы на",
+    r"who will win",
+    r"who wins",
+    r"analyze",
+    r"prediction for",
+]
+
+
 # ===== COMPETITION CODES =====
 COMPETITIONS = {
     "PL": "Premier League 🏴󠁧󠁢󠁥󠁮󠁧󠁿",
@@ -36,6 +163,55 @@ COMPETITIONS = {
     "CL": "Champions League 🇪🇺",
     "EL": "Europa League 🇪🇺",
 }
+
+
+# ===== HELPER FUNCTIONS =====
+
+def translate_team_name(query):
+    """Translate Russian team names to English"""
+    query_lower = query.lower().strip()
+    
+    for ru, en in TEAM_TRANSLATIONS.items():
+        if ru in query_lower:
+            query_lower = query_lower.replace(ru, en)
+    
+    return query_lower
+
+
+def detect_intent(message):
+    """Detect user intent from message"""
+    message_lower = message.lower()
+    
+    for pattern in RECOMMEND_PATTERNS:
+        if re.search(pattern, message_lower):
+            return "recommend"
+    
+    for pattern in MATCHES_PATTERNS:
+        if re.search(pattern, message_lower):
+            return "matches"
+    
+    for pattern in ANALYSIS_PATTERNS:
+        if re.search(pattern, message_lower):
+            return "analysis"
+    
+    return "team_search"
+
+
+def extract_team_from_query(query):
+    """Extract team name from natural language query"""
+    query_lower = translate_team_name(query.lower())
+    
+    remove_words = [
+        "кто", "выиграет", "победит", "что", "думаешь", "про", "матч", 
+        "анализ", "прогноз", "на", "шансы", "или", "vs", "против",
+        "who", "will", "win", "wins", "analyze", "prediction", "for",
+        "match", "game", "vs", "versus", "against", "the", "a", "an"
+    ]
+    
+    words = query_lower.split()
+    filtered_words = [w for w in words if w not in remove_words and len(w) > 2]
+    
+    return " ".join(filtered_words)
 
 
 # ===== API FUNCTIONS =====
@@ -108,28 +284,8 @@ def get_team_recent_matches(team_id, limit=5):
 def search_match(query):
     """Search for a specific match by team names"""
     matches = get_upcoming_matches()
-    query_lower = query.lower().strip()
-    
-    # Common team name translations
-    translations = {
-        "барселона": "barcelona",
-        "реал": "real madrid",
-        "ливерпуль": "liverpool",
-        "манчестер": "manchester",
-        "челси": "chelsea",
-        "арсенал": "arsenal",
-        "бавария": "bayern",
-        "ювентус": "juventus",
-        "милан": "milan",
-        "интер": "inter",
-        "пари сен жермен": "paris",
-        "псж": "paris",
-    }
-    
-    # Translate if needed
-    for ru, en in translations.items():
-        if ru in query_lower:
-            query_lower = query_lower.replace(ru, en)
+    query_lower = translate_team_name(query.lower().strip())
+    query_clean = extract_team_from_query(query_lower)
     
     best_match = None
     best_score = 0
@@ -139,18 +295,41 @@ def search_match(query):
         away_team = match.get("awayTeam", {}).get("name", "").lower()
         
         score = 0
-        for word in query_lower.split():
-            if len(word) >= 3:  # Skip short words
+        for word in query_clean.split():
+            if len(word) >= 3:
                 if word in home_team:
                     score += 2
                 if word in away_team:
                     score += 2
+                if any(word in part for part in home_team.split()):
+                    score += 1
+                if any(word in part for part in away_team.split()):
+                    score += 1
         
         if score > best_score:
             best_score = score
             best_match = match
     
     return best_match if best_score >= 2 else None
+
+
+def get_best_matches_for_recommendation():
+    """Get best matches for recommendation based on league importance"""
+    matches = get_upcoming_matches()
+    
+    priority_leagues = ["Premier League", "La Liga", "Bundesliga", "Serie A", "UEFA Champions League"]
+    
+    priority_matches = []
+    other_matches = []
+    
+    for match in matches:
+        competition = match.get("competition", {}).get("name", "")
+        if any(league in competition for league in priority_leagues):
+            priority_matches.append(match)
+        else:
+            other_matches.append(match)
+    
+    return (priority_matches + other_matches)[:5]
 
 
 def get_odds_for_match(home_team, away_team, sport="soccer_epl"):
@@ -184,7 +363,6 @@ def get_odds_for_match(home_team, away_team, sport="soccer_epl"):
                     event_home = event.get("home_team", "").lower()
                     event_away = event.get("away_team", "").lower()
                     
-                    # Check if teams match
                     home_match = any(word in event_home for word in home_team.lower().split()[:2])
                     away_match = any(word in event_away for word in away_team.lower().split()[:2])
                     
@@ -217,6 +395,9 @@ def format_recent_form(matches, team_id):
         home_score = match.get("score", {}).get("fullTime", {}).get("home", 0)
         away_score = match.get("score", {}).get("fullTime", {}).get("away", 0)
         
+        if home_score is None or away_score is None:
+            continue
+            
         if home_id == team_id:
             if home_score > away_score:
                 form.append("✅")
@@ -243,19 +424,15 @@ def analyze_match_with_claude(match_data, odds_data=None, h2h_data=None, home_fo
     
     home_team = match_data.get("homeTeam", {}).get("name", "Unknown")
     away_team = match_data.get("awayTeam", {}).get("name", "Unknown")
-    home_id = match_data.get("homeTeam", {}).get("id")
-    away_id = match_data.get("awayTeam", {}).get("id")
     competition = match_data.get("competition", {}).get("name", "Unknown League")
     match_date = match_data.get("utcDate", "Unknown")
     
-    # Format date nicely
     try:
         dt = datetime.fromisoformat(match_date.replace("Z", "+00:00"))
         match_date_formatted = dt.strftime("%d %B %Y, %H:%M UTC")
     except:
         match_date_formatted = match_date
     
-    # Format odds info
     odds_info = "Коэффициенты: недоступны"
     if odds_data:
         home_odds = odds_data.get(home_team) or odds_data.get(odds_data.get("home_team", ""), "N/A")
@@ -267,7 +444,6 @@ def analyze_match_with_claude(match_data, odds_data=None, h2h_data=None, home_fo
 • Ничья: {draw_odds}
 • {away_team}: {away_odds}"""
         
-        # Add totals if available
         over_25 = odds_data.get("total_Over_2.5")
         under_25 = odds_data.get("total_Under_2.5")
         if over_25 and under_25:
@@ -277,7 +453,6 @@ def analyze_match_with_claude(match_data, odds_data=None, h2h_data=None, home_fo
 • Больше: {over_25}
 • Меньше: {under_25}"""
     
-    # Format H2H
     h2h_info = ""
     if h2h_data:
         aggregates = h2h_data.get("aggregates", {})
@@ -293,7 +468,6 @@ def analyze_match_with_claude(match_data, odds_data=None, h2h_data=None, home_fo
 • Ничьих: {draws}
 • {away_team}: {away_wins} побед"""
     
-    # Format recent form
     form_info = ""
     if home_form or away_form:
         form_info = f"""
@@ -355,6 +529,57 @@ def analyze_match_with_claude(match_data, odds_data=None, h2h_data=None, home_fo
         return f"❌ Ошибка анализа: {e}"
 
 
+def get_recommendations_with_claude(matches):
+    """Use Claude to recommend best bets from list of matches"""
+    
+    if not claude_client or not matches:
+        return None
+    
+    matches_info = ""
+    for i, match in enumerate(matches, 1):
+        home = match.get("homeTeam", {}).get("name", "?")
+        away = match.get("awayTeam", {}).get("name", "?")
+        comp = match.get("competition", {}).get("name", "?")
+        date = match.get("utcDate", "")[:10]
+        matches_info += f"{i}. {home} vs {away} ({comp}) - {date}\n"
+    
+    prompt = f"""Ты профессиональный спортивный аналитик. 
+Вот список ближайших матчей:
+
+{matches_info}
+
+Выбери 2-3 самых интересных матча для ставок и кратко объясни почему.
+Для каждого матча укажи:
+- Какой матч
+- Рекомендуемая ставка (победа/ничья/тотал)
+- Почему это интересно (1-2 предложения)
+
+Формат:
+
+🔥 **РЕКОМЕНДАЦИИ НА СЕГОДНЯ:**
+
+1️⃣ **[Команда] vs [Команда]**
+   Ставка: [рекомендация]
+   Почему: [объяснение]
+
+2️⃣ ...
+
+Отвечай кратко и по делу, на русском."""
+
+    try:
+        message = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=800,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return message.content[0].text
+    except Exception as e:
+        logger.error(f"Claude API error: {e}")
+        return None
+
+
 # ===== TELEGRAM HANDLERS =====
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -364,14 +589,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Привет! Я анализирую футбольные матчи с помощью AI и реальных данных.
 
 **🎮 Как использовать:**
-Просто напиши название команды или матч:
-• `Барселона`
-• `Arsenal vs Chelsea`  
-• `Real Madrid`
+
+📝 **Свободная форма:**
+• "Кто выиграет Арсенал или Челси?"
+• "Что думаешь про матч Ливерпуля?"
+• "Посоветуй на что поставить"
+
+⚽ **Или просто напиши команду:**
+• `Arsenal`, `Барселона`, `Bayern`
 
 **📋 Команды:**
 /matches — ближайшие матчи
 /leagues — выбрать лигу
+/recommend — лучшие ставки на сегодня
 /help — помощь
 
 ⚠️ _Прогнозы носят информационный характер. Делайте ставки ответственно._
@@ -383,11 +613,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send help message"""
     help_text = """📚 **Инструкция**
 
-**Поиск матча:**
-Напиши название команды на русском или английском:
-• `Ливерпуль`, `Liverpool`
-• `Барселона vs Реал`
-• `Bayern Munich`
+**Способы запроса:**
+
+1️⃣ **Свободная форма:**
+   • "Кто выиграет Барселона или Реал?"
+   • "Анализ матча Ливерпуля"
+   • "Посоветуй интересные матчи"
+
+2️⃣ **Название команды:**
+   • `Arsenal`, `Барселона`, `Bayern Munich`
+
+3️⃣ **Команды:**
+   • /matches — все ближайшие матчи
+   • /leagues — выбрать лигу
+   • /recommend — AI рекомендации
 
 **Доступные лиги:**
 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League
@@ -397,18 +636,34 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🇫🇷 Ligue 1
 🇪🇺 Champions League
 
-**Что анализирует бот:**
-• Текущие коэффициенты букмекеров
-• Историю личных встреч
-• Форму команд
-• AI-прогноз с объяснением
-
-**Команды:**
-/matches — все ближайшие матчи
-/leagues — выбрать конкретную лигу
-/start — начать сначала
+**Понимаю на русском и английском!**
 """
     await update.message.reply_text(help_text, parse_mode='Markdown')
+
+
+async def recommend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get AI recommendations for best bets"""
+    await update.message.reply_text("🔍 Анализирую лучшие матчи для ставок...")
+    
+    matches = get_best_matches_for_recommendation()
+    
+    if not matches:
+        await update.message.reply_text("❌ Не удалось получить матчи. Попробуй позже.")
+        return
+    
+    recommendations = get_recommendations_with_claude(matches)
+    
+    if recommendations:
+        await update.message.reply_text(recommendations, parse_mode='Markdown')
+    else:
+        text = "⚽ **Интересные матчи:**\n\n"
+        for match in matches[:5]:
+            home = match.get("homeTeam", {}).get("name", "?")
+            away = match.get("awayTeam", {}).get("name", "?")
+            comp = match.get("competition", {}).get("name", "")
+            text += f"• {home} vs {away}\n  🏆 {comp}\n\n"
+        text += "_Напиши название команды для детального анализа_"
+        await update.message.reply_text(text, parse_mode='Markdown')
 
 
 async def show_leagues(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -471,7 +726,6 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Не удалось получить матчи. Попробуй позже.")
         return
     
-    # Group by competition
     by_competition = {}
     for match in matches:
         comp = match.get("competition", {}).get("name", "Other")
@@ -501,25 +755,36 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user message and analyze match"""
+    """Handle user message with intelligent intent detection"""
     query = update.message.text.strip()
     
-    if len(query) < 3:
-        await update.message.reply_text("⚠️ Слишком короткий запрос. Напиши название команды.")
+    if len(query) < 2:
+        await update.message.reply_text("⚠️ Слишком короткий запрос.")
         return
     
-    status_msg = await update.message.reply_text(f"🔍 Ищу матч: _{query}_...", parse_mode='Markdown')
+    intent = detect_intent(query)
     
-    # Search for match
+    if intent == "recommend":
+        await recommend_command(update, context)
+        return
+    
+    if intent == "matches":
+        await show_matches(update, context)
+        return
+    
+    status_msg = await update.message.reply_text(f"🔍 Ищу матч...", parse_mode='Markdown')
+    
     match = search_match(query)
     
     if not match:
         await status_msg.edit_text(
-            f"❌ Не нашёл матч с «{query}» в ближайшие 7 дней.\n\n"
-            "💡 Попробуй:\n"
-            "• Другое написание (Arsenal, Арсенал)\n"
+            f"🤔 Не нашёл подходящий матч.\n\n"
+            "💡 **Попробуй:**\n"
+            "• Название команды на английском (Arsenal, Liverpool)\n"
             "• /matches — посмотреть все матчи\n"
-            "• /leagues — выбрать лигу"
+            "• /recommend — получить рекомендации\n"
+            "• /leagues — выбрать лигу",
+            parse_mode='Markdown'
         )
         return
     
@@ -537,11 +802,9 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # Get additional data
     odds = get_odds_for_match(home_team, away_team)
     h2h = get_head_to_head(match_id) if match_id else None
     
-    # Get team forms
     home_matches = get_team_recent_matches(home_id) if home_id else []
     away_matches = get_team_recent_matches(away_id) if away_id else []
     home_form = format_recent_form(home_matches, home_id) if home_matches else None
@@ -554,10 +817,8 @@ async def analyze_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # Analyze with Claude
     analysis = analyze_match_with_claude(match, odds, h2h, home_form, away_form)
     
-    # Send analysis
     header = f"⚽ **{home_team}** vs **{away_team}**\n"
     header += f"🏆 {competition}\n"
     header += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -580,7 +841,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Start the bot"""
     
-    # Check required env vars
     if not TELEGRAM_TOKEN:
         print("❌ TELEGRAM_TOKEN not set!")
         return
@@ -598,21 +858,18 @@ def main():
     print(f"   Odds API: {'✅' if ODDS_API_KEY else '❌'}")
     print(f"   Claude AI: {'✅' if CLAUDE_API_KEY else '❌'}")
     
-    # Create application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("matches", show_matches))
     application.add_handler(CommandHandler("leagues", show_leagues))
+    application.add_handler(CommandHandler("recommend", recommend_command))
     application.add_handler(CallbackQueryHandler(league_callback, pattern="^league_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze_message))
     
-    # Error handler
     application.add_error_handler(error_handler)
     
-    # Start polling
     print("✅ Bot is running! Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
