@@ -37,10 +37,7 @@ COMPETITIONS = {
 }
 
 
-def detect_language(text):
-    """Detect if text is Russian or English"""
-    russian_chars = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
-    return "ru" if russian_chars > len(text) * 0.2 else "en"
+# ===== HELPERS =====
 
 
 def get_bank_percentage(confidence):
@@ -59,11 +56,11 @@ def get_bank_percentage(confidence):
 
 # ===== CLAUDE PARSER =====
 
-def parse_user_query(user_message, lang="en"):
+def parse_user_query(user_message):
     """Parse user query with Claude"""
     
     if not claude_client:
-        return {"intent": "team_search", "teams": [user_message], "lang": lang}
+        return {"intent": "team_search", "teams": [user_message]}
     
     prompt = f"""Analyze this football betting message and return JSON.
 
@@ -98,13 +95,11 @@ Return ONLY JSON, no other text."""
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
         
-        result = json.loads(text)
-        result["lang"] = lang
-        return result
+        return json.loads(text)
         
     except Exception as e:
         logger.error(f"Parse error: {e}")
-        return {"intent": "team_search", "teams": [user_message], "lang": lang}
+        return {"intent": "team_search", "teams": [user_message]}
 
 
 # ===== API FUNCTIONS =====
@@ -258,7 +253,7 @@ def get_odds(home, away):
 
 # ===== CLAUDE ANALYSIS =====
 
-def analyze_match(match, odds=None, h2h=None, home_form=None, away_form=None, lang="ru"):
+def analyze_match(match, odds=None, h2h=None, home_form=None, away_form=None, user_query=""):
     """Full match analysis with emojis"""
     
     if not claude_client:
@@ -298,49 +293,35 @@ def analyze_match(match, odds=None, h2h=None, home_form=None, away_form=None, la
     if home_form or away_form:
         form_text = f"Form: {home}={home_form or '?'}, {away}={away_form or '?'}"
 
-    lang_instr = "RESPOND IN RUSSIAN." if lang == "ru" else "RESPOND IN ENGLISH."
-    
-    prompt = f"""You are a confident expert betting analyst. Analyze this match and ALWAYS give recommendations.
+    prompt = f"""User asked: "{user_query}"
+
+You are a confident expert betting analyst. Analyze this match and ALWAYS give recommendations.
 
 {comp}: {home} vs {away}
 Odds: {odds_text}
 {h2h_text}
 {form_text}
 
-{lang_instr}
+IMPORTANT: 
+- Respond in the SAME LANGUAGE as the user's query above
+- You MUST give betting recommendations
+- Use your knowledge about these teams
+- Don't refuse to analyze
 
-IMPORTANT: You MUST give betting recommendations. Use your knowledge about these teams (league position, typical performance, historical strength). Don't refuse to analyze - make your best prediction based on available info.
-
-USE THIS EXACT FORMAT:
-
-📊 ВЕРОЯТНОСТИ:
-• {home}: X%
-• Ничья: X%
-• {away}: X%
-
-🎯 ЛУЧШАЯ СТАВКА (Уверенность: X%):
-[Bet type] @ [coefficient if known]
-💰 Рекомендация: X% от банка
-[1-2 sentences why]
-
-📈 ДРУГИЕ ВАРИАНТЫ:
-1. [Bet] - X% уверенность - коэфф X.XX
-2. [Bet] - X% уверенность - коэфф X.XX
-3. [Bet] - X% уверенность - коэфф X.XX
-
-⚠️ РИСКИ:
-[Key risks - 1-2 sentences]
-
-✅ ВЕРДИКТ: [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ПРОПУСТИТЬ]
+FORMAT:
+📊 Probabilities for each outcome (%)
+🎯 Best bet with confidence %, coefficient, and % of bankroll
+📈 3 alternative bets with confidence and odds
+⚠️ Key risks (1-2 sentences)
+✅ Verdict: Strong bet / Medium risk / Skip
 
 RULES:
-- ALWAYS provide predictions - never refuse
-- Use your knowledge about teams if data is limited
-- Premier League vs Championship = clear favorite (75%+)
+- ALWAYS provide predictions
+- Premier League vs lower league = clear favorite (75%+)
 - Include coefficients from odds data
 - Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%
 - Mark 70%+ bets as "⭐ VALUE"
-- Only ПРОПУСТИТЬ if genuinely unpredictable (both teams equal)"""
+- Use emojis for structure"""
 
     try:
         message = claude_client.messages.create(
@@ -353,7 +334,7 @@ RULES:
         return f"Error: {e}"
 
 
-def get_recommendations(matches, lang="ru"):
+def get_recommendations(matches, user_query=""):
     """Get AI recommendations"""
     
     logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
@@ -373,40 +354,26 @@ def get_recommendations(matches, lang="ru"):
         c = m.get("competition", {}).get("name", "?")
         matches_text += f"{i}. {h} vs {a} ({c})\n"
     
-    lang_instr = "RESPOND IN RUSSIAN." if lang == "ru" else "RESPOND IN ENGLISH."
-    
-    prompt = f"""You are a CONFIDENT betting expert. Analyze and give TOP 3-4 picks:
+    prompt = f"""User asked: "{user_query}"
+
+Give TOP 3-4 betting picks from these matches:
 
 {matches_text}
 
-{lang_instr}
-
-IMPORTANT: You MUST give recommendations. Use your football knowledge about these teams.
-- Premier League vs Championship = obvious favorite
+IMPORTANT:
+- Respond in the SAME LANGUAGE as the user's query above
+- You MUST give recommendations
+- Use your football knowledge
+- Premier League vs lower leagues = obvious favorite
 - Big teams at home = usually win
-- Form, history, class difference matters
 
-USE THIS FORMAT:
+FORMAT:
+🔥 Top picks (3-4 matches)
+For each: bet type, odds, confidence %, bankroll %, 1 sentence why
+❌ Matches to avoid with reason
 
-🔥 ТОП СТАВКИ:
-
-1️⃣ [Team] vs [Team]
-   ✅ Ставка: [specific bet] @ коэфф X.XX
-   📊 Уверенность: X%
-   💰 Банк: X%
-   💡 Почему: [1 sentence]
-
-2️⃣ ...
-
-3️⃣ ...
-
-❌ ИЗБЕГАТЬ:
-• [Match] - [why risky]
-
-RULES:
-- ALWAYS give 3-4 picks
-- Never refuse or say "not enough data"
-- Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
+Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%
+Use emojis. Be confident. Never refuse."""
 
     try:
         logger.info("Calling Claude API for recommendations...")
@@ -1078,7 +1045,7 @@ async def inplay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Recommend command from user {update.effective_user.id}")
-    lang = detect_language(update.message.text or "")
+    user_text = update.message.text or "/recommend"
     
     status = await update.message.reply_text("🔍 Анализирую лучшие ставки...")
     
@@ -1089,7 +1056,7 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text("❌ Не удалось загрузить матчи. Попробуй позже.")
         return
     
-    recs = get_recommendations(matches, lang)
+    recs = get_recommendations(matches, user_text)
     
     if recs:
         logger.info("Recommendations received successfully")
@@ -1174,16 +1141,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(user_text) < 2:
         return
     
-    lang = detect_language(user_text)
-    
     status = await update.message.reply_text("🔍 Анализирую запрос...")
     
     # Parse
-    parsed = parse_user_query(user_text, lang)
+    parsed = parse_user_query(user_text)
     intent = parsed.get("intent", "unknown")
     teams = parsed.get("teams", [])
     
-    logger.info(f"Parsed: intent={intent}, teams={teams}, lang={lang}")
+    logger.info(f"Parsed: intent={intent}, teams={teams}")
     
     # Handle intents
     if intent == "greeting":
@@ -1248,7 +1213,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status.edit_text(f"✅ {home} vs {away}\n🏆 {comp}\n\n🤖 AI анализирует...")
     
     # Analyze
-    analysis = analyze_match(match, odds, h2h, home_form, away_form, lang)
+    analysis = analyze_match(match, odds, h2h, home_form, away_form, user_text)
     
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
     
