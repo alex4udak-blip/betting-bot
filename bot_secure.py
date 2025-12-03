@@ -1380,13 +1380,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "🔔 **Live-алерты включены!**\n\n"
                 "Каждые 10 минут проверяю матчи.\n"
-                "Если найду ставку с 75%+ уверенностью за 1-3 часа до начала — пришлю алерт!\n\n"
+                "Если найду ставку с 70%+ за 1-3 часа — пришлю алерт!\n\n"
                 "📨 Пример алерта:\n"
                 "```\n"
                 "🚨 LIVE ALERT!\n"
                 "⚽ Arsenal vs Chelsea\n"
                 "⚡ СТАВКА: Победа хозяев\n"
-                "📊 Уверенность: 78%\n"
+                "📊 Уверенность: 72%\n"
                 "```\n\n"
                 "Напиши /live чтобы выключить.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1761,15 +1761,141 @@ async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         live_subscribers.add(user_id)
         await update.message.reply_text(
             "🔔 **Live-алерты включены!**\n\n"
-            "Я буду проверять матчи каждые 5 минут.\n"
-            "Когда найду хорошую ставку (75%+) за 1-3 часа до матча — пришлю алерт!\n\n"
+            "Каждые 10 минут проверяю матчи.\n"
+            "Если найду ставку с 70%+ уверенностью за 1-3 часа до матча — пришлю алерт!\n\n"
             "📊 Типы алертов:\n"
             "• Победа фаворита\n"
             "• Тоталы с высокой вероятностью\n"
             "• Обе забьют\n\n"
+            "⚠️ Алерт придёт только если:\n"
+            "1. Есть матч в окне 0.5-3 часа\n"
+            "2. Claude найдёт ставку 70%+\n\n"
             "Напиши /live чтобы выключить.",
             parse_mode="Markdown"
         )
+
+
+async def testalert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test alert - manually trigger check"""
+    user_id = update.effective_user.id
+    
+    await update.message.reply_text("🔍 Принудительно проверяю матчи для алертов...")
+    
+    # Temporarily add user to subscribers
+    was_subscribed = user_id in live_subscribers
+    live_subscribers.add(user_id)
+    
+    # Get matches
+    matches = get_matches(days=1, use_cache=False)
+    
+    if not matches:
+        await update.message.reply_text("❌ Нет матчей сегодня")
+        if not was_subscribed:
+            live_subscribers.discard(user_id)
+        return
+    
+    now = datetime.now()
+    upcoming = []
+    all_today = []
+    
+    for m in matches:
+        try:
+            match_time = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00")).replace(tzinfo=None)
+            hours_until = (match_time - now).total_seconds() / 3600
+            
+            if hours_until > 0:  # Future matches
+                all_today.append((m, hours_until))
+                if 0.5 < hours_until < 3:
+                    upcoming.append(m)
+        except:
+            continue
+    
+    # Show status
+    text = f"📊 **Статус алертов:**\n\n"
+    text += f"🔔 Подписчики: {len(live_subscribers)}\n"
+    text += f"📅 Матчей сегодня: {len(matches)}\n"
+    text += f"⏰ В окне 0.5-3ч: {len(upcoming)}\n\n"
+    
+    if all_today:
+        text += "**Ближайшие матчи:**\n"
+        for m, hours in sorted(all_today, key=lambda x: x[1])[:5]:
+            home = m.get("homeTeam", {}).get("name", "?")
+            away = m.get("awayTeam", {}).get("name", "?")
+            in_window = "✅" if 0.5 < hours < 3 else "⏳"
+            text += f"{in_window} {home} vs {away} (через {hours:.1f}ч)\n"
+    
+    if not upcoming:
+        text += "\n⚠️ Нет матчей в окне 0.5-3 часа — алерты не сработают"
+        await update.message.reply_text(text, parse_mode="Markdown")
+        if not was_subscribed:
+            live_subscribers.discard(user_id)
+        return
+    
+    text += "\n🔄 Анализирую матчи в окне..."
+    await update.message.reply_text(text, parse_mode="Markdown")
+    
+    # Analyze one match
+    match = upcoming[0]
+    home = match.get("homeTeam", {}).get("name", "?")
+    away = match.get("awayTeam", {}).get("name", "?")
+    comp = match.get("competition", {}).get("name", "?")
+    home_id = match.get("homeTeam", {}).get("id")
+    away_id = match.get("awayTeam", {}).get("id")
+    
+    home_form = get_team_form(home_id) if home_id else None
+    away_form = get_team_form(away_id) if away_id else None
+    odds = get_odds(home, away)
+    
+    form_text = ""
+    if home_form:
+        form_text += f"{home}: {home_form['form']}\n"
+    if away_form:
+        form_text += f"{away}: {away_form['form']}"
+    
+    odds_text = str(odds) if odds else "нет данных"
+    
+    prompt = f"""You are a betting expert. Quick analysis for live alert:
+
+Match: {home} vs {away}
+Competition: {comp}
+Form: {form_text}
+Odds: {odds_text}
+
+If you find a bet with 70%+ confidence, respond with:
+
+🚨 LIVE ALERT!
+
+⚽ {home} vs {away}
+🏆 {comp}
+⏰ Через 1-3 часа
+
+⚡ СТАВКА: [bet type]
+📊 Уверенность: X%
+💰 Коэфф: X.XX
+🎯 Банк: X%
+📝 Почему: [1 sentence based on form]
+
+If NO good bet (all <70%), respond exactly: NO_ALERT
+
+Be reasonably selective but not too strict!"""
+
+    try:
+        message = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        response = message.content[0].text
+        
+        result = f"**Claude ответил:**\n\n{response}"
+        await update.message.reply_text(result, parse_mode="Markdown")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+    
+    if not was_subscribed:
+        live_subscribers.discard(user_id)
 
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
@@ -1838,7 +1964,7 @@ Competition: {comp}
 Form: {form_text}
 Odds: {odds_text}
 
-If you find a bet with 75%+ confidence, respond with:
+If you find a bet with 70%+ confidence, respond with:
 
 🚨 LIVE ALERT!
 
@@ -1852,9 +1978,9 @@ If you find a bet with 75%+ confidence, respond with:
 🎯 Банк: X%
 📝 Почему: [1 sentence based on form]
 
-If NO good bet (all <75%), respond exactly: NO_ALERT
+If NO good bet (all <70%), respond exactly: NO_ALERT
 
-Be selective - only alert for really good opportunities!"""
+Be reasonably selective but not too strict - if there's a decent opportunity, alert!"""
 
         try:
             message = claude_client.messages.create(
@@ -1865,8 +1991,11 @@ Be selective - only alert for really good opportunities!"""
             
             response = message.content[0].text
             
-            if "NO_ALERT" not in response and "LIVE ALERT" in response:
-                logger.info(f"Sending alert for {home} vs {away}")
+            # Log Claude's response for debugging
+            if "NO_ALERT" in response:
+                logger.info(f"Alert check for {home} vs {away}: NO_ALERT (confidence < 75%)")
+            elif "LIVE ALERT" in response:
+                logger.info(f"🚨 Alert triggered for {home} vs {away}!")
                 
                 for user_id in live_subscribers:
                     try:
@@ -1877,8 +2006,11 @@ Be selective - only alert for really good opportunities!"""
                             reply_markup=InlineKeyboardMarkup(keyboard),
                             parse_mode="Markdown"
                         )
+                        logger.info(f"Alert sent to user {user_id}")
                     except Exception as e:
                         logger.error(f"Failed to send alert to {user_id}: {e}")
+            else:
+                logger.warning(f"Unexpected response for {home} vs {away}: {response[:100]}...")
                         
         except Exception as e:
             logger.error(f"Alert analysis error: {e}")
@@ -2060,6 +2192,7 @@ def main():
     app.add_handler(CommandHandler("favorites", favorites_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("live", live_cmd))
+    app.add_handler(CommandHandler("testalert", testalert_cmd))
     
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
