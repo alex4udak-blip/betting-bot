@@ -356,7 +356,14 @@ RULES:
 def get_recommendations(matches, lang="ru"):
     """Get AI recommendations"""
     
-    if not claude_client or not matches:
+    logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
+    
+    if not claude_client:
+        logger.error("Claude client not available!")
+        return None
+    
+    if not matches:
+        logger.error("No matches provided!")
         return None
     
     matches_text = ""
@@ -402,13 +409,16 @@ RULES:
 - Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
 
     try:
+        logger.info("Calling Claude API for recommendations...")
         message = claude_client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
+        logger.info("Claude API response received")
         return message.content[0].text
-    except:
+    except Exception as e:
+        logger.error(f"Claude API error in get_recommendations: {e}")
         return None
 
 
@@ -1067,11 +1077,13 @@ async def inplay_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Recommend command from user {update.effective_user.id}")
     lang = detect_language(update.message.text or "")
     
     status = await update.message.reply_text("🔍 Анализирую лучшие ставки...")
     
     matches = get_matches(days=7)
+    logger.info(f"Got {len(matches) if matches else 0} matches for recommendations")
     
     if not matches:
         await status.edit_text("❌ Не удалось загрузить матчи. Попробуй позже.")
@@ -1080,8 +1092,10 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recs = get_recommendations(matches, lang)
     
     if recs:
+        logger.info("Recommendations received successfully")
         await status.edit_text(recs)
     else:
+        logger.error("Failed to get recommendations")
         await status.edit_text("❌ Ошибка анализа. Попробуй позже.")
 
 
