@@ -187,6 +187,50 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds):
     conn.commit()
     conn.close()
 
+def get_pending_predictions():
+    """Get predictions that haven't been checked yet"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds 
+                 FROM predictions 
+                 WHERE is_correct IS NULL 
+                 AND predicted_at > datetime('now', '-7 days')""")
+    rows = c.fetchall()
+    conn.close()
+    
+    return [{"id": r[0], "user_id": r[1], "match_id": r[2], "home": r[3], 
+             "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7]} for r in rows]
+
+def update_prediction_result(pred_id, result, is_correct):
+    """Update prediction with result"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""UPDATE predictions 
+                 SET result = ?, is_correct = ?, checked_at = CURRENT_TIMESTAMP 
+                 WHERE id = ?""", (result, is_correct, pred_id))
+    conn.commit()
+    conn.close()
+
+def check_bet_result(bet_type, home_score, away_score):
+    """Check if bet was correct based on score"""
+    total_goals = home_score + away_score
+    
+    if bet_type == "П1":
+        return home_score > away_score
+    elif bet_type == "П2":
+        return away_score > home_score
+    elif bet_type == "Х" or bet_type == "ничья":
+        return home_score == away_score
+    elif bet_type == "ТБ 2.5" or bet_type == "Over 2.5":
+        return total_goals > 2.5
+    elif bet_type == "ТМ 2.5" or bet_type == "Under 2.5":
+        return total_goals < 2.5
+    elif bet_type == "BTTS" or bet_type == "обе забьют":
+        return home_score > 0 and away_score > 0
+    
+    # Default - can't determine
+    return None
+
 def get_user_stats(user_id):
     """Get user's prediction statistics"""
     conn = sqlite3.connect(DB_PATH)
@@ -1532,11 +1576,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     home = match.get("homeTeam", {}).get("name", "?")
     away = match.get("awayTeam", {}).get("name", "?")
     comp = match.get("competition", {}).get("name", "?")
+    match_id = match.get("id")
     
     await status.edit_text(f"✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...")
     
     # Enhanced analysis
     analysis = analyze_match_enhanced(match, user)
+    
+    # Extract and save prediction from analysis
+    try:
+        # Try to extract confidence from response
+        confidence = 70  # default
+        bet_type = "match_analysis"
+        odds_value = 1.5
+        
+        # Look for confidence percentage
+        import re
+        conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', analysis)
+        if conf_match:
+            confidence = int(conf_match.group(1))
+        
+        # Look for bet type
+        if "П1" in analysis or "победа" in analysis.lower():
+            bet_type = "П1"
+        elif "П2" in analysis:
+            bet_type = "П2"
+        elif "ТБ" in analysis or "больше" in analysis.lower():
+            bet_type = "ТБ 2.5"
+        elif "ТМ" in analysis or "меньше" in analysis.lower():
+            bet_type = "ТМ 2.5"
+        elif "обе забьют" in analysis.lower():
+            bet_type = "BTTS"
+        
+        # Look for odds
+        odds_match = re.search(r'@\s*(\d+\.?\d*)', analysis)
+        if odds_match:
+            odds_value = float(odds_match.group(1))
+        
+        # Save prediction
+        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
+        logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%")
+        
+    except Exception as e:
+        logger.error(f"Error saving prediction: {e}")
     
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
     
@@ -1695,6 +1777,80 @@ Be selective - only alert for really good opportunities!"""
             logger.error(f"Alert analysis error: {e}")
 
 
+async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
+    """Check finished matches and update prediction results - runs every hour"""
+    
+    pending = get_pending_predictions()
+    
+    if not pending:
+        logger.info("No pending predictions to check")
+        return
+    
+    logger.info(f"Checking {len(pending)} pending predictions...")
+    
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    for pred in pending:
+        match_id = pred.get("match_id")
+        if not match_id:
+            continue
+        
+        try:
+            # Get match result from API
+            url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+            r = requests.get(url, headers=headers, timeout=10)
+            
+            if r.status_code != 200:
+                continue
+            
+            match_data = r.json()
+            status = match_data.get("status")
+            
+            # Only process finished matches
+            if status != "FINISHED":
+                continue
+            
+            score = match_data.get("score", {}).get("fullTime", {})
+            home_score = score.get("home")
+            away_score = score.get("away")
+            
+            if home_score is None or away_score is None:
+                continue
+            
+            # Check if bet was correct
+            bet_type = pred.get("bet_type", "")
+            is_correct = check_bet_result(bet_type, home_score, away_score)
+            
+            if is_correct is None:
+                # Can't determine, skip
+                continue
+            
+            result_str = f"{home_score}:{away_score}"
+            update_prediction_result(pred["id"], result_str, 1 if is_correct else 0)
+            
+            logger.info(f"Updated prediction {pred['id']}: {pred['home']} vs {pred['away']} = {result_str}, correct={is_correct}")
+            
+            # Notify user about result
+            user_id = pred.get("user_id")
+            if user_id:
+                emoji = "✅" if is_correct else "❌"
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"{emoji} **Результат прогноза:**\n\n"
+                             f"⚽ {pred['home']} {home_score}:{away_score} {pred['away']}\n"
+                             f"📊 Ставка: {bet_type}\n"
+                             f"{'✅ Прогноз верный!' if is_correct else '❌ Прогноз не сработал'}\n\n"
+                             f"Напиши /stats для полной статистики",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error checking prediction {pred['id']}: {e}")
+
+
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
     """Send daily digest at 10:00 - runs every 2 hours"""
     
@@ -1732,6 +1888,39 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.error(f"Failed to send digest to {user_id}: {e}")
+
+
+def get_match_result(match_id):
+    """Get match result by ID"""
+    if not FOOTBALL_API_KEY:
+        return None
+    
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    try:
+        url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            match = r.json()
+            status = match.get("status")
+            
+            if status == "FINISHED":
+                score = match.get("score", {}).get("fullTime", {})
+                home_score = score.get("home", 0) or 0
+                away_score = score.get("away", 0) or 0
+                return {
+                    "status": "FINISHED",
+                    "home_score": home_score,
+                    "away_score": away_score,
+                    "result": f"{home_score}-{away_score}"
+                }
+            else:
+                return {"status": status}
+    except Exception as e:
+        logger.error(f"Get match result error: {e}")
+    
+    return None
 
 
 # ===== MAIN =====
@@ -1778,13 +1967,15 @@ def main():
     job_queue = app.job_queue
     job_queue.run_repeating(check_live_matches, interval=300, first=60)  # Every 5 min
     job_queue.run_repeating(send_daily_digest, interval=7200, first=120)  # Every 2 hours
+    job_queue.run_repeating(check_predictions_results, interval=3600, first=180)  # Every hour
     
-    print("\n✅ Bot v9 Enhanced running!")
+    print("\n✅ Bot v10 running!")
     print("   📊 Enhanced analysis with form + H2H + home/away")
     print("   💾 SQLite database for user settings")
     print("   ⚙️ Personalization (odds, risk level)")
     print("   🎛️ Inline buttons for better UX")
     print("   🔔 Live alerts every 5 min (use /live)")
+    print("   📈 Prediction tracking + auto-results check")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
