@@ -401,74 +401,140 @@ Bank %: 80%+=5%, 75-80%=3-4%, 70-75%=2-3%, 65-70%=1-2%"""
         return None
 
 
+# ===== PREDICTIONS TRACKING =====
+
+# Store predictions: {match_id: {bet, confidence, odds, timestamp, result}}
+predictions_db = {}
+
+def save_prediction(match_id, home, away, bet_type, confidence, odds=None):
+    """Save a prediction for tracking"""
+    predictions_db[match_id] = {
+        "match": f"{home} vs {away}",
+        "home": home,
+        "away": away,
+        "bet": bet_type,
+        "confidence": confidence,
+        "odds": odds,
+        "timestamp": datetime.now().isoformat(),
+        "result": None,  # Will be filled after match
+        "correct": None  # True/False after checking
+    }
+    logger.info(f"Saved prediction: {home} vs {away} - {bet_type}")
+
+
+def check_prediction_result(prediction, home_score, away_score):
+    """Check if prediction was correct based on final score"""
+    bet = prediction.get("bet", "").lower()
+    
+    # Home win
+    if "п1" in bet or "победа" in bet.lower() and prediction["home"].lower() in bet.lower():
+        return home_score > away_score
+    if "home" in bet or "win" in bet and prediction["home"].lower() in bet.lower():
+        return home_score > away_score
+    
+    # Away win  
+    if "п2" in bet or "победа" in bet.lower() and prediction["away"].lower() in bet.lower():
+        return away_score > home_score
+    
+    # Draw
+    if "ничья" in bet or "draw" in bet or "x" in bet.lower():
+        return home_score == away_score
+    
+    # Over 2.5
+    if "тб 2.5" in bet or "тб2.5" in bet or "over 2.5" in bet or "больше 2.5" in bet:
+        return (home_score + away_score) > 2.5
+    
+    # Under 2.5
+    if "тм 2.5" in bet or "тм2.5" in bet or "under 2.5" in bet or "меньше 2.5" in bet:
+        return (home_score + away_score) < 2.5
+    
+    # BTTS Yes
+    if "обе забьют" in bet or "btts" in bet:
+        return home_score > 0 and away_score > 0
+    
+    # Default - can't determine
+    return None
+
+
+async def check_finished_matches(context: ContextTypes.DEFAULT_TYPE):
+    """Check results of finished matches and update predictions"""
+    
+    if not predictions_db:
+        return
+    
+    logger.info("Checking finished matches...")
+    
+    # Get recent finished matches
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    for match_id, pred in list(predictions_db.items()):
+        if pred.get("result") is not None:
+            continue  # Already checked
+        
+        try:
+            response = requests.get(
+                f"{FOOTBALL_API_URL}/matches/{match_id}",
+                headers=headers, timeout=10
+            )
+            
+            if response.status_code == 200:
+                match = response.json()
+                status = match.get("status", "")
+                
+                if status == "FINISHED":
+                    score = match.get("score", {}).get("fullTime", {})
+                    home_score = score.get("home", 0)
+                    away_score = score.get("away", 0)
+                    
+                    pred["result"] = f"{home_score}:{away_score}"
+                    pred["correct"] = check_prediction_result(pred, home_score, away_score)
+                    
+                    logger.info(f"Result: {pred['match']} {pred['result']} - {'✅' if pred['correct'] else '❌'}")
+                    
+        except Exception as e:
+            logger.error(f"Error checking match {match_id}: {e}")
+
+
+def get_stats_summary():
+    """Get prediction statistics"""
+    if not predictions_db:
+        return None
+    
+    total = len(predictions_db)
+    checked = [p for p in predictions_db.values() if p.get("correct") is not None]
+    correct = [p for p in checked if p.get("correct") == True]
+    wrong = [p for p in checked if p.get("correct") == False]
+    pending = [p for p in predictions_db.values() if p.get("result") is None]
+    
+    win_rate = (len(correct) / len(checked) * 100) if checked else 0
+    
+    # Calculate ROI (simplified)
+    roi = 0
+    for p in checked:
+        odds = p.get("odds") or 1.5  # Default odds if not saved
+        if p.get("correct"):
+            roi += (odds - 1)  # Profit
+        else:
+            roi -= 1  # Loss
+    
+    roi_percent = (roi / len(checked) * 100) if checked else 0
+    
+    return {
+        "total": total,
+        "checked": len(checked),
+        "correct": len(correct),
+        "wrong": len(wrong),
+        "pending": len(pending),
+        "win_rate": win_rate,
+        "roi": roi_percent,
+        "recent": list(predictions_db.values())[-5:]
+    }
+
+
 # ===== LIVE ALERTS =====
 
 # Track recommendations for stats
 recommendations_history = []
-
-async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
-    """Send stats summary every 2 hours to subscribers"""
-    
-    if not live_subscribers:
-        return
-    
-    logger.info("Sending stats summary...")
-    
-    # Get today's matches
-    matches = get_matches(days=1)
-    
-    # Count by status
-    scheduled = 0
-    in_play = 0
-    finished = 0
-    
-    for m in matches:
-        status = m.get("status", "")
-        if status == "SCHEDULED" or status == "TIMED":
-            scheduled += 1
-        elif status == "IN_PLAY" or status == "PAUSED":
-            in_play += 1
-        elif status == "FINISHED":
-            finished += 1
-    
-    # Build stats message
-    now = datetime.now().strftime("%H:%M")
-    
-    text = f"📊 **Статистика ({now})**\n\n"
-    text += f"⚽ **Матчи сегодня:**\n"
-    text += f"   • Ожидается: {scheduled}\n"
-    text += f"   • Сейчас идёт: {in_play}\n"
-    text += f"   • Завершено: {finished}\n\n"
-    
-    # Recent recommendations
-    if recommendations_history:
-        text += f"🎯 **Последние рекомендации:** {len(recommendations_history)}\n"
-        for rec in recommendations_history[-3:]:
-            text += f"   • {rec}\n"
-        text += "\n"
-    
-    # Upcoming interesting matches
-    upcoming = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
-    if upcoming:
-        text += "⏰ **Ближайшие матчи:**\n"
-        for m in upcoming[:3]:
-            h = m.get("homeTeam", {}).get("name", "?")
-            a = m.get("awayTeam", {}).get("name", "?")
-            try:
-                dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
-                time_str = dt.strftime("%H:%M")
-            except:
-                time_str = "?"
-            text += f"   • {time_str} - {h} vs {a}\n"
-    
-    text += "\n💡 /recommend - получить рекомендации"
-    
-    # Send to all subscribers
-    for chat_id in live_subscribers:
-        try:
-            await context.bot.send_message(chat_id=chat_id, text=text)
-        except Exception as e:
-            logger.error(f"Failed to send stats to {chat_id}: {e}")
 
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
@@ -533,6 +599,31 @@ Be brief. Russian."""
                 response = message.content[0].text
                 
                 if "NO_ALERT" not in response and "LIVE ALERT" in response:
+                    # Extract bet info from response for tracking
+                    bet_type = "Unknown"
+                    confidence = 75
+                    
+                    # Try to extract bet type
+                    if "Ставка:" in response:
+                        try:
+                            bet_line = [l for l in response.split("\n") if "Ставка:" in l][0]
+                            bet_type = bet_line.split("Ставка:")[1].split("@")[0].strip()
+                        except:
+                            pass
+                    
+                    # Try to extract confidence
+                    if "Уверенность:" in response:
+                        try:
+                            conf_line = [l for l in response.split("\n") if "Уверенность:" in l][0]
+                            confidence = int(''.join(filter(str.isdigit, conf_line.split(":")[1][:5])))
+                        except:
+                            pass
+                    
+                    # Save prediction for tracking
+                    match_id = match.get("id")
+                    if match_id:
+                        save_prediction(match_id, home, away, bet_type, confidence)
+                    
                     # Track recommendation
                     recommendations_history.append(f"{home} vs {away}")
                     if len(recommendations_history) > 20:
@@ -558,6 +649,9 @@ async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"Sending stats summary to {len(live_subscribers)} subscribers...")
     
+    # First check finished matches to update predictions
+    await check_finished_matches(context)
+    
     matches = get_matches(days=1)
     
     if not matches:
@@ -568,6 +662,9 @@ async def send_stats_summary(context: ContextTypes.DEFAULT_TYPE):
     for m in matches:
         league = m.get("competition", {}).get("name", "Other")
         by_league[league] = by_league.get(league, 0) + 1
+    
+    # Get prediction stats
+    pred_stats = get_stats_summary()
     
     # Get top picks
     top_picks = ""
@@ -611,11 +708,23 @@ Be very brief. Russian."""
     for league, count in list(by_league.items())[:5]:
         summary += f"• {league}: {count}\n"
     
+    # Add prediction tracking stats
+    if pred_stats and pred_stats["total"] > 0:
+        summary += f"\n📈 **МОИ РЕЗУЛЬТАТЫ:**\n"
+        if pred_stats["checked"] > 0:
+            emoji = "🔥" if pred_stats["win_rate"] >= 70 else "✅" if pred_stats["win_rate"] >= 50 else "📉"
+            summary += f"{emoji} Точность: {pred_stats['correct']}/{pred_stats['checked']} ({pred_stats['win_rate']:.0f}%)\n"
+            roi_sign = "+" if pred_stats["roi"] > 0 else ""
+            summary += f"💰 ROI: {roi_sign}{pred_stats['roi']:.1f}%\n"
+        if pred_stats["pending"] > 0:
+            summary += f"⏳ Ожидают: {pred_stats['pending']}\n"
+    
     summary += f"""
 🎯 **Топ ставки (70%+):**
 {top_picks}
 
-💡 Напиши название команды для полного анализа!
+💡 /stats - полная статистика
+💡 Напиши название команды для анализа!
 """
     
     # Send to subscribers
@@ -645,6 +754,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /matches - все матчи
 /leagues - по лигам
 /live - включить live-алерты
+/stats - моя статистика прогнозов
 /help - помощь
 
 🎯 **Анализирую:**
@@ -652,6 +762,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Форы, Тоталы
 • Обе забьют
 • % от банка
+
+📈 **Отслеживаю результаты:**
+• Проверяю угадал или нет
+• Считаю точность и ROI
+• /stats покажет статистику
 
 ⚠️ Ставки - это риск. Играйте ответственно.
 """
@@ -704,6 +819,48 @@ async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "который скоро начнётся.\n\n"
             "Напиши /live чтобы выключить."
         )
+
+
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show prediction statistics"""
+    
+    # First check finished matches
+    await check_finished_matches(context)
+    
+    stats = get_stats_summary()
+    
+    if not stats or stats["total"] == 0:
+        await update.message.reply_text(
+            "📊 **Статистика пока пуста**\n\n"
+            "Я начну отслеживать прогнозы после первых рекомендаций.\n"
+            "Напиши /recommend чтобы получить прогнозы!"
+        )
+        return
+    
+    text = "📈 **МОЯ СТАТИСТИКА:**\n\n"
+    
+    if stats["checked"] > 0:
+        emoji = "🔥" if stats["win_rate"] >= 70 else "✅" if stats["win_rate"] >= 50 else "📉"
+        text += f"{emoji} **Точность:** {stats['correct']}/{stats['checked']} ({stats['win_rate']:.1f}%)\n"
+        
+        roi_emoji = "💰" if stats["roi"] > 0 else "📉"
+        text += f"{roi_emoji} **ROI:** {'+' if stats['roi'] > 0 else ''}{stats['roi']:.1f}%\n\n"
+    
+    if stats["pending"] > 0:
+        text += f"⏳ **Ожидают результата:** {stats['pending']}\n\n"
+    
+    if stats["recent"]:
+        text += "📋 **Последние прогнозы:**\n"
+        for p in stats["recent"][-5:]:
+            if p.get("result"):
+                emoji = "✅" if p.get("correct") else "❌"
+                text += f"{emoji} {p['match']} {p['result']} - {p['bet']}\n"
+            else:
+                text += f"⏳ {p['match']} - {p['bet']}\n"
+    
+    text += f"\n📊 Всего прогнозов: {stats['total']}"
+    
+    await update.message.reply_text(text)
 
 
 async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -909,6 +1066,7 @@ def main():
     app.add_handler(CommandHandler("leagues", leagues_cmd))
     app.add_handler(CommandHandler("recommend", recommend_cmd))
     app.add_handler(CommandHandler("live", live_cmd))
+    app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CallbackQueryHandler(league_cb, pattern="^league_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
