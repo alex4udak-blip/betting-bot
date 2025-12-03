@@ -240,7 +240,7 @@ def check_bet_result(bet_type, home_score, away_score):
     return None
 
 def get_user_stats(user_id):
-    """Get user's prediction statistics"""
+    """Get user's prediction statistics with recent predictions"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
@@ -253,14 +253,35 @@ def get_user_stats(user_id):
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct IS NOT NULL", (user_id,))
     checked = c.fetchone()[0]
     
+    # Get recent predictions
+    c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at 
+                 FROM predictions 
+                 WHERE user_id = ? 
+                 ORDER BY predicted_at DESC 
+                 LIMIT 10""", (user_id,))
+    recent = c.fetchall()
+    
     conn.close()
+    
+    predictions = []
+    for r in recent:
+        predictions.append({
+            "home": r[0],
+            "away": r[1],
+            "bet_type": r[2],
+            "confidence": r[3],
+            "result": r[4],
+            "is_correct": r[5],
+            "date": r[6]
+        })
     
     return {
         "total": total,
         "correct": correct,
         "checked": checked,
         "pending": total - checked,
-        "win_rate": (correct / checked * 100) if checked > 0 else 0
+        "win_rate": (correct / checked * 100) if checked > 0 else 0,
+        "predictions": predictions
     }
 
 
@@ -1098,14 +1119,16 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user statistics"""
+    """Show user statistics with prediction history"""
     user_id = update.effective_user.id
     stats = get_user_stats(user_id)
     
     if stats["total"] == 0:
         text = """📈 **МОЯ СТАТИСТИКА**
 
-Пока нет данных. Статистика начнёт собираться когда ты будешь получать прогнозы и матчи завершатся."""
+Пока нет данных. Статистика начнёт собираться когда ты будешь получать прогнозы.
+
+💡 Напиши название команды (например "Liverpool") чтобы получить прогноз."""
     else:
         win_emoji = "🔥" if stats["win_rate"] >= 70 else "✅" if stats["win_rate"] >= 50 else "📉"
         
@@ -1116,9 +1139,33 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 **Всего прогнозов:** {stats['total']}
 ✅ **Проверено:** {stats['checked']}
 ⏳ **Ожидают результата:** {stats['pending']}
+
+{'─'*25}
+📋 **Последние прогнозы:**
 """
+        # Add recent predictions
+        for p in stats.get("predictions", [])[:7]:
+            if p["is_correct"] is None:
+                emoji = "⏳"
+                result_text = "ожидаем"
+            elif p["is_correct"]:
+                emoji = "✅"
+                result_text = p["result"] or "выиграл"
+            else:
+                emoji = "❌"
+                result_text = p["result"] or "проиграл"
+            
+            # Shorten team names
+            home_short = p["home"][:10] + ".." if len(p["home"]) > 12 else p["home"]
+            away_short = p["away"][:10] + ".." if len(p["away"]) > 12 else p["away"]
+            
+            text += f"{emoji} {home_short} - {away_short}\n"
+            text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
     
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]]
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обновить", callback_data="cmd_stats")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+    ]
     
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -1332,8 +1379,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]]
             await query.edit_message_text(
                 "🔔 **Live-алерты включены!**\n\n"
-                "Я буду проверять матчи каждые 5 минут.\n"
-                "Когда найду хорошую ставку (75%+) за 1-3 часа до матча — пришлю алерт!\n\n"
+                "Каждые 10 минут проверяю матчи.\n"
+                "Если найду ставку с 75%+ уверенностью за 1-3 часа до начала — пришлю алерт!\n\n"
+                "📨 Пример алерта:\n"
+                "```\n"
+                "🚨 LIVE ALERT!\n"
+                "⚽ Arsenal vs Chelsea\n"
+                "⚡ СТАВКА: Победа хозяев\n"
+                "📊 Уверенность: 78%\n"
+                "```\n\n"
                 "Напиши /live чтобы выключить.",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
@@ -1457,6 +1511,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_favorite_league(user_id, code)
         await query.answer(f"✅ {COMPETITIONS.get(code, code)} добавлена в избранное!")
         await favorites_cmd(update, context)
+    
+    elif data.startswith("fav_team_"):
+        team_name = data.replace("fav_team_", "")
+        add_favorite_team(user_id, team_name)
+        await query.answer(f"✅ {team_name} добавлена в избранное!")
+        # Don't edit message, just show notification
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
