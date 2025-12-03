@@ -227,32 +227,44 @@ Message: "{user_message}"
 Return ONLY this JSON format:
 {{"intent": "X", "teams": ["Y"], "league": "Z"}}
 
-INTENT RULES:
-- "team_search" = asks about specific team OR "who wins X" OR mentions any team name
-- "recommend" = wants betting tips/recommendations
-- "matches_list" = wants to see matches
-- "next_match" = asks for closest/next/nearest match
-- "today" = asks about today's matches
-- "tomorrow" = asks about tomorrow's matches
-- "settings" = wants to change settings/preferences
-- "favorites" = asks about favorite teams/leagues
-- "stats" = asks about statistics/results
+INTENT RULES (VERY IMPORTANT):
+- "team_search" = mentions ANY specific team name OR asks about a match
+  Examples: "Liverpool", "Арсенал", "что думаешь про Баварию", "Arsenal vs Brentford", "кто выиграет Реал"
+- "recommend" = asks for general tips WITHOUT any team names
+  Examples: "лучшие ставки", "что посоветуешь", "топ ставки сегодня"
+- "matches_list" = wants to see list of matches (no specific team)
+- "next_match" = asks for closest/next match
+- "today" = asks about today's matches generally
+- "tomorrow" = asks about tomorrow's matches generally
+- "settings" = wants to change settings
+- "favorites" = asks about favorites
+- "stats" = asks about statistics
 - "greeting" = just hello/hi
 - "help" = asks how to use
 
-LEAGUE DETECTION (put in "league" field):
+CRITICAL: If user mentions ANY team name (even in a question like "what about Arsenal?") → intent = "team_search"
+
+LEAGUE DETECTION:
 - "немецкая лига" / "Bundesliga" / "бундеслига" = "BL1"
 - "английская лига" / "Premier League" / "АПЛ" = "PL"  
-- "испанская лига" / "La Liga" / "Ла Лига" = "PD"
-- "итальянская лига" / "Serie A" / "Серия А" = "SA"
-- "французская лига" / "Ligue 1" / "Лига 1" = "FL1"
+- "испанская лига" / "La Liga" = "PD"
+- "итальянская лига" / "Serie A" = "SA"
+- "французская лига" / "Ligue 1" = "FL1"
 - "Лига чемпионов" / "Champions League" = "CL"
-- If no specific league mentioned = null
+- If no league = null
 
 TEAM TRANSLATIONS:
-Бавария=Bayern Munich, Арсенал=Arsenal, Ливерпуль=Liverpool, Реал=Real Madrid, Барселона=Barcelona, Дортмунд=Borussia Dortmund, ПСЖ=PSG, МЮ=Manchester United, Челси=Chelsea, Ман Сити=Manchester City
+Бавария=Bayern Munich, Арсенал=Arsenal, Ливерпуль=Liverpool, Реал=Real Madrid, Барселона=Barcelona, Дортмунд=Borussia Dortmund, ПСЖ=PSG, МЮ=Manchester United, Челси=Chelsea, Ман Сити=Manchester City, Тоттенхэм=Tottenham, Брайтон=Brighton, Астон Вилла=Aston Villa, Брентфорд=Brentford, Вест Хэм=West Ham
 
-Return ONLY JSON, no other text."""
+EXAMPLES:
+- "Liverpool" → {{"intent": "team_search", "teams": ["Liverpool"], "league": null}}
+- "Арсенал против Брентфорда" → {{"intent": "team_search", "teams": ["Arsenal", "Brentford"], "league": null}}
+- "что думаешь про Баварию" → {{"intent": "team_search", "teams": ["Bayern Munich"], "league": null}}
+- "Brighton vs Aston Villa analysis" → {{"intent": "team_search", "teams": ["Brighton", "Aston Villa"], "league": null}}
+- "лучшие ставки" → {{"intent": "recommend", "teams": [], "league": null}}
+- "топ ставки на сегодня" → {{"intent": "recommend", "teams": [], "league": null}}
+
+Return ONLY JSON."""
 
     try:
         message = claude_client.messages.create(
@@ -265,7 +277,13 @@ Return ONLY JSON, no other text."""
         if "```" in text:
             text = text.split("```")[1].replace("json", "").strip()
         
-        return json.loads(text)
+        result = json.loads(text)
+        
+        # SAFETY CHECK: If teams are mentioned, force team_search
+        if result.get("teams") and len(result.get("teams", [])) > 0:
+            result["intent"] = "team_search"
+        
+        return result
         
     except Exception as e:
         logger.error(f"Parse error: {e}")
@@ -496,24 +514,34 @@ def get_odds(home_team, away_team):
 
 
 def find_match(team_names, matches):
-    """Find match by team names"""
-    if not matches:
+    """Find match by team names - flexible matching"""
+    if not matches or not team_names:
         return None
     
     for team in team_names:
-        team_lower = team.lower()
+        if not team:
+            continue
+            
+        team_lower = team.lower().strip()
+        
+        # Skip very short queries
+        if len(team_lower) < 3:
+            continue
+        
         for m in matches:
             home = m.get("homeTeam", {}).get("name", "").lower()
             away = m.get("awayTeam", {}).get("name", "").lower()
-            
-            if team_lower in home or team_lower in away:
-                return m
-            
-            # Check short names
             home_short = m.get("homeTeam", {}).get("shortName", "").lower()
             away_short = m.get("awayTeam", {}).get("shortName", "").lower()
+            home_tla = m.get("homeTeam", {}).get("tla", "").lower()
+            away_tla = m.get("awayTeam", {}).get("tla", "").lower()
             
-            if team_lower in home_short or team_lower in away_short:
+            # Check all name variants
+            if (team_lower in home or team_lower in away or
+                team_lower in home_short or team_lower in away_short or
+                team_lower == home_tla or team_lower == away_tla or
+                home in team_lower or away in team_lower):
+                logger.info(f"Found match: {home} vs {away} for query '{team}'")
                 return m
     
     return None
@@ -1472,14 +1500,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Team search - detailed analysis
     await status.edit_text("🔍 Ищу матч...")
     
+    logger.info(f"Team search for: {teams}")
+    
     matches = get_matches(days=14)
+    logger.info(f"Got {len(matches) if matches else 0} matches to search")
+    
     match = None
     
     if teams:
         match = find_match(teams, matches)
+        logger.info(f"find_match with teams result: {match is not None}")
     
     if not match:
         match = find_match([user_text], matches)
+        logger.info(f"find_match with user_text result: {match is not None}")
     
     if not match:
         text = f"😕 Не нашёл матч: {', '.join(teams) if teams else user_text}\n\n"
