@@ -792,10 +792,11 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")],
         [InlineKeyboardButton("📆 Завтра", callback_data="cmd_tomorrow"),
          InlineKeyboardButton("🏆 Лиги", callback_data="cmd_leagues")],
-        [InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings"),
-         InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites")],
-        [InlineKeyboardButton("📈 Моя статистика", callback_data="cmd_stats"),
-         InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
+        [InlineKeyboardButton("🔔 Live-алерты", callback_data="cmd_live"),
+         InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings")],
+        [InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites"),
+         InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats")],
+        [InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
     ]
     
     text = f"""⚽ **BetAnalyzer AI** - Умные прогнозы
@@ -810,8 +811,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 /recommend - Лучшие ставки
 📅 /today - Матчи сегодня
 📆 /tomorrow - Матчи завтра
+🔔 /live - Включить алерты за 1-3ч до матча
 ⚙️ /settings - Настройки
-⭐ /favorites - Избранное
 
 Или просто напиши **название команды**!"""
     
@@ -1037,6 +1038,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /recommend - Лучшие ставки
 • /today - Матчи сегодня
 • /tomorrow - Матчи завтра
+• /live - 🔔 Включить алерты за 1-3ч до матча
 • /settings - Настройки фильтров
 • /favorites - Избранные команды/лиги
 • /stats - Моя статистика
@@ -1045,6 +1047,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 1. Напиши название команды (напр. "Ливерпуль")
 2. Получи детальный анализ с формой, H2H и рекомендациями
 3. Настрой фильтры под свой стиль игры
+4. Включи /live для автоматических алертов
+
+**Live-алерты:**
+Каждые 5 минут бот проверяет матчи на ближайшие 1-3 часа.
+Если находит ставку с 75%+ уверенностью — присылает алерт!
 
 **Типы ставок:**
 • П1/Х/П2 - Исход матча
@@ -1081,10 +1088,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")],
             [InlineKeyboardButton("📆 Завтра", callback_data="cmd_tomorrow"),
              InlineKeyboardButton("🏆 Лиги", callback_data="cmd_leagues")],
-            [InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings"),
-             InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites")],
-            [InlineKeyboardButton("📈 Моя статистика", callback_data="cmd_stats"),
-             InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
+            [InlineKeyboardButton("🔔 Live-алерты", callback_data="cmd_live"),
+             InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings")],
+            [InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites"),
+             InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats")],
+            [InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
         ]
         await query.edit_message_text("⚽ **BetAnalyzer AI** - Выбери действие:", 
                                        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -1190,6 +1198,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "cmd_help":
         await help_cmd(update, context)
+    
+    elif data == "cmd_live":
+        user_id = query.from_user.id
+        if user_id in live_subscribers:
+            live_subscribers.remove(user_id)
+            await query.edit_message_text(
+                "🔕 **Live-алерты выключены**\n\n"
+                "Напиши /live чтобы включить снова.",
+                parse_mode="Markdown"
+            )
+        else:
+            live_subscribers.add(user_id)
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]]
+            await query.edit_message_text(
+                "🔔 **Live-алерты включены!**\n\n"
+                "Я буду проверять матчи каждые 5 минут.\n"
+                "Когда найду хорошую ставку (75%+) за 1-3 часа до матча — пришлю алерт!\n\n"
+                "Напиши /live чтобы выключить.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
     
     # League selection
     elif data.startswith("league_"):
@@ -1491,6 +1520,186 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Error: {context.error}")
 
 
+# ===== LIVE ALERTS SYSTEM =====
+
+async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle live alerts subscription"""
+    user_id = update.effective_user.id
+    
+    if user_id in live_subscribers:
+        live_subscribers.remove(user_id)
+        await update.message.reply_text(
+            "🔕 **Live-алерты выключены**\n\n"
+            "Ты больше не будешь получать уведомления о матчах.\n"
+            "Напиши /live чтобы включить снова.",
+            parse_mode="Markdown"
+        )
+    else:
+        live_subscribers.add(user_id)
+        await update.message.reply_text(
+            "🔔 **Live-алерты включены!**\n\n"
+            "Я буду проверять матчи каждые 5 минут.\n"
+            "Когда найду хорошую ставку (75%+) за 1-3 часа до матча — пришлю алерт!\n\n"
+            "📊 Типы алертов:\n"
+            "• Победа фаворита\n"
+            "• Тоталы с высокой вероятностью\n"
+            "• Обе забьют\n\n"
+            "Напиши /live чтобы выключить.",
+            parse_mode="Markdown"
+        )
+
+
+async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
+    """Check upcoming matches and send alerts - runs every 5 minutes"""
+    
+    if not live_subscribers:
+        return
+    
+    logger.info(f"Checking live matches for {len(live_subscribers)} subscribers...")
+    
+    # Get matches in next 3 hours
+    matches = get_matches(days=1)
+    
+    if not matches:
+        return
+    
+    now = datetime.now()
+    upcoming = []
+    
+    for m in matches:
+        try:
+            match_time = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00")).replace(tzinfo=None)
+            hours_until = (match_time - now).total_seconds() / 3600
+            
+            if 0.5 < hours_until < 3:  # Between 30 min and 3 hours
+                upcoming.append(m)
+        except:
+            continue
+    
+    if not upcoming:
+        logger.info("No upcoming matches in 0.5-3h window")
+        return
+    
+    logger.info(f"Found {len(upcoming)} upcoming matches")
+    
+    # Analyze each match
+    for match in upcoming[:3]:  # Limit to 3 matches per check
+        home = match.get("homeTeam", {}).get("name", "?")
+        away = match.get("awayTeam", {}).get("name", "?")
+        comp = match.get("competition", {}).get("name", "?")
+        home_id = match.get("homeTeam", {}).get("id")
+        away_id = match.get("awayTeam", {}).get("id")
+        
+        # Get form data
+        home_form = get_team_form(home_id) if home_id else None
+        away_form = get_team_form(away_id) if away_id else None
+        odds = get_odds(home, away)
+        
+        # Build context for Claude
+        form_text = ""
+        if home_form:
+            form_text += f"{home}: {home_form['form']} ({home_form['wins']}W-{home_form['draws']}D-{home_form['losses']}L)\n"
+        if away_form:
+            form_text += f"{away}: {away_form['form']} ({away_form['wins']}W-{away_form['draws']}D-{away_form['losses']}L)"
+        
+        odds_text = ""
+        if odds:
+            for k, v in odds.items():
+                if not k.startswith("Over") and not k.startswith("Under"):
+                    odds_text += f"{k}: {v}, "
+        
+        prompt = f"""You are a betting expert. Quick analysis for live alert:
+
+Match: {home} vs {away}
+Competition: {comp}
+Form: {form_text}
+Odds: {odds_text}
+
+If you find a bet with 75%+ confidence, respond with:
+
+🚨 LIVE ALERT!
+
+⚽ {home} vs {away}
+🏆 {comp}
+⏰ Через 1-3 часа
+
+⚡ СТАВКА: [bet type]
+📊 Уверенность: X%
+💰 Коэфф: X.XX
+🎯 Банк: X%
+📝 Почему: [1 sentence based on form]
+
+If NO good bet (all <75%), respond exactly: NO_ALERT
+
+Be selective - only alert for really good opportunities!"""
+
+        try:
+            message = claude_client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response = message.content[0].text
+            
+            if "NO_ALERT" not in response and "LIVE ALERT" in response:
+                logger.info(f"Sending alert for {home} vs {away}")
+                
+                for user_id in live_subscribers:
+                    try:
+                        keyboard = [[InlineKeyboardButton("📊 Подробный анализ", callback_data=f"analyze_{match.get('id', 0)}")]]
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=response,
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send alert to {user_id}: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Alert analysis error: {e}")
+
+
+async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
+    """Send daily digest at 10:00 - runs every 2 hours"""
+    
+    if not live_subscribers:
+        return
+    
+    # Only send once a day (around 10:00)
+    current_hour = datetime.now().hour
+    if current_hour != 10:
+        return
+    
+    logger.info("Sending daily digest...")
+    
+    matches = get_matches(date_filter="today")
+    
+    if not matches:
+        return
+    
+    # Get top recommendations
+    recs = get_recommendations_enhanced(matches, "daily digest")
+    
+    if not recs:
+        return
+    
+    text = f"☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**\n\n{recs}"
+    
+    for user_id in live_subscribers:
+        try:
+            keyboard = [[InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]]
+            await context.bot.send_message(
+                chat_id=user_id, 
+                text=text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send digest to {user_id}: {e}")
+
+
 # ===== MAIN =====
 
 def main():
@@ -1520,6 +1729,7 @@ def main():
     app.add_handler(CommandHandler("settings", settings_cmd))
     app.add_handler(CommandHandler("favorites", favorites_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("live", live_cmd))
     
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -1530,11 +1740,17 @@ def main():
     # Error handler
     app.add_error_handler(error_handler)
     
+    # Job Queue - Live Alerts
+    job_queue = app.job_queue
+    job_queue.run_repeating(check_live_matches, interval=300, first=60)  # Every 5 min
+    job_queue.run_repeating(send_daily_digest, interval=7200, first=120)  # Every 2 hours
+    
     print("\n✅ Bot v9 Enhanced running!")
     print("   📊 Enhanced analysis with form + H2H + home/away")
     print("   💾 SQLite database for user settings")
     print("   ⚙️ Personalization (odds, risk level)")
     print("   🎛️ Inline buttons for better UX")
+    print("   🔔 Live alerts every 5 min (use /live)")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
