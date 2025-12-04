@@ -6,7 +6,8 @@ import sqlite3
 import asyncio
 import time
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
 import anthropic
@@ -172,6 +173,61 @@ def detect_language(user):
     return "ru"
 
 
+# ===== TIMEZONES =====
+
+TIMEZONES = {
+    "msk": ("Europe/Moscow", "🇷🇺 Москва (MSK)"),
+    "kiev": ("Europe/Kiev", "🇺🇦 Киев (EET)"),
+    "london": ("Europe/London", "🇬🇧 Лондон (GMT)"),
+    "paris": ("Europe/Paris", "🇫🇷 Париж (CET)"),
+    "istanbul": ("Europe/Istanbul", "🇹🇷 Стамбул (TRT)"),
+    "dubai": ("Asia/Dubai", "🇦🇪 Дубай (GST)"),
+    "mumbai": ("Asia/Kolkata", "🇮🇳 Мумбаи (IST)"),
+    "jakarta": ("Asia/Jakarta", "🇮🇩 Джакарта (WIB)"),
+    "manila": ("Asia/Manila", "🇵🇭 Манила (PHT)"),
+    "sao_paulo": ("America/Sao_Paulo", "🇧🇷 Сан-Паулу (BRT)"),
+    "lagos": ("Africa/Lagos", "🇳🇬 Лагос (WAT)"),
+    "new_york": ("America/New_York", "🇺🇸 Нью-Йорк (EST)"),
+}
+
+def convert_utc_to_user_tz(utc_time_str, user_tz="Europe/Moscow"):
+    """Convert UTC time string to user's timezone"""
+    try:
+        # Parse UTC time
+        if utc_time_str.endswith("Z"):
+            utc_time_str = utc_time_str[:-1] + "+00:00"
+        
+        utc_dt = datetime.fromisoformat(utc_time_str)
+        
+        # If naive datetime, assume UTC
+        if utc_dt.tzinfo is None:
+            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        
+        # Convert to user timezone
+        user_zone = ZoneInfo(user_tz)
+        local_dt = utc_dt.astimezone(user_zone)
+        
+        return local_dt.strftime("%H:%M")
+    except Exception as e:
+        logger.error(f"Timezone conversion error: {e}")
+        # Fallback to UTC
+        try:
+            dt = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+            return dt.strftime("%H:%M") + " UTC"
+        except:
+            return "?"
+
+def get_tz_offset_str(user_tz="Europe/Moscow"):
+    """Get timezone offset string like +3, -5, etc."""
+    try:
+        now = datetime.now(ZoneInfo(user_tz))
+        offset = now.utcoffset()
+        hours = int(offset.total_seconds() // 3600)
+        return f"UTC{'+' if hours >= 0 else ''}{hours}"
+    except:
+        return "UTC"
+
+
 # ===== DATABASE =====
 
 DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db"
@@ -192,7 +248,8 @@ def init_db():
         language TEXT DEFAULT 'ru',
         is_premium INTEGER DEFAULT 0,
         daily_requests INTEGER DEFAULT 0,
-        last_request_date TEXT
+        last_request_date TEXT,
+        timezone TEXT DEFAULT 'Europe/Moscow'
     )''')
     
     # Favorite teams
@@ -246,6 +303,10 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN is_premium INTEGER DEFAULT 0")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'Europe/Moscow'")
+    except:
+        pass
     
     conn.commit()
     conn.close()
@@ -269,7 +330,8 @@ def get_user(user_id):
             "language": row[6] if len(row) > 6 else "ru",
             "is_premium": row[7] if len(row) > 7 else 0,
             "daily_requests": row[8] if len(row) > 8 else 0,
-            "last_request_date": row[9] if len(row) > 9 else None
+            "last_request_date": row[9] if len(row) > 9 else None,
+            "timezone": row[10] if len(row) > 10 else "Europe/Moscow"
         }
     return None
 
@@ -288,7 +350,7 @@ def update_user_settings(user_id, **kwargs):
     c = conn.cursor()
     
     for key, value in kwargs.items():
-        if key in ['min_odds', 'max_odds', 'risk_level', 'language', 'is_premium', 'daily_requests', 'last_request_date']:
+        if key in ['min_odds', 'max_odds', 'risk_level', 'language', 'is_premium', 'daily_requests', 'last_request_date', 'timezone']:
             c.execute(f"UPDATE users SET {key} = ? WHERE user_id = ?", (value, user_id))
     
     conn.commit()
@@ -298,6 +360,7 @@ def check_daily_limit(user_id):
     """Check if user has reached daily limit. Returns (can_use, remaining)"""
     user = get_user(user_id)
     if not user:
+        logger.info(f"User {user_id} not found, allowing request")
         return True, FREE_DAILY_LIMIT
     
     # Premium users have no limit
@@ -308,15 +371,21 @@ def check_daily_limit(user_id):
     last_date = user.get("last_request_date")
     daily_requests = user.get("daily_requests", 0)
     
+    logger.info(f"User {user_id}: daily_requests={daily_requests}, last_date={last_date}, today={today}, limit={FREE_DAILY_LIMIT}")
+    
     # Reset counter if new day
     if last_date != today:
         update_user_settings(user_id, daily_requests=0, last_request_date=today)
+        logger.info(f"User {user_id}: New day, reset counter")
         return True, FREE_DAILY_LIMIT
     
     if daily_requests >= FREE_DAILY_LIMIT:
+        logger.info(f"User {user_id}: LIMIT REACHED ({daily_requests} >= {FREE_DAILY_LIMIT})")
         return False, 0
     
-    return True, FREE_DAILY_LIMIT - daily_requests
+    remaining = FREE_DAILY_LIMIT - daily_requests
+    logger.info(f"User {user_id}: OK, remaining={remaining}")
+    return True, remaining
 
 def increment_daily_usage(user_id):
     """Increment daily usage counter"""
@@ -329,9 +398,12 @@ def increment_daily_usage(user_id):
     
     if last_date != today:
         update_user_settings(user_id, daily_requests=1, last_request_date=today)
+        logger.info(f"User {user_id}: First request today, set to 1")
     else:
         current = user.get("daily_requests", 0)
-        update_user_settings(user_id, daily_requests=current + 1)
+        new_count = current + 1
+        update_user_settings(user_id, daily_requests=new_count)
+        logger.info(f"User {user_id}: Incremented to {new_count}")
 
 def add_favorite_team(user_id, team_name):
     """Add favorite team"""
@@ -440,6 +512,37 @@ def check_bet_result(bet_type, home_score, away_score):
     """Check if bet was correct based on score"""
     total_goals = home_score + away_score
     bet_lower = bet_type.lower() if bet_type else ""
+    bet_upper = bet_type.upper() if bet_type else ""
+    
+    # Handicaps (Фора)
+    if "фора" in bet_lower or "handicap" in bet_lower:
+        # Parse handicap value
+        handicap_match = re.search(r'\(?([-+]?\d+\.?\d*)\)?', bet_type)
+        if handicap_match:
+            handicap = float(handicap_match.group(1))
+            
+            # Home team handicap (Фора1)
+            if "1" in bet_type or "home" in bet_lower:
+                adjusted_home = home_score + handicap
+                if adjusted_home > away_score:
+                    return True
+                elif adjusted_home < away_score:
+                    return False
+                else:
+                    return None  # Push/refund
+            
+            # Away team handicap (Фора2)
+            elif "2" in bet_type or "away" in bet_lower:
+                adjusted_away = away_score + handicap
+                if adjusted_away > home_score:
+                    return True
+                elif adjusted_away < home_score:
+                    return False
+                else:
+                    return None
+        
+        # Default: assume home -1 handicap
+        return (home_score - 1) > away_score
     
     # Home win
     if bet_type == "П1" or "победа хозя" in bet_lower or "home win" in bet_lower or bet_type == "1":
@@ -453,24 +556,28 @@ def check_bet_result(bet_type, home_score, away_score):
     elif bet_type == "Х" or "ничья" in bet_lower or "draw" in bet_lower:
         return home_score == away_score
     
+    # 12 (not draw)
+    elif bet_type == "12" or "не ничья" in bet_lower:
+        return home_score != away_score
+    
     # Over 2.5
-    elif "ТБ" in bet_type or "тотал больше" in bet_lower or "over" in bet_lower or "больше 2" in bet_lower:
+    elif "ТБ" in bet_upper or "тотал больше" in bet_lower or "over" in bet_lower or "больше 2" in bet_lower:
         return total_goals > 2.5
     
     # Under 2.5
-    elif "ТМ" in bet_type or "тотал меньше" in bet_lower or "under" in bet_lower or "меньше 2" in bet_lower:
+    elif "ТМ" in bet_upper or "тотал меньше" in bet_lower or "under" in bet_lower or "меньше 2" in bet_lower:
         return total_goals < 2.5
     
     # BTTS
-    elif "BTTS" in bet_type.upper() or "обе забьют" in bet_lower or "both teams" in bet_lower:
+    elif "BTTS" in bet_upper or "обе забьют" in bet_lower or "both teams" in bet_lower:
         return home_score > 0 and away_score > 0
     
     # Double chance 1X
-    elif "1X" in bet_type or "двойной шанс 1" in bet_lower:
+    elif "1X" in bet_upper or "двойной шанс 1" in bet_lower:
         return home_score >= away_score
     
     # Double chance X2
-    elif "X2" in bet_type or "двойной шанс 2" in bet_lower:
+    elif "X2" in bet_upper or "двойной шанс 2" in bet_lower:
         return away_score >= home_score
     
     # If we can't determine bet type
@@ -490,25 +597,38 @@ def get_user_stats(user_id):
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct = 1", (user_id,))
     correct = c.fetchone()[0]
     
+    c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct = 0", (user_id,))
+    incorrect = c.fetchone()[0]
+    
+    c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct = 2", (user_id,))
+    push = c.fetchone()[0]
+    
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct IS NOT NULL", (user_id,))
     checked = c.fetchone()[0]
     
-    # Stats by category
+    # Stats by category (excluding push from win rate calculation)
     categories = {}
     for cat in ["totals_over", "totals_under", "outcomes_home", "outcomes_away", "outcomes_draw", 
                 "btts", "double_chance", "handicap", "other"]:
-        c.execute("""SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+        c.execute("""SELECT 
+                        COUNT(*),
+                        SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN is_correct = 2 THEN 1 ELSE 0 END)
                      FROM predictions 
                      WHERE user_id = ? AND bet_category = ? AND is_correct IS NOT NULL""", 
                   (user_id, cat))
         row = c.fetchone()
         cat_total = row[0] or 0
         cat_correct = row[1] or 0
-        if cat_total > 0:
+        cat_push = row[2] or 0
+        # Calculate rate excluding pushes
+        cat_decided = cat_total - cat_push
+        if cat_decided > 0:
             categories[cat] = {
                 "total": cat_total,
                 "correct": cat_correct,
-                "rate": round(cat_correct / cat_total * 100, 1)
+                "push": cat_push,
+                "rate": round(cat_correct / cat_decided * 100, 1)
             }
     
     # Recent predictions
@@ -533,12 +653,18 @@ def get_user_stats(user_id):
             "date": r[6]
         })
     
+    # Win rate excluding pushes
+    decided = correct + incorrect
+    win_rate = (correct / decided * 100) if decided > 0 else 0
+    
     return {
         "total": total,
         "correct": correct,
+        "incorrect": incorrect,
+        "push": push,
         "checked": checked,
         "pending": total - checked,
-        "win_rate": (correct / checked * 100) if checked > 0 else 0,
+        "win_rate": win_rate,
         "categories": categories,
         "predictions": predictions
     }
@@ -611,7 +737,7 @@ Return ONLY valid JSON, no explanation."""
 # ===== FOOTBALL DATA API =====
 
 def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
-    """Get matches from Football Data API"""
+    """Get matches from Football Data API - only upcoming matches"""
     if not FOOTBALL_API_KEY:
         return []
     
@@ -635,7 +761,8 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
         date_from = datetime.now().strftime("%Y-%m-%d")
         date_to = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
     
-    params = {"dateFrom": date_from, "dateTo": date_to}
+    # Only get SCHEDULED matches (not finished)
+    params = {"dateFrom": date_from, "dateTo": date_to, "status": "SCHEDULED"}
     
     if competition:
         try:
@@ -643,6 +770,8 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
             r = requests.get(url, headers=headers, params=params, timeout=10)
             if r.status_code == 200:
                 matches = r.json().get("matches", [])
+                # Filter only future matches
+                matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
                 logger.info(f"Got {len(matches)} from {competition}")
                 return matches
             elif r.status_code == 429:
@@ -650,7 +779,8 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
                 time.sleep(6)
                 r = requests.get(url, headers=headers, params=params, timeout=10)
                 if r.status_code == 200:
-                    return r.json().get("matches", [])
+                    matches = r.json().get("matches", [])
+                    return [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
             else:
                 logger.error(f"API error {r.status_code} for {competition}")
         except Exception as e:
@@ -668,6 +798,8 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
             
             if r.status_code == 200:
                 matches = r.json().get("matches", [])
+                # Filter only future matches
+                matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
                 all_matches.extend(matches)
                 logger.info(f"Got {len(matches)} from {code}")
             elif r.status_code == 429:
@@ -676,6 +808,7 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
                 r = requests.get(url, headers=headers, params=params, timeout=10)
                 if r.status_code == 200:
                     matches = r.json().get("matches", [])
+                    matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
                     all_matches.extend(matches)
                     logger.info(f"Retry got {len(matches)} from {code}")
             else:
@@ -686,7 +819,7 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
         except Exception as e:
             logger.error(f"Error: {e}")
     
-    logger.info(f"Total: {len(all_matches)} matches")
+    logger.info(f"Total: {len(all_matches)} upcoming matches")
     
     # Update cache
     if not competition and not date_filter:
@@ -1392,6 +1525,7 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show today's matches"""
     user = get_user(update.effective_user.id)
     lang = user.get("language", "ru") if user else "ru"
+    user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
     
     status = await update.message.reply_text(get_text("analyzing", lang))
     
@@ -1408,18 +1542,15 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             by_comp[comp] = []
         by_comp[comp].append(m)
     
-    text = "📅 **МАТЧИ СЕГОДНЯ:**\n\n" if lang == "ru" else "📅 **TODAY'S MATCHES:**\n\n"
+    tz_info = get_tz_offset_str(user_tz)
+    text = f"📅 **МАТЧИ СЕГОДНЯ** ({tz_info}):\n\n" if lang == "ru" else f"📅 **TODAY'S MATCHES** ({tz_info}):\n\n"
     
     for comp, ms in by_comp.items():
         text += f"🏆 **{comp}**\n"
         for m in ms[:5]:
             home = m.get("homeTeam", {}).get("name", "?")
             away = m.get("awayTeam", {}).get("name", "?")
-            try:
-                dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
-                time_str = dt.strftime("%H:%M")
-            except:
-                time_str = "?"
+            time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
             text += f"  ⏰ {time_str} | {home} vs {away}\n"
         text += "\n"
     
@@ -1435,6 +1566,7 @@ async def tomorrow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show tomorrow's matches"""
     user = get_user(update.effective_user.id)
     lang = user.get("language", "ru") if user else "ru"
+    user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
     
     status = await update.message.reply_text(get_text("analyzing", lang))
     
@@ -1451,18 +1583,15 @@ async def tomorrow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             by_comp[comp] = []
         by_comp[comp].append(m)
     
-    text = "📆 **МАТЧИ ЗАВТРА:**\n\n" if lang == "ru" else "📆 **TOMORROW'S MATCHES:**\n\n"
+    tz_info = get_tz_offset_str(user_tz)
+    text = f"📆 **МАТЧИ ЗАВТРА** ({tz_info}):\n\n" if lang == "ru" else f"📆 **TOMORROW'S MATCHES** ({tz_info}):\n\n"
     
     for comp, ms in by_comp.items():
         text += f"🏆 **{comp}**\n"
         for m in ms[:5]:
             home = m.get("homeTeam", {}).get("name", "?")
             away = m.get("awayTeam", {}).get("name", "?")
-            try:
-                dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
-                time_str = dt.strftime("%H:%M")
-            except:
-                time_str = "?"
+            time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
             text += f"  ⏰ {time_str} | {home} vs {away}\n"
         text += "\n"
     
@@ -1484,12 +1613,15 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = get_user(user_id)
     
     lang = user.get("language", "ru")
+    user_tz = user.get("timezone", "Europe/Moscow")
+    tz_display = get_tz_offset_str(user_tz)
     
     keyboard = [
         [InlineKeyboardButton(f"📉 Мин. коэфф: {user['min_odds']}", callback_data="set_min_odds")],
         [InlineKeyboardButton(f"📈 Макс. коэфф: {user['max_odds']}", callback_data="set_max_odds")],
         [InlineKeyboardButton(f"⚠️ Риск: {user['risk_level']}", callback_data="set_risk")],
         [InlineKeyboardButton("🌍 Язык / Language", callback_data="set_language")],
+        [InlineKeyboardButton(f"🕐 Часовой пояс: {tz_display}", callback_data="set_timezone")],
         [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
     ]
     
@@ -1499,6 +1631,7 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📈 **Максимальный коэфф:** {user['max_odds']}
 ⚠️ **Уровень риска:** {user['risk_level']}
 🌍 **Язык:** {lang.upper()}
+🕐 **Часовой пояс:** {tz_display}
 💎 **Премиум:** {'✅ Да' if user.get('is_premium') else '❌ Нет'}
 
 Нажми на параметр чтобы изменить:"""
@@ -1567,13 +1700,18 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     win_emoji = "🔥" if stats["win_rate"] >= 70 else "✅" if stats["win_rate"] >= 50 else "📉"
     
+    # Build stats string with push
+    decided = stats['correct'] + stats.get('incorrect', 0)
+    push_str = f"\n🔄 **Возвраты:** {stats['push']}" if stats.get('push', 0) > 0 else ""
+    
     text = f"""📈 **СТАТИСТИКА**
 
-{win_emoji} **Точность:** {stats['correct']}/{stats['checked']} ({stats['win_rate']:.1f}%)
+{win_emoji} **Точность:** {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
 
 📊 **Всего прогнозов:** {stats['total']}
-✅ **Проверено:** {stats['checked']}
-⏳ **Ожидают результата:** {stats['pending']}
+✅ **Верных:** {stats['correct']}
+❌ **Неверных:** {stats.get('incorrect', 0)}{push_str}
+⏳ **Ожидают:** {stats['pending']}
 
 """
     
@@ -1594,7 +1732,8 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "📋 **По типам ставок:**\n"
         for cat, data in stats["categories"].items():
             cat_name = cat_names.get(cat, cat)
-            text += f"  • {cat_name}: {data['correct']}/{data['total']} ({data['rate']}%)\n"
+            push_info = f" (+{data['push']}🔄)" if data.get('push', 0) > 0 else ""
+            text += f"  • {cat_name}: {data['correct']}/{data['total'] - data.get('push', 0)} ({data['rate']}%){push_info}\n"
         text += "\n"
     
     # Recent predictions
@@ -1603,9 +1742,12 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if p["is_correct"] is None:
             emoji = "⏳"
             result_text = "ожидаем"
-        elif p["is_correct"]:
+        elif p["is_correct"] == 1:
             emoji = "✅"
             result_text = p["result"] or "выиграл"
+        elif p["is_correct"] == 2:
+            emoji = "🔄"
+            result_text = f"{p['result']} (возврат)"
         else:
             emoji = "❌"
             result_text = p["result"] or "проиграл"
@@ -1757,6 +1899,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(get_text("no_matches", lang))
     
     elif data == "cmd_today":
+        user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
         await query.edit_message_text(get_text("analyzing", lang))
         matches = get_matches(date_filter="today")
         if not matches:
@@ -1770,17 +1913,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 by_comp[comp] = []
             by_comp[comp].append(m)
         
-        text = "📅 **МАТЧИ СЕГОДНЯ:**\n\n"
+        tz_info = get_tz_offset_str(user_tz)
+        text = f"📅 **МАТЧИ СЕГОДНЯ** ({tz_info}):\n\n"
         for comp, ms in by_comp.items():
             text += f"🏆 **{comp}**\n"
             for m in ms[:5]:
                 home = m.get("homeTeam", {}).get("name", "?")
                 away = m.get("awayTeam", {}).get("name", "?")
-                try:
-                    dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
-                    time_str = dt.strftime("%H:%M")
-                except:
-                    time_str = "?"
+                time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
                 text += f"  ⏰ {time_str} | {home} vs {away}\n"
             text += "\n"
         
@@ -1791,6 +1931,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     elif data == "cmd_tomorrow":
+        user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
         await query.edit_message_text(get_text("analyzing", lang))
         matches = get_matches(date_filter="tomorrow")
         if not matches:
@@ -1804,17 +1945,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 by_comp[comp] = []
             by_comp[comp].append(m)
         
-        text = "📆 **МАТЧИ ЗАВТРА:**\n\n"
+        tz_info = get_tz_offset_str(user_tz)
+        text = f"📆 **МАТЧИ ЗАВТРА** ({tz_info}):\n\n"
         for comp, ms in by_comp.items():
             text += f"🏆 **{comp}**\n"
             for m in ms[:5]:
                 home = m.get("homeTeam", {}).get("name", "?")
                 away = m.get("awayTeam", {}).get("name", "?")
-                try:
-                    dt = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
-                    time_str = dt.strftime("%H:%M")
-                except:
-                    time_str = "?"
+                time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
                 text += f"  ⏰ {time_str} | {home} vs {away}\n"
             text += "\n"
         
@@ -2007,6 +2145,33 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_keyboard(new_lang)
         )
         await settings_cmd(update, context)
+    
+    # Timezone selection
+    elif data == "set_timezone":
+        keyboard = [
+            [InlineKeyboardButton("🇷🇺 Москва", callback_data="tz_msk"),
+             InlineKeyboardButton("🇺🇦 Киев", callback_data="tz_kiev")],
+            [InlineKeyboardButton("🇬🇧 Лондон", callback_data="tz_london"),
+             InlineKeyboardButton("🇫🇷 Париж", callback_data="tz_paris")],
+            [InlineKeyboardButton("🇹🇷 Стамбул", callback_data="tz_istanbul"),
+             InlineKeyboardButton("🇦🇪 Дубай", callback_data="tz_dubai")],
+            [InlineKeyboardButton("🇮🇳 Мумбаи", callback_data="tz_mumbai"),
+             InlineKeyboardButton("🇮🇩 Джакарта", callback_data="tz_jakarta")],
+            [InlineKeyboardButton("🇵🇭 Манила", callback_data="tz_manila"),
+             InlineKeyboardButton("🇧🇷 Сан-Паулу", callback_data="tz_sao_paulo")],
+            [InlineKeyboardButton("🇳🇬 Лагос", callback_data="tz_lagos"),
+             InlineKeyboardButton("🇺🇸 Нью-Йорк", callback_data="tz_new_york")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+        ]
+        await query.edit_message_text("🕐 Выбери часовой пояс:", reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    elif data.startswith("tz_"):
+        tz_key = data.replace("tz_", "")
+        if tz_key in TIMEZONES:
+            tz_value, tz_name = TIMEZONES[tz_key]
+            update_user_settings(user_id, timezone=tz_value)
+            await query.answer(f"✅ {tz_name}")
+            await settings_cmd(update, context)
     
     # Add favorite league
     elif data == "add_fav_league":
@@ -2228,40 +2393,81 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Enhanced analysis
     analysis = analyze_match_enhanced(match, user, lang)
     
-    # Extract and save prediction
+    # Extract and save prediction - parse ONLY from MAIN BET section
     try:
         confidence = 70
         bet_type = "П1"
         odds_value = 1.5
         
-        conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', analysis)
+        # Extract main bet section only
+        main_bet_section = ""
+        main_bet_match = re.search(r'ОСНОВНАЯ СТАВКА.*?(?=📈|ДОПОЛНИТЕЛЬНЫЕ|$)', analysis, re.DOTALL | re.IGNORECASE)
+        if main_bet_match:
+            main_bet_section = main_bet_match.group(0).lower()
+        else:
+            # Fallback - look for first bet mention
+            main_bet_section = analysis[:500].lower()
+        
+        logger.info(f"Main bet section: {main_bet_section[:200]}")
+        
+        # Get confidence from main bet section
+        conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', main_bet_section)
         if conf_match:
             confidence = int(conf_match.group(1))
+        else:
+            # Try full text
+            conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', analysis)
+            if conf_match:
+                confidence = int(conf_match.group(1))
         
-        analysis_lower = analysis.lower()
-        
-        if "тб 2.5" in analysis_lower or "over 2.5" in analysis_lower:
+        # Detect bet type from main bet section ONLY
+        if "фора" in main_bet_section or "handicap" in main_bet_section:
+            # Parse handicap value
+            fora_match = re.search(r'фора\s*[12]?\s*\(?([-+]?\d+\.?\d*)\)?', main_bet_section)
+            if fora_match:
+                fora_value = fora_match.group(1)
+                if "-1" in main_bet_section or "(-1)" in main_bet_section:
+                    bet_type = "Фора1(-1)"
+                elif "+1" in main_bet_section or "(+1)" in main_bet_section:
+                    bet_type = "Фора2(+1)"
+                elif "-1.5" in main_bet_section:
+                    bet_type = "Фора1(-1.5)"
+                else:
+                    bet_type = f"Фора({fora_value})"
+            else:
+                bet_type = "Фора1(-1)"
+        elif "тб 2.5" in main_bet_section or "тотал больше 2.5" in main_bet_section or "over 2.5" in main_bet_section:
             bet_type = "ТБ 2.5"
-        elif "тм 2.5" in analysis_lower or "under 2.5" in analysis_lower:
+        elif "тм 2.5" in main_bet_section or "тотал меньше 2.5" in main_bet_section or "under 2.5" in main_bet_section:
             bet_type = "ТМ 2.5"
-        elif "обе забьют" in analysis_lower or "btts" in analysis_lower:
+        elif "обе забьют" in main_bet_section or "btts" in main_bet_section:
             bet_type = "BTTS"
-        elif "п2" in analysis_lower or "победа гостей" in analysis_lower:
+        elif "п2" in main_bet_section or "победа гостей" in main_bet_section:
             bet_type = "П2"
-        elif "п1" in analysis_lower or "победа хозя" in analysis_lower:
+        elif "п1" in main_bet_section or "победа хозя" in main_bet_section:
             bet_type = "П1"
-        elif "ничья" in analysis_lower:
+        elif "ничья" in main_bet_section or " х " in main_bet_section:
             bet_type = "Х"
-        elif "1x" in analysis_lower or "x2" in analysis_lower:
-            bet_type = "1X" if "1x" in analysis_lower else "X2"
+        elif "1x" in main_bet_section:
+            bet_type = "1X"
+        elif "x2" in main_bet_section or "2x" in main_bet_section:
+            bet_type = "X2"
+        elif "12" in main_bet_section or "не ничья" in main_bet_section:
+            bet_type = "12"
         
-        odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
+        # Get odds from main bet section
+        odds_match = re.search(r'@\s*~?(\d+\.?\d*)', main_bet_section)
         if odds_match:
             odds_value = float(odds_match.group(1))
+        else:
+            # Try full text
+            odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
+            if odds_match:
+                odds_value = float(odds_match.group(1))
         
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
         increment_daily_usage(user_id)
-        logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%")
+        logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
         
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
@@ -2564,23 +2770,36 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                     is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
                     result = f"{home_score}-{away_score}"
                     
-                    if is_correct is not None:
-                        update_prediction_result(pred["id"], result, 1 if is_correct else 0)
-                        logger.info(f"Updated prediction {pred['id']}: {result} -> {'✅' if is_correct else '❌'}")
-                        
-                        # Notify user
-                        try:
-                            await context.bot.send_message(
-                                chat_id=pred["user_id"],
-                                text=f"📊 **Результат прогноза**\n\n"
-                                     f"⚽ {pred['home']} vs {pred['away']}\n"
-                                     f"🎯 Ставка: {pred['bet_type']}\n"
-                                     f"📈 Счёт: {result}\n"
-                                     f"{'✅ Прогноз верный!' if is_correct else '❌ Прогноз не сработал'}",
-                                parse_mode="Markdown"
-                            )
-                        except:
-                            pass
+                    # Handle three outcomes: win (1), lose (0), push/void (2)
+                    if is_correct is True:
+                        db_value = 1
+                        emoji = "✅"
+                        status_text = "Прогноз верный!"
+                    elif is_correct is False:
+                        db_value = 0
+                        emoji = "❌"
+                        status_text = "Прогноз не сработал"
+                    else:  # is_correct is None = push/void
+                        db_value = 2
+                        emoji = "🔄"
+                        status_text = "Возврат (push)"
+                    
+                    update_prediction_result(pred["id"], result, db_value)
+                    logger.info(f"Updated prediction {pred['id']}: {result} -> {emoji}")
+                    
+                    # Notify user
+                    try:
+                        await context.bot.send_message(
+                            chat_id=pred["user_id"],
+                            text=f"📊 **Результат прогноза**\n\n"
+                                 f"⚽ {pred['home']} vs {pred['away']}\n"
+                                 f"🎯 Ставка: {pred['bet_type']}\n"
+                                 f"📈 Счёт: {result}\n"
+                                 f"{emoji} {status_text}",
+                            parse_mode="Markdown"
+                        )
+                    except:
+                        pass
             
             time.sleep(0.5)
             
