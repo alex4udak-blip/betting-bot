@@ -1114,9 +1114,14 @@ def get_odds(home_team, away_team):
         if r.status_code == 200:
             events = r.json()
             
+            home_lower = (home_team or "").lower()
+            away_lower = (away_team or "").lower()
+            
             for event in events:
-                if (home_team.lower() in event.get("home_team", "").lower() or
-                    away_team.lower() in event.get("away_team", "").lower()):
+                event_home = (event.get("home_team") or "").lower()
+                event_away = (event.get("away_team") or "").lower()
+                
+                if (home_lower in event_home or away_lower in event_away):
                     
                     odds = {}
                     for bookmaker in event.get("bookmakers", [])[:1]:
@@ -1150,17 +1155,21 @@ def find_match(team_names, matches):
             continue
         
         for m in matches:
-            home = m.get("homeTeam", {}).get("name", "").lower()
-            away = m.get("awayTeam", {}).get("name", "").lower()
-            home_short = m.get("homeTeam", {}).get("shortName", "").lower()
-            away_short = m.get("awayTeam", {}).get("shortName", "").lower()
-            home_tla = m.get("homeTeam", {}).get("tla", "").lower()
-            away_tla = m.get("awayTeam", {}).get("tla", "").lower()
+            home = (m.get("homeTeam", {}).get("name") or "").lower()
+            away = (m.get("awayTeam", {}).get("name") or "").lower()
+            home_short = (m.get("homeTeam", {}).get("shortName") or "").lower()
+            away_short = (m.get("awayTeam", {}).get("shortName") or "").lower()
+            home_tla = (m.get("homeTeam", {}).get("tla") or "").lower()
+            away_tla = (m.get("awayTeam", {}).get("tla") or "").lower()
+            
+            # Skip if no team names
+            if not home and not away:
+                continue
             
             if (team_lower in home or team_lower in away or
                 team_lower in home_short or team_lower in away_short or
                 team_lower == home_tla or team_lower == away_tla or
-                home in team_lower or away in team_lower):
+                (home and home in team_lower) or (away and away in team_lower)):
                 logger.info(f"Found match: {home} vs {away} for query '{team}'")
                 return m
     
@@ -1173,9 +1182,9 @@ def get_match_warnings(match, home_form, away_form, lang="ru"):
     """Get warnings for a match (cup, top club, rotation)"""
     warnings = []
     
-    home_team = match.get("homeTeam", {}).get("name", "")
-    away_team = match.get("awayTeam", {}).get("name", "")
-    competition = match.get("competition", {}).get("name", "")
+    home_team = match.get("homeTeam", {}).get("name") or ""
+    away_team = match.get("awayTeam", {}).get("name") or ""
+    competition = match.get("competition", {}).get("name") or ""
     
     # Check if cup match
     is_cup = any(kw in competition for kw in CUP_KEYWORDS)
@@ -1183,8 +1192,8 @@ def get_match_warnings(match, home_form, away_form, lang="ru"):
         warnings.append(get_text("cup_warning", lang))
     
     # Check if playing against top club
-    home_is_top = any(club.lower() in home_team.lower() for club in TOP_CLUBS)
-    away_is_top = any(club.lower() in away_team.lower() for club in TOP_CLUBS)
+    home_is_top = any(club.lower() in home_team.lower() for club in TOP_CLUBS) if home_team else False
+    away_is_top = any(club.lower() in away_team.lower() for club in TOP_CLUBS) if away_team else False
     
     if home_is_top or away_is_top:
         top_club = home_team if home_is_top else away_team
@@ -1409,8 +1418,8 @@ def get_recommendations_enhanced(matches, user_query="", user_settings=None, lea
             "CL": "UEFA Champions League",
             "BSA": "Brasileirão"
         }
-        target_league = league_names.get(league_filter, league_filter)
-        matches = [m for m in matches if target_league.lower() in m.get("competition", {}).get("name", "").lower()]
+        target_league = league_names.get(league_filter, league_filter) or ""
+        matches = [m for m in matches if target_league.lower() in (m.get("competition", {}).get("name") or "").lower()]
     
     if not matches:
         return "❌ Нет матчей для выбранной лиги." if lang == "ru" else "❌ No matches for selected league."
@@ -1816,40 +1825,58 @@ async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
     
     if not user:
-        await update.message.reply_text(f"❌ User {user_id} not found in DB")
+        await update.message.reply_text(f"User {user_id} not found in DB")
         return
     
     can_use, remaining = check_daily_limit(user_id)
     
-    text = f"""🔧 **DEBUG INFO**
+    text = f"""🔧 DEBUG INFO
 
-👤 **User ID:** `{user_id}`
-📛 **Username:** {user.get('username', 'N/A')}
+👤 User ID: {user_id}
+📛 Username: {user.get('username', 'N/A')}
 
-📊 **Limits:**
-• Daily requests: {user.get('daily_requests', 0)}/{FREE_DAILY_LIMIT}
-• Last request date: {user.get('last_request_date', 'Never')}
-• Can use: {'✅ Yes' if can_use else '❌ No'}
-• Remaining: {remaining}
+📊 Limits:
+- Daily requests: {user.get('daily_requests', 0)}/{FREE_DAILY_LIMIT}
+- Last request date: {user.get('last_request_date', 'Never')}
+- Can use: {'Yes' if can_use else 'No'}
+- Remaining: {remaining}
 
-💎 **Premium:** {'✅ Yes' if user.get('is_premium') else '❌ No'}
+💎 Premium: {'Yes' if user.get('is_premium') else 'No'}
 
-⚙️ **Settings:**
-• Min odds: {user.get('min_odds', 1.3)}
-• Max odds: {user.get('max_odds', 3.0)}
-• Risk: {user.get('risk_level', 'medium')}
-• Language: {user.get('language', 'ru')}
-• Timezone: {user.get('timezone', 'Europe/Moscow')}
+⚙️ Settings:
+- Min odds: {user.get('min_odds', 1.3)}
+- Max odds: {user.get('max_odds', 3.0)}
+- Risk: {user.get('risk_level', 'medium')}
+- Language: {user.get('language', 'ru')}
+- Timezone: {user.get('timezone', 'Europe/Moscow')}
 
-🏆 **Leagues:** {len(COMPETITIONS)} configured
+🏆 Leagues: {len(COMPETITIONS)} configured
 """
     
     keyboard = [
         [InlineKeyboardButton("🔄 Reset Limit", callback_data="debug_reset_limit")],
+        [InlineKeyboardButton("❌ Remove Premium", callback_data="debug_remove_premium")],
         [InlineKeyboardButton("🔙 Back", callback_data="cmd_start")]
     ]
     
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get recommendations with user preferences"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    
+    # Check daily limit
+    can_use, remaining = check_daily_limit(user_id)
+    if not can_use:
+        text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    
+    status = await update.message.reply_text(get_text("analyzing", lang))
     
     matches = get_matches(days=7)
     
@@ -2070,11 +2097,21 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Reset daily limit for debugging
         update_user_settings(user_id, daily_requests=0, last_request_date=None)
         await query.edit_message_text(
-            f"✅ **Лимит сброшен!**\n\n"
-            f"User ID: `{user_id}`\n"
+            f"✅ Лимит сброшен!\n\n"
+            f"User ID: {user_id}\n"
             f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
-            f"Теперь можешь делать {FREE_DAILY_LIMIT} новых прогнозов.",
-            parse_mode="Markdown"
+            f"Теперь можешь делать {FREE_DAILY_LIMIT} новых прогнозов."
+        )
+    
+    elif data == "debug_remove_premium":
+        # Remove premium status for debugging
+        update_user_settings(user_id, is_premium=0, daily_requests=0, last_request_date=None)
+        await query.edit_message_text(
+            f"✅ Premium статус убран!\n\n"
+            f"User ID: {user_id}\n"
+            f"Premium: No\n"
+            f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
+            f"Теперь лимит будет работать."
         )
     
     elif data == "cmd_favorites":
