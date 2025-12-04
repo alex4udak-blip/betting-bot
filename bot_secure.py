@@ -1554,26 +1554,40 @@ def get_bot_accuracy_stats() -> dict:
             stats["correct"] = row[1] or 0
             stats["overall_accuracy"] = round(stats["correct"] / stats["total"] * 100, 1)
 
-        # Accuracy by bet type
+        # Accuracy by bet category (grouped properly)
         c.execute("""
-            SELECT bet_type, COUNT(*) as total,
+            SELECT bet_category, COUNT(*) as total,
                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
             FROM predictions
-            WHERE is_correct IS NOT NULL AND bet_type IS NOT NULL
-            GROUP BY bet_type
-            HAVING total >= 5
+            WHERE is_correct IS NOT NULL AND bet_category IS NOT NULL
+            GROUP BY bet_category
+            HAVING total >= 3
             ORDER BY (wins * 1.0 / total) DESC
         """)
+        # Human-readable category names
+        category_names = {
+            "totals_over": "ТБ (Тотал больше)",
+            "totals_under": "ТМ (Тотал меньше)",
+            "outcomes_home": "П1 (Победа хозяев)",
+            "outcomes_away": "П2 (Победа гостей)",
+            "outcomes_draw": "Ничья (X)",
+            "btts": "ОЗ (Обе забьют)",
+            "double_chance": "Двойной шанс",
+            "handicap": "Фора",
+            "other": "Другое"
+        }
+
         for row in c.fetchall():
-            bet_type, total, wins = row
+            category, total, wins = row
             accuracy = round((wins or 0) / total * 100, 1)
-            stats["by_bet_type"][bet_type] = {
+            display_name = category_names.get(category, category)
+            stats["by_bet_type"][display_name] = {
                 "total": total,
                 "wins": wins or 0,
                 "accuracy": accuracy
             }
             if accuracy >= 55:
-                stats["best_bet_types"].append(bet_type)
+                stats["best_bet_types"].append(display_name)
 
         # Accuracy by confidence range
         c.execute("""
