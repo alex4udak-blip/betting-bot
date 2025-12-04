@@ -637,7 +637,19 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN timezone TEXT DEFAULT 'Europe/Moscow'")
     except:
         pass
-    
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN live_alerts INTEGER DEFAULT 0")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
+    except:
+        pass
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -2693,13 +2705,19 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM users")
     total_users = c.fetchone()[0]
 
-    # Active today
-    c.execute("SELECT COUNT(*) FROM users WHERE last_active > datetime('now', '-1 day')")
-    active_today = c.fetchone()[0]
+    # Active today (safe query - column may not exist)
+    try:
+        c.execute("SELECT COUNT(*) FROM users WHERE last_active > datetime('now', '-1 day')")
+        active_today = c.fetchone()[0]
+    except:
+        active_today = "N/A"
 
-    # Premium users
-    c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
-    premium_users = c.fetchone()[0]
+    # Premium users (safe query)
+    try:
+        c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
+        premium_users = c.fetchone()[0]
+    except:
+        premium_users = 0
 
     # Total predictions
     c.execute("SELECT COUNT(*) FROM predictions")
@@ -2712,8 +2730,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     correct = row[1] or 0
     accuracy = round(correct / verified * 100, 1) if verified > 0 else 0
 
-    # Live subscribers
-    c.execute("SELECT COUNT(*) FROM users WHERE live_alerts = 1")
+    # Live subscribers (from live_subscribers table)
+    c.execute("SELECT COUNT(*) FROM live_subscribers")
     live_subs = c.fetchone()[0]
 
     conn.close()
@@ -2863,6 +2881,7 @@ async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = int(context.args[0])
 
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (target_id,))
     row = c.fetchone()
@@ -2878,17 +2897,25 @@ async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.close()
 
-    # Parse user data
+    # Parse user data safely
+    username = row['username'] if 'username' in row.keys() else None
+    first_name = row['first_name'] if 'first_name' in row.keys() else None
+    language = row['language'] if 'language' in row.keys() else 'ru'
+    is_premium = row['is_premium'] if 'is_premium' in row.keys() else 0
+    live_alerts = row['live_alerts'] if 'live_alerts' in row.keys() else 0
+    created_at = row['created_at'] if 'created_at' in row.keys() else 'N/A'
+    last_active = row['last_active'] if 'last_active' in row.keys() else 'N/A'
+
     text = f"""👤 **Информация о юзере {target_id}**
 
-├ Username: @{row[2] or 'нет'}
-├ Имя: {row[3] or 'нет'}
-├ Язык: {row[4] or 'ru'}
-├ Premium: {'✅' if row[5] else '❌'}
-├ Live-алерты: {'✅' if row[6] else '❌'}
+├ Username: @{username or 'нет'}
+├ Имя: {first_name or 'нет'}
+├ Язык: {language}
+├ Premium: {'✅' if is_premium else '❌'}
+├ Live-алерты: {'✅' if live_alerts else '❌'}
 ├ Прогнозов: {pred_count}
-├ Зарегистрирован: {row[8]}
-└ Последняя активность: {row[9]}"""
+├ Зарегистрирован: {created_at}
+└ Последняя активность: {last_active}"""
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
