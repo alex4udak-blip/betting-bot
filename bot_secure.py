@@ -2637,7 +2637,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command"""
     user = get_user(update.effective_user.id)
     lang = user.get("language", "ru") if user else "ru"
-    
+
     text = f"""❓ **ПОМОЩЬ**
 
 **Основные команды:**
@@ -2670,11 +2670,227 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 1X/X2 - Двойной шанс"""
 
     keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
-    
+
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin panel - only for admins"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    # Get stats
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Total users
+    c.execute("SELECT COUNT(*) FROM users")
+    total_users = c.fetchone()[0]
+
+    # Active today
+    c.execute("SELECT COUNT(*) FROM users WHERE last_active > datetime('now', '-1 day')")
+    active_today = c.fetchone()[0]
+
+    # Premium users
+    c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
+    premium_users = c.fetchone()[0]
+
+    # Total predictions
+    c.execute("SELECT COUNT(*) FROM predictions")
+    total_predictions = c.fetchone()[0]
+
+    # Verified predictions
+    c.execute("SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) FROM predictions WHERE is_correct IS NOT NULL")
+    row = c.fetchone()
+    verified = row[0] or 0
+    correct = row[1] or 0
+    accuracy = round(correct / verified * 100, 1) if verified > 0 else 0
+
+    # Live subscribers
+    c.execute("SELECT COUNT(*) FROM users WHERE live_alerts = 1")
+    live_subs = c.fetchone()[0]
+
+    conn.close()
+
+    text = f"""👑 **АДМИН-ПАНЕЛЬ**
+
+📊 **Статистика бота:**
+├ Всего юзеров: {total_users}
+├ Активных сегодня: {active_today}
+├ Premium: {premium_users}
+└ Live подписчики: {live_subs}
+
+🎯 **Прогнозы:**
+├ Всего: {total_predictions}
+├ Проверенных: {verified}
+├ Верных: {correct}
+└ Точность: {accuracy}%
+
+⚙️ **Админ-команды:**
+• /broadcast <текст> - Рассылка всем
+• /addpremium <user_id> - Дать премиум
+• /removepremium <user_id> - Убрать премиум
+• /userinfo <user_id> - Инфо о юзере
+• /botstats - Детальная статистика
+• /checkresults - Проверить результаты
+
+🔧 **Система:**
+├ Админов: {len(ADMIN_IDS)}
+└ Твой ID: {user_id}"""
+
+    keyboard = [
+        [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+         InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
+        [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
+    ]
+
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Broadcast message to all users - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /broadcast <текст сообщения>")
+        return
+
+    message = " ".join(context.args)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM users")
+    users = c.fetchall()
+    conn.close()
+
+    sent = 0
+    failed = 0
+
+    await update.message.reply_text(f"📢 Начинаю рассылку {len(users)} юзерам...")
+
+    for (uid,) in users:
+        try:
+            await context.bot.send_message(uid, f"📢 **Объявление:**\n\n{message}", parse_mode="Markdown")
+            sent += 1
+            await asyncio.sleep(0.05)  # Rate limiting
+        except Exception:
+            failed += 1
+
+    await update.message.reply_text(f"✅ Рассылка завершена!\n├ Отправлено: {sent}\n└ Ошибок: {failed}")
+
+
+async def addpremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add premium to user - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /addpremium <user_id>")
+        return
+
+    target_id = int(context.args[0])
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET is_premium = 1 WHERE user_id = ?", (target_id,))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+
+    if affected > 0:
+        await update.message.reply_text(f"✅ Премиум выдан юзеру {target_id}")
+        try:
+            await context.bot.send_message(target_id, "🎉 Вам выдан Premium-статус! Безлимитные прогнозы активированы.")
+        except Exception:
+            pass
+    else:
+        await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+
+
+async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove premium from user - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /removepremium <user_id>")
+        return
+
+    target_id = int(context.args[0])
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (target_id,))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+
+    if affected > 0:
+        await update.message.reply_text(f"✅ Премиум убран у юзера {target_id}")
+    else:
+        await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+
+
+async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get user info - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /userinfo <user_id>")
+        return
+
+    target_id = int(context.args[0])
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE user_id = ?", (target_id,))
+    row = c.fetchone()
+
+    if not row:
+        await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+        conn.close()
+        return
+
+    # Get prediction count
+    c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ?", (target_id,))
+    pred_count = c.fetchone()[0]
+
+    conn.close()
+
+    # Parse user data
+    text = f"""👤 **Информация о юзере {target_id}**
+
+├ Username: @{row[2] or 'нет'}
+├ Имя: {row[3] or 'нет'}
+├ Язык: {row[4] or 'ru'}
+├ Premium: {'✅' if row[5] else '❌'}
+├ Live-алерты: {'✅' if row[6] else '❌'}
+├ Прогнозов: {pred_count}
+├ Зарегистрирован: {row[8]}
+└ Последняя активность: {row[9]}"""
+
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3805,6 +4021,13 @@ def main():
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
     app.add_handler(CommandHandler("debug", debug_cmd))
+
+    # Admin commands
+    app.add_handler(CommandHandler("admin", admin_cmd))
+    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    app.add_handler(CommandHandler("addpremium", addpremium_cmd))
+    app.add_handler(CommandHandler("removepremium", removepremium_cmd))
+    app.add_handler(CommandHandler("userinfo", userinfo_cmd))
     
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
