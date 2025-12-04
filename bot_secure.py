@@ -14,6 +14,18 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
 import anthropic
 
+# ML imports (for prediction learning)
+try:
+    import numpy as np
+    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score
+    import joblib
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    np = None
+
 # ===== CONFIGURATION =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 # Standard plan key: 2e13bc51a3474c29b6a513feee9dd805
@@ -556,6 +568,10 @@ def get_tz_offset_str(user_tz="Europe/Moscow"):
 
 DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db"
 
+# ML Models directory
+ML_MODELS_DIR = "/data/ml_models" if os.path.exists("/data") else "ml_models"
+ML_MIN_SAMPLES = 100  # Minimum predictions to train model
+
 def init_db():
     """Initialize SQLite database"""
     conn = sqlite3.connect(DB_PATH)
@@ -615,7 +631,28 @@ def init_db():
         user_id INTEGER PRIMARY KEY,
         subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
-    
+
+    # ML training data table
+    c.execute('''CREATE TABLE IF NOT EXISTS ml_training_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prediction_id INTEGER,
+        bet_category TEXT,
+        features_json TEXT,
+        target INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (prediction_id) REFERENCES predictions(id)
+    )''')
+
+    # ML model metadata
+    c.execute('''CREATE TABLE IF NOT EXISTS ml_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_type TEXT,
+        accuracy REAL,
+        samples_count INTEGER,
+        trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        model_path TEXT
+    )''')
+
     # Add new columns if they don't exist (for migration)
     try:
         c.execute("ALTER TABLE predictions ADD COLUMN bet_category TEXT")
@@ -868,18 +905,25 @@ def categorize_bet(bet_type):
         return "handicap"
     return "other"
 
-def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds):
-    """Save prediction to database with category"""
+def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None):
+    """Save prediction to database with category and ML features"""
     category = categorize_bet(bet_type)
-    
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""INSERT INTO predictions 
+    c.execute("""INSERT INTO predictions
                  (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
               (user_id, match_id, home, away, bet_type, category, confidence, odds))
+    prediction_id = c.lastrowid
     conn.commit()
     conn.close()
+
+    # Save ML training data if features provided
+    if ml_features and category:
+        save_ml_training_data(prediction_id, category, ml_features, target=None)
+
+    return prediction_id
 
 def get_pending_predictions():
     """Get predictions that haven't been checked yet"""
@@ -896,14 +940,22 @@ def get_pending_predictions():
              "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7]} for r in rows]
 
 def update_prediction_result(pred_id, result, is_correct):
-    """Update prediction with result"""
+    """Update prediction with result and ML training data"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""UPDATE predictions 
-                 SET result = ?, is_correct = ?, checked_at = CURRENT_TIMESTAMP 
+    c.execute("""UPDATE predictions
+                 SET result = ?, is_correct = ?, checked_at = CURRENT_TIMESTAMP
                  WHERE id = ?""", (result, is_correct, pred_id))
     conn.commit()
     conn.close()
+
+    # Update ML training target (1 = correct, 0 = incorrect)
+    if is_correct is not None:
+        target = 1 if is_correct else 0
+        update_ml_training_target(pred_id, target)
+
+        # Check if we should train models
+        check_and_train_models()
 
 def check_bet_result(bet_type, home_score, away_score):
     """Check if bet was correct based on score"""
@@ -982,6 +1034,405 @@ def check_bet_result(bet_type, home_score, away_score):
         return home_score > away_score
     
     return None
+
+
+# ===== MACHINE LEARNING SYSTEM =====
+
+def extract_features(home_form: dict, away_form: dict, standings: dict,
+                     odds: dict, h2h: list, home_team: str, away_team: str) -> dict:
+    """Extract numerical features for ML model"""
+    features = {}
+
+    # Home team form features
+    if home_form:
+        home_overall = home_form.get("overall", {})
+        home_home = home_form.get("home", {})
+        features["home_wins"] = home_overall.get("wins", 0)
+        features["home_draws"] = home_overall.get("draws", 0)
+        features["home_losses"] = home_overall.get("losses", 0)
+        features["home_goals_scored"] = home_overall.get("avg_goals_scored", 1.5)
+        features["home_goals_conceded"] = home_overall.get("avg_goals_conceded", 1.0)
+        features["home_home_win_rate"] = home_home.get("win_rate", 50)
+        features["home_btts_pct"] = home_form.get("btts_percent", 50)
+        features["home_over25_pct"] = home_form.get("over25_percent", 50)
+    else:
+        features["home_wins"] = 0
+        features["home_draws"] = 0
+        features["home_losses"] = 0
+        features["home_goals_scored"] = 1.5
+        features["home_goals_conceded"] = 1.0
+        features["home_home_win_rate"] = 50
+        features["home_btts_pct"] = 50
+        features["home_over25_pct"] = 50
+
+    # Away team form features
+    if away_form:
+        away_overall = away_form.get("overall", {})
+        away_away = away_form.get("away", {})
+        features["away_wins"] = away_overall.get("wins", 0)
+        features["away_draws"] = away_overall.get("draws", 0)
+        features["away_losses"] = away_overall.get("losses", 0)
+        features["away_goals_scored"] = away_overall.get("avg_goals_scored", 1.0)
+        features["away_goals_conceded"] = away_overall.get("avg_goals_conceded", 1.5)
+        features["away_away_win_rate"] = away_away.get("win_rate", 30)
+        features["away_btts_pct"] = away_form.get("btts_percent", 50)
+        features["away_over25_pct"] = away_form.get("over25_percent", 50)
+    else:
+        features["away_wins"] = 0
+        features["away_draws"] = 0
+        features["away_losses"] = 0
+        features["away_goals_scored"] = 1.0
+        features["away_goals_conceded"] = 1.5
+        features["away_away_win_rate"] = 30
+        features["away_btts_pct"] = 50
+        features["away_over25_pct"] = 50
+
+    # Standings features
+    features["home_position"] = 10
+    features["away_position"] = 10
+    if standings:
+        for team in standings.get("standings", []):
+            team_name = team.get("team", {}).get("name", "").lower()
+            if home_team.lower() in team_name or team_name in home_team.lower():
+                features["home_position"] = team.get("position", 10)
+            if away_team.lower() in team_name or team_name in away_team.lower():
+                features["away_position"] = team.get("position", 10)
+
+    features["position_diff"] = features["home_position"] - features["away_position"]
+
+    # Odds features (implied probabilities)
+    if odds:
+        features["odds_home"] = odds.get("home", 2.5)
+        features["odds_draw"] = odds.get("draw", 3.5)
+        features["odds_away"] = odds.get("away", 3.0)
+        # Implied probabilities
+        features["implied_home"] = 1 / features["odds_home"] if features["odds_home"] > 0 else 0.4
+        features["implied_draw"] = 1 / features["odds_draw"] if features["odds_draw"] > 0 else 0.25
+        features["implied_away"] = 1 / features["odds_away"] if features["odds_away"] > 0 else 0.35
+    else:
+        features["odds_home"] = 2.5
+        features["odds_draw"] = 3.5
+        features["odds_away"] = 3.0
+        features["implied_home"] = 0.4
+        features["implied_draw"] = 0.25
+        features["implied_away"] = 0.35
+
+    # H2H features
+    h2h_home_wins = 0
+    h2h_draws = 0
+    h2h_away_wins = 0
+    if h2h:
+        for match in h2h[:10]:
+            score = match.get("score", {}).get("fullTime", {})
+            h_goals = score.get("home", 0) or 0
+            a_goals = score.get("away", 0) or 0
+            if h_goals > a_goals:
+                h2h_home_wins += 1
+            elif h_goals < a_goals:
+                h2h_away_wins += 1
+            else:
+                h2h_draws += 1
+
+    features["h2h_home_wins"] = h2h_home_wins
+    features["h2h_draws"] = h2h_draws
+    features["h2h_away_wins"] = h2h_away_wins
+    features["h2h_total"] = h2h_home_wins + h2h_draws + h2h_away_wins
+
+    # Calculated features
+    features["expected_goals"] = (features["home_goals_scored"] + features["away_goals_conceded"]) / 2 + \
+                                  (features["away_goals_scored"] + features["home_goals_conceded"]) / 2
+    features["avg_btts_pct"] = (features["home_btts_pct"] + features["away_btts_pct"]) / 2
+    features["avg_over25_pct"] = (features["home_over25_pct"] + features["away_over25_pct"]) / 2
+
+    return features
+
+
+def save_ml_training_data(prediction_id: int, bet_category: str, features: dict, target: int = None):
+    """Save features for ML training"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target)
+                 VALUES (?, ?, ?, ?)""",
+              (prediction_id, bet_category, json.dumps(features), target))
+    conn.commit()
+    conn.close()
+
+
+def update_ml_training_target(prediction_id: int, target: int):
+    """Update target (result) for ML training data"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE ml_training_data SET target = ? WHERE prediction_id = ?", (target, prediction_id))
+    conn.commit()
+    conn.close()
+
+
+def get_ml_training_data(bet_category: str) -> tuple:
+    """Get training data for specific bet category"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT features_json, target FROM ml_training_data
+                 WHERE bet_category = ? AND target IS NOT NULL""", (bet_category,))
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return None, None
+
+    X = []
+    y = []
+    for features_json, target in rows:
+        try:
+            features = json.loads(features_json)
+            # Convert to list in consistent order
+            feature_values = [
+                features.get("home_wins", 0),
+                features.get("home_draws", 0),
+                features.get("home_losses", 0),
+                features.get("home_goals_scored", 1.5),
+                features.get("home_goals_conceded", 1.0),
+                features.get("home_home_win_rate", 50),
+                features.get("away_wins", 0),
+                features.get("away_draws", 0),
+                features.get("away_losses", 0),
+                features.get("away_goals_scored", 1.0),
+                features.get("away_goals_conceded", 1.5),
+                features.get("away_away_win_rate", 30),
+                features.get("home_position", 10),
+                features.get("away_position", 10),
+                features.get("position_diff", 0),
+                features.get("odds_home", 2.5),
+                features.get("odds_draw", 3.5),
+                features.get("odds_away", 3.0),
+                features.get("implied_home", 0.4),
+                features.get("implied_draw", 0.25),
+                features.get("implied_away", 0.35),
+                features.get("h2h_home_wins", 0),
+                features.get("h2h_draws", 0),
+                features.get("h2h_away_wins", 0),
+                features.get("expected_goals", 2.5),
+                features.get("avg_btts_pct", 50),
+                features.get("avg_over25_pct", 50),
+            ]
+            X.append(feature_values)
+            y.append(target)
+        except:
+            continue
+
+    return X, y
+
+
+def train_ml_model(bet_category: str) -> Optional[dict]:
+    """Train ML model for specific bet category"""
+    if not ML_AVAILABLE:
+        logger.warning("ML libraries not available")
+        return None
+
+    X, y = get_ml_training_data(bet_category)
+
+    if X is None or len(X) < ML_MIN_SAMPLES:
+        logger.info(f"Not enough data for {bet_category}: {len(X) if X else 0} samples")
+        return None
+
+    # Create models directory
+    os.makedirs(ML_MODELS_DIR, exist_ok=True)
+
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        np.array(X), np.array(y), test_size=0.2, random_state=42
+    )
+
+    # Train model (Gradient Boosting works well for tabular data)
+    model = GradientBoostingClassifier(
+        n_estimators=100,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+
+    # Evaluate
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+
+    # Save model
+    model_path = os.path.join(ML_MODELS_DIR, f"model_{bet_category}.pkl")
+    joblib.dump(model, model_path)
+
+    # Save metadata
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT INTO ml_models (model_type, accuracy, samples_count, model_path)
+                 VALUES (?, ?, ?, ?)""",
+              (bet_category, accuracy, len(X), model_path))
+    conn.commit()
+    conn.close()
+
+    logger.info(f"Trained {bet_category} model: accuracy={accuracy:.2%}, samples={len(X)}")
+
+    return {
+        "category": bet_category,
+        "accuracy": accuracy,
+        "samples": len(X),
+        "model_path": model_path
+    }
+
+
+def train_all_models():
+    """Train models for all bet categories with enough data"""
+    categories = ["outcomes_home", "outcomes_away", "outcomes_draw",
+                  "totals_over", "totals_under", "btts"]
+
+    results = {}
+    for cat in categories:
+        result = train_ml_model(cat)
+        if result:
+            results[cat] = result
+
+    return results
+
+
+def ml_predict(features: dict, bet_category: str) -> Optional[dict]:
+    """Get ML prediction for a bet category"""
+    if not ML_AVAILABLE:
+        return None
+
+    model_path = os.path.join(ML_MODELS_DIR, f"model_{bet_category}.pkl")
+
+    if not os.path.exists(model_path):
+        return None
+
+    try:
+        model = joblib.load(model_path)
+
+        # Convert features to array
+        feature_values = [
+            features.get("home_wins", 0),
+            features.get("home_draws", 0),
+            features.get("home_losses", 0),
+            features.get("home_goals_scored", 1.5),
+            features.get("home_goals_conceded", 1.0),
+            features.get("home_home_win_rate", 50),
+            features.get("away_wins", 0),
+            features.get("away_draws", 0),
+            features.get("away_losses", 0),
+            features.get("away_goals_scored", 1.0),
+            features.get("away_goals_conceded", 1.5),
+            features.get("away_away_win_rate", 30),
+            features.get("home_position", 10),
+            features.get("away_position", 10),
+            features.get("position_diff", 0),
+            features.get("odds_home", 2.5),
+            features.get("odds_draw", 3.5),
+            features.get("odds_away", 3.0),
+            features.get("implied_home", 0.4),
+            features.get("implied_draw", 0.25),
+            features.get("implied_away", 0.35),
+            features.get("h2h_home_wins", 0),
+            features.get("h2h_draws", 0),
+            features.get("h2h_away_wins", 0),
+            features.get("expected_goals", 2.5),
+            features.get("avg_btts_pct", 50),
+            features.get("avg_over25_pct", 50),
+        ]
+
+        X = np.array([feature_values])
+
+        # Get probability
+        proba = model.predict_proba(X)[0]
+        prediction = model.predict(X)[0]
+
+        return {
+            "prediction": int(prediction),
+            "confidence": float(max(proba) * 100),
+            "probabilities": {
+                "win": float(proba[1]) if len(proba) > 1 else float(proba[0]),
+                "lose": float(proba[0]) if len(proba) > 1 else 0
+            }
+        }
+    except Exception as e:
+        logger.error(f"ML prediction error: {e}")
+        return None
+
+
+def get_all_ml_predictions(features: dict) -> dict:
+    """Get ML predictions for all available bet types"""
+    predictions = {}
+
+    # Outcomes
+    for cat in ["outcomes_home", "outcomes_away", "outcomes_draw"]:
+        pred = ml_predict(features, cat)
+        if pred:
+            predictions[cat] = pred
+
+    # Totals
+    for cat in ["totals_over", "totals_under"]:
+        pred = ml_predict(features, cat)
+        if pred:
+            predictions[cat] = pred
+
+    # BTTS
+    pred = ml_predict(features, "btts")
+    if pred:
+        predictions["btts"] = pred
+
+    return predictions
+
+
+def check_and_train_models():
+    """Check if we have enough data and train models"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Check samples per category
+    c.execute("""SELECT bet_category, COUNT(*) as cnt
+                 FROM ml_training_data
+                 WHERE target IS NOT NULL
+                 GROUP BY bet_category""")
+    counts = dict(c.fetchall())
+    conn.close()
+
+    trained = []
+    for category, count in counts.items():
+        if count >= ML_MIN_SAMPLES:
+            # Check if model exists and is recent
+            model_path = os.path.join(ML_MODELS_DIR, f"model_{category}.pkl")
+            if not os.path.exists(model_path):
+                result = train_ml_model(category)
+                if result:
+                    trained.append(result)
+
+    return trained
+
+
+def get_ml_status() -> dict:
+    """Get ML system status"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Training data counts
+    c.execute("""SELECT bet_category, COUNT(*) as total,
+                 SUM(CASE WHEN target IS NOT NULL THEN 1 ELSE 0 END) as verified
+                 FROM ml_training_data GROUP BY bet_category""")
+    data_counts = {row[0]: {"total": row[1], "verified": row[2]} for row in c.fetchall()}
+
+    # Model info
+    c.execute("""SELECT model_type, accuracy, samples_count, trained_at
+                 FROM ml_models ORDER BY trained_at DESC""")
+    models = {row[0]: {"accuracy": row[1], "samples": row[2], "trained_at": row[3]}
+              for row in c.fetchall()}
+
+    conn.close()
+
+    return {
+        "ml_available": ML_AVAILABLE,
+        "min_samples": ML_MIN_SAMPLES,
+        "data_counts": data_counts,
+        "models": models,
+        "ready_to_train": [cat for cat, data in data_counts.items()
+                          if data["verified"] >= ML_MIN_SAMPLES and cat not in models]
+    }
+
 
 def get_user_stats(user_id):
     """Get user's prediction statistics with categories"""
@@ -1999,6 +2450,40 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
             analysis_data += f"  💡 {rec}\n"
         analysis_data += "\n"
 
+    # ===== ML PREDICTIONS =====
+    # Extract features for ML
+    ml_features = extract_features(
+        home_form=home_form,
+        away_form=away_form,
+        standings=standings,
+        odds=odds,
+        h2h=h2h.get("matches", []) if h2h else [],
+        home_team=home,
+        away_team=away
+    )
+
+    # Get ML predictions if models are trained
+    ml_predictions = get_all_ml_predictions(ml_features)
+
+    if ml_predictions:
+        analysis_data += "🤖 ML МОДЕЛЬ ПРЕДСКАЗЫВАЕТ:\n"
+        ml_names = {
+            "outcomes_home": "П1 (победа хозяев)",
+            "outcomes_away": "П2 (победа гостей)",
+            "outcomes_draw": "Ничья",
+            "totals_over": "ТБ 2.5",
+            "totals_under": "ТМ 2.5",
+            "btts": "Обе забьют"
+        }
+        for cat, pred in ml_predictions.items():
+            name = ml_names.get(cat, cat)
+            conf = pred["confidence"]
+            analysis_data += f"  {name}: {conf:.0f}% вероятность\n"
+        analysis_data += "  ⚠️ ML модель обучена на исторических данных бота\n\n"
+
+    # Store features for future ML training (will be linked to prediction later)
+    # Features are stored in match context for saving after Claude response
+
     # User settings for filtering
     filter_info = ""
     if user_settings:
@@ -2919,11 +3404,91 @@ async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
+async def mlstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show ML system status - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    status = get_ml_status()
+
+    text = f"""🤖 **ML СИСТЕМА**
+
+🔧 **Статус:**
+├ ML доступен: {'✅' if status['ml_available'] else '❌'}
+└ Мин. данных для обучения: {status['min_samples']}
+
+📊 **Данные для обучения:**
+"""
+
+    if status["data_counts"]:
+        category_names = {
+            "outcomes_home": "П1",
+            "outcomes_away": "П2",
+            "outcomes_draw": "Ничья",
+            "totals_over": "ТБ 2.5",
+            "totals_under": "ТМ 2.5",
+            "btts": "BTTS",
+            "double_chance": "Двойной шанс",
+            "handicap": "Фора"
+        }
+        for cat, data in status["data_counts"].items():
+            name = category_names.get(cat, cat)
+            ready = "✅" if data["verified"] >= status["min_samples"] else f"⏳ {data['verified']}/{status['min_samples']}"
+            text += f"├ {name}: {data['total']} всего, {data['verified']} проверено {ready}\n"
+    else:
+        text += "├ Пока нет данных\n"
+
+    text += "\n🎯 **Обученные модели:**\n"
+
+    if status["models"]:
+        for cat, info in status["models"].items():
+            name = category_names.get(cat, cat)
+            text += f"├ {name}: {info['accuracy']:.1%} точность ({info['samples']} samples)\n"
+    else:
+        text += "├ Модели ещё не обучены\n"
+        text += f"└ Нужно {status['min_samples']}+ проверенных прогнозов\n"
+
+    if status["ready_to_train"]:
+        text += f"\n⚡ **Готовы к обучению:** {', '.join(status['ready_to_train'])}"
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 Обучить модели", callback_data="ml_train")],
+        [InlineKeyboardButton("🔙 В админку", callback_data="cmd_admin")]
+    ]
+
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def mltrain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force train ML models - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("🔄 Запускаю обучение моделей...")
+
+    results = train_all_models()
+
+    if results:
+        text = "✅ **Обучение завершено:**\n\n"
+        for cat, info in results.items():
+            text += f"• {cat}: {info['accuracy']:.1%} точность\n"
+    else:
+        text = "❌ Недостаточно данных для обучения.\nНужно минимум 100 проверенных прогнозов на категорию."
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all callback queries"""
     query = update.callback_query
     await query.answer()
-    
+
     data = query.data
     user_id = query.from_user.id
     user = get_user(user_id)
@@ -3127,7 +3692,64 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
-    
+
+    elif data == "ml_train":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        await query.edit_message_text("🔄 Запускаю обучение моделей...")
+
+        results = train_all_models()
+
+        if results:
+            text = "✅ **Обучение завершено:**\n\n"
+            for cat, info in results.items():
+                text += f"• {cat}: {info['accuracy']:.1%} точность\n"
+        else:
+            text = "❌ Недостаточно данных для обучения.\nНужно минимум 100 проверенных прогнозов на категорию."
+
+        keyboard = [[InlineKeyboardButton("🔙 ML статус", callback_data="cmd_mlstatus")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_mlstatus":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        status = get_ml_status()
+        text = f"""🤖 **ML СИСТЕМА**
+
+🔧 **Статус:**
+├ ML доступен: {'✅' if status['ml_available'] else '❌'}
+└ Мин. данных для обучения: {status['min_samples']}
+
+"""
+        if status["models"]:
+            text += "🎯 **Обученные модели:**\n"
+            for cat, info in status["models"].items():
+                text += f"├ {cat}: {info['accuracy']:.1%} точность\n"
+        else:
+            text += "🎯 **Модели:** ещё не обучены\n"
+
+        keyboard = [
+            [InlineKeyboardButton("🔄 Обучить", callback_data="ml_train")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_admin":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        # Simplified admin panel for callback
+        text = "👑 **АДМИН-ПАНЕЛЬ**\n\nИспользуй /admin для полной статистики"
+        keyboard = [
+            [InlineKeyboardButton("🤖 ML система", callback_data="cmd_mlstatus")],
+            [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
     # League selection
     elif data.startswith("league_"):
         code = data.replace("league_", "")
@@ -4054,7 +4676,9 @@ def main():
     app.add_handler(CommandHandler("addpremium", addpremium_cmd))
     app.add_handler(CommandHandler("removepremium", removepremium_cmd))
     app.add_handler(CommandHandler("userinfo", userinfo_cmd))
-    
+    app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
+    app.add_handler(CommandHandler("mltrain", mltrain_cmd))
+
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
     
