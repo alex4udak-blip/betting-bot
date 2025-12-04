@@ -49,18 +49,31 @@ matches_cache = {
 
 # Extended competitions for Standard plan (25 leagues)
 COMPETITIONS = {
+    # Tier 1 - Top leagues
     "PL": "Premier League",
     "PD": "La Liga", 
     "BL1": "Bundesliga",
     "SA": "Serie A",
     "FL1": "Ligue 1",
     "CL": "Champions League",
+    "EL": "Europa League",
     "ELC": "Championship",
     "DED": "Eredivisie",
     "PPL": "Primeira Liga",
     "BSA": "Brasileirão",
-    "EL": "Europa League",
-    "CLI": "Conference League",
+    
+    # Tier 2 - Secondary leagues (NEW!)
+    "BL2": "Bundesliga 2",
+    "SB": "Serie B",
+    "FL2": "Ligue 2",
+    "SD": "Segunda División",
+    "SPL": "Scottish Premier",
+    "BJL": "Jupiler Pro League",
+    "ASL": "Liga Argentina",
+    "EL1": "League One",
+    "FAC": "FA Cup",
+    "DFB": "DFB-Pokal",
+    "MLS": "MLS",
 }
 
 # Top clubs that should never be underestimated
@@ -1980,11 +1993,33 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🇩🇪 Bundesliga", callback_data="league_BL1"),
              InlineKeyboardButton("🇮🇹 Serie A", callback_data="league_SA")],
             [InlineKeyboardButton("🇫🇷 Ligue 1", callback_data="league_FL1"),
-             InlineKeyboardButton("🇪🇺 Champions League", callback_data="league_CL")],
-            [InlineKeyboardButton("🇧🇷 Brasileirão", callback_data="league_BSA")],
+             InlineKeyboardButton("🇳🇱 Eredivisie", callback_data="league_DED")],
+            [InlineKeyboardButton("🇵🇹 Primeira Liga", callback_data="league_PPL"),
+             InlineKeyboardButton("🇧🇷 Brasileirão", callback_data="league_BSA")],
+            [InlineKeyboardButton("🇪🇺 Champions League", callback_data="league_CL"),
+             InlineKeyboardButton("🇪🇺 Europa League", callback_data="league_EL")],
+            [InlineKeyboardButton("➕ Ещё лиги", callback_data="cmd_leagues2")],
             [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
         ]
-        await query.edit_message_text("🏆 **Выбери лигу:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text("🏆 **Топ лиги:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    
+    elif data == "cmd_leagues2":
+        keyboard = [
+            [InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship", callback_data="league_ELC"),
+             InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 League One", callback_data="league_EL1")],
+            [InlineKeyboardButton("🇩🇪 Bundesliga 2", callback_data="league_BL2"),
+             InlineKeyboardButton("🇮🇹 Serie B", callback_data="league_SB")],
+            [InlineKeyboardButton("🇫🇷 Ligue 2", callback_data="league_FL2"),
+             InlineKeyboardButton("🇪🇸 Segunda", callback_data="league_SD")],
+            [InlineKeyboardButton("🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland", callback_data="league_SPL"),
+             InlineKeyboardButton("🇧🇪 Belgium", callback_data="league_BJL")],
+            [InlineKeyboardButton("🇦🇷 Argentina", callback_data="league_ASL"),
+             InlineKeyboardButton("🇺🇸 MLS", callback_data="league_MLS")],
+            [InlineKeyboardButton("🏆 FA Cup", callback_data="league_FAC"),
+             InlineKeyboardButton("🏆 DFB-Pokal", callback_data="league_DFB")],
+            [InlineKeyboardButton("🔙 Топ лиги", callback_data="cmd_leagues")]
+        ]
+        await query.edit_message_text("🏆 **Другие лиги:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     elif data == "cmd_settings":
         await settings_cmd(update, context)
