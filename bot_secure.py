@@ -328,23 +328,26 @@ def init_db():
 def get_user(user_id):
     """Get user settings"""
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # Read by column names
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     row = c.fetchone()
     conn.close()
     
     if row:
+        # Convert to dict for safe access
+        data = dict(row)
         return {
-            "user_id": row[0],
-            "username": row[1],
-            "min_odds": row[3] if len(row) > 3 else 1.3,
-            "max_odds": row[4] if len(row) > 4 else 3.0,
-            "risk_level": row[5] if len(row) > 5 else "medium",
-            "language": row[6] if len(row) > 6 else "ru",
-            "is_premium": row[7] if len(row) > 7 else 0,
-            "daily_requests": row[8] if len(row) > 8 else 0,
-            "last_request_date": row[9] if len(row) > 9 else None,
-            "timezone": row[10] if len(row) > 10 else "Europe/Moscow"
+            "user_id": data.get("user_id"),
+            "username": data.get("username"),
+            "min_odds": data.get("min_odds", 1.3),
+            "max_odds": data.get("max_odds", 3.0),
+            "risk_level": data.get("risk_level", "medium"),
+            "language": data.get("language", "ru"),
+            "is_premium": data.get("is_premium", 0),
+            "daily_requests": data.get("daily_requests", 0),
+            "last_request_date": data.get("last_request_date"),
+            "timezone": data.get("timezone", "Europe/Moscow")
         }
     return None
 
@@ -384,12 +387,12 @@ def check_daily_limit(user_id):
         return True, 999
     
     today = datetime.now().strftime("%Y-%m-%d")
-    last_date = user.get("last_request_date")
-    daily_requests = user.get("daily_requests", 0)
+    last_date = user.get("last_request_date") or ""  # Handle None
+    daily_requests = user.get("daily_requests") or 0  # Handle None
     
-    logger.info(f"User {user_id}: requests={daily_requests}, last_date={last_date}, today={today}, limit={FREE_DAILY_LIMIT}")
+    logger.info(f"User {user_id}: requests={daily_requests}, last_date='{last_date}', today={today}, limit={FREE_DAILY_LIMIT}")
     
-    # Reset counter if new day
+    # Reset counter if new day or empty date
     if last_date != today:
         update_user_settings(user_id, daily_requests=0, last_request_date=today)
         logger.info(f"User {user_id}: New day, reset to 0")
@@ -418,8 +421,8 @@ def increment_daily_usage(user_id):
         return
     
     today = datetime.now().strftime("%Y-%m-%d")
-    last_date = user.get("last_request_date")
-    current = user.get("daily_requests", 0)
+    last_date = user.get("last_request_date") or ""  # Handle None
+    current = user.get("daily_requests") or 0  # Handle None
     
     if last_date != today:
         update_user_settings(user_id, daily_requests=1, last_request_date=today)
@@ -2095,7 +2098,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "debug_reset_limit":
         # Reset daily limit for debugging
-        update_user_settings(user_id, daily_requests=0, last_request_date=None)
+        logger.info(f"DEBUG: Resetting limit for user {user_id}")
+        update_user_settings(user_id, daily_requests=0, last_request_date="")
+        user_after = get_user(user_id)
+        logger.info(f"DEBUG: After reset - requests={user_after.get('daily_requests')}, last_date={user_after.get('last_request_date')}")
         await query.edit_message_text(
             f"✅ Лимит сброшен!\n\n"
             f"User ID: {user_id}\n"
@@ -2105,12 +2111,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "debug_remove_premium":
         # Remove premium status for debugging
-        update_user_settings(user_id, is_premium=0, daily_requests=0, last_request_date=None)
+        user_before = get_user(user_id)
+        logger.info(f"DEBUG: Before remove premium - is_premium={user_before.get('is_premium')}")
+        update_user_settings(user_id, is_premium=0, daily_requests=0, last_request_date="")
+        user_after = get_user(user_id)
+        logger.info(f"DEBUG: After remove premium - is_premium={user_after.get('is_premium')}, requests={user_after.get('daily_requests')}")
         await query.edit_message_text(
             f"✅ Premium статус убран!\n\n"
             f"User ID: {user_id}\n"
-            f"Premium: No\n"
-            f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
+            f"Premium: {user_after.get('is_premium')}\n"
+            f"Daily requests: {user_after.get('daily_requests')}/{FREE_DAILY_LIMIT}\n\n"
             f"Теперь лимит будет работать."
         )
     
