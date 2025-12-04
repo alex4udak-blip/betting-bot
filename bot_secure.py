@@ -4420,6 +4420,7 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Found {len(upcoming)} upcoming matches")
     
     for match in upcoming[:3]:
+        match_id = match.get("id")  # Get match ID for tracking
         home = match.get("homeTeam", {}).get("name", "?")
         away = match.get("awayTeam", {}).get("name", "?")
         comp = match.get("competition", {}).get("name", "?")
@@ -4429,26 +4430,56 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         home_form = await get_team_form(home_id) if home_id else None
         away_form = await get_team_form(away_id) if away_id else None
         odds = await get_odds(home, away)
-        
+        h2h = await get_h2h(match_id) if match_id else None
+
+        # Build detailed form text
         form_text = ""
         if home_form:
-            form_text += f"{home}: {home_form['form']}\n"
+            avg_scored = home_form['goals_scored'] / 5 if home_form.get('goals_scored') else 0
+            avg_conceded = home_form['goals_conceded'] / 5 if home_form.get('goals_conceded') else 0
+            form_text += f"{home}: {home_form['form']} ({home_form['wins']}W-{home_form['draws']}D-{home_form['losses']}L), avg goals: {avg_scored:.1f} scored, {avg_conceded:.1f} conceded\n"
         if away_form:
-            form_text += f"{away}: {away_form['form']}"
-        
+            avg_scored = away_form['goals_scored'] / 5 if away_form.get('goals_scored') else 0
+            avg_conceded = away_form['goals_conceded'] / 5 if away_form.get('goals_conceded') else 0
+            form_text += f"{away}: {away_form['form']} ({away_form['wins']}W-{away_form['draws']}D-{away_form['losses']}L), avg goals: {avg_scored:.1f} scored, {avg_conceded:.1f} conceded"
+
+        # Calculate expected goals
+        expected_text = ""
+        if home_form and away_form:
+            home_avg_scored = home_form['goals_scored'] / 5 if home_form.get('goals_scored') else 1.2
+            home_avg_conceded = home_form['goals_conceded'] / 5 if home_form.get('goals_conceded') else 1.2
+            away_avg_scored = away_form['goals_scored'] / 5 if away_form.get('goals_scored') else 1.0
+            away_avg_conceded = away_form['goals_conceded'] / 5 if away_form.get('goals_conceded') else 1.0
+            expected_home = (home_avg_scored + away_avg_conceded) / 2
+            expected_away = (away_avg_scored + home_avg_conceded) / 2
+            expected_total = expected_home + expected_away
+            expected_text = f"Expected goals: {home} ~{expected_home:.1f}, {away} ~{expected_away:.1f}, Total ~{expected_total:.1f}"
+
+        # H2H info
+        h2h_text = ""
+        if h2h:
+            h2h_text = f"H2H ({h2h['home_wins']}-{h2h['draws']}-{h2h['away_wins']}): avg {h2h['avg_goals']:.1f} goals, BTTS {h2h['btts_percent']:.0f}%, Over2.5 {h2h['over25_percent']:.0f}%"
+
         odds_text = ""
         if odds:
             for k, v in odds.items():
                 if not k.startswith("Over") and not k.startswith("Under"):
                     odds_text += f"{k}: {v}, "
-        
+
         # Analyze match and send alerts in user's language
         analysis_prompt = f"""Analyze this match for betting:
 
 Match: {home} vs {away}
 Competition: {comp}
 Form: {form_text if form_text else "Limited data"}
+{expected_text}
+{h2h_text if h2h_text else "No H2H data"}
 Odds: {odds_text if odds_text else "Not available"}
+
+IMPORTANT: Use H2H data and expected goals for totals prediction!
+- If H2H avg goals > 2.8 or Over2.5 > 60% → favor Over 2.5
+- If H2H avg goals < 2.2 or Over2.5 < 40% → favor Under 2.5
+- Expected goals is key for totals prediction
 
 If you find a good bet (70%+ confidence), respond with JSON:
 {{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
@@ -4511,6 +4542,11 @@ If no good bet exists, respond: {{"alert": false}}"""
                             reply_markup=InlineKeyboardMarkup(keyboard),
                             parse_mode="Markdown"
                         )
+
+                        # Save prediction to database for statistics tracking
+                        if match_id:
+                            save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_val)
+                            logger.info(f"Live alert prediction saved: {home} vs {away}, {bet_type} for user {user_id}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
                         
