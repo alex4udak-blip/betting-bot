@@ -1,12 +1,14 @@
 import os
 import logging
-import requests
 import json
 import sqlite3
 import asyncio
-import time
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Any
+
+import aiohttp
+import requests  # Keep for sync fallback in non-async contexts
 from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
@@ -29,12 +31,42 @@ AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
 # Daily free limit for predictions
 FREE_DAILY_LIMIT = 3
 
+# Admin user IDs (add your Telegram user ID here)
+# Get your ID by messaging @userinfobot on Telegram
+ADMIN_IDS: set[int] = {
+    int(admin_id.strip())
+    for admin_id in os.getenv("ADMIN_IDS", "").split(",")
+    if admin_id.strip().isdigit()
+}
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is an admin"""
+    return user_id in ADMIN_IDS
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 claude_client = None
 if CLAUDE_API_KEY:
     claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+
+# Global aiohttp session (initialized on first use)
+_http_session: Optional[aiohttp.ClientSession] = None
+
+async def get_http_session() -> aiohttp.ClientSession:
+    """Get or create global aiohttp session"""
+    global _http_session
+    if _http_session is None or _http_session.closed:
+        timeout = aiohttp.ClientTimeout(total=15)
+        _http_session = aiohttp.ClientSession(timeout=timeout)
+    return _http_session
+
+async def close_http_session() -> None:
+    """Close global aiohttp session"""
+    global _http_session
+    if _http_session and not _http_session.closed:
+        await _http_session.close()
+        _http_session = None
 
 # Live mode subscribers
 live_subscribers = set()
@@ -298,6 +330,12 @@ def init_db():
         checked_at TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(user_id)
     )''')
+
+    # Live alert subscribers (persistent storage)
+    c.execute('''CREATE TABLE IF NOT EXISTS live_subscribers (
+        user_id INTEGER PRIMARY KEY,
+        subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
     
     # Add new columns if they don't exist (for migration)
     try:
@@ -360,15 +398,24 @@ def create_user(user_id, username=None, language="ru"):
     conn.commit()
     conn.close()
 
-def update_user_settings(user_id, **kwargs):
-    """Update user settings"""
+# Whitelist of allowed settings fields (prevents SQL injection)
+ALLOWED_USER_SETTINGS = frozenset({
+    'min_odds', 'max_odds', 'risk_level', 'language',
+    'is_premium', 'daily_requests', 'last_request_date', 'timezone'
+})
+
+def update_user_settings(user_id: int, **kwargs) -> None:
+    """Update user settings (SQL injection safe)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    
+
     for key, value in kwargs.items():
-        if key in ['min_odds', 'max_odds', 'risk_level', 'language', 'is_premium', 'daily_requests', 'last_request_date', 'timezone']:
-            c.execute(f"UPDATE users SET {key} = ? WHERE user_id = ?", (value, user_id))
-    
+        # Only allow whitelisted fields
+        if key in ALLOWED_USER_SETTINGS:
+            # Use parameterized query with validated column name
+            query = f"UPDATE users SET {key} = ? WHERE user_id = ?"
+            c.execute(query, (value, user_id))
+
     conn.commit()
     conn.close()
 
@@ -473,6 +520,38 @@ def get_favorite_leagues(user_id):
     leagues = [row[0] for row in c.fetchall()]
     conn.close()
     return leagues
+
+
+# ===== LIVE SUBSCRIBERS PERSISTENCE =====
+
+def load_live_subscribers() -> set[int]:
+    """Load live subscribers from database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM live_subscribers")
+    subscribers = {row[0] for row in c.fetchall()}
+    conn.close()
+    logger.info(f"Loaded {len(subscribers)} live subscribers from DB")
+    return subscribers
+
+
+def add_live_subscriber(user_id: int) -> None:
+    """Add user to live subscribers in DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO live_subscribers (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def remove_live_subscriber(user_id: int) -> None:
+    """Remove user from live subscribers in DB"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM live_subscribers WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
 
 def categorize_bet(bet_type):
     """Categorize bet type for statistics"""
@@ -763,20 +842,21 @@ Return ONLY valid JSON, no explanation."""
 
 # ===== FOOTBALL DATA API =====
 
-def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
-    """Get matches from Football Data API - only upcoming matches"""
+async def get_matches(competition: Optional[str] = None, date_filter: Optional[str] = None,
+                      days: int = 7, use_cache: bool = True) -> list[dict]:
+    """Get matches from Football Data API - only upcoming matches (ASYNC)"""
     if not FOOTBALL_API_KEY:
         return []
-    
+
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+
     # Check cache
     if use_cache and not competition and not date_filter and days == 7:
-        if (matches_cache["updated_at"] and 
+        if (matches_cache["updated_at"] and
             (datetime.now() - matches_cache["updated_at"]).total_seconds() < matches_cache["ttl_seconds"]):
             logger.info(f"Using cached matches: {len(matches_cache['data'])} matches")
             return matches_cache["data"]
-    
+
     if date_filter == "today":
         date_from = datetime.now().strftime("%Y-%m-%d")
         date_to = date_from
@@ -787,61 +867,65 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
     else:
         date_from = datetime.now().strftime("%Y-%m-%d")
         date_to = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
-    
+
     # Only get SCHEDULED matches (not finished)
     params = {"dateFrom": date_from, "dateTo": date_to, "status": "SCHEDULED"}
-    
+    session = await get_http_session()
+
     if competition:
         try:
             url = f"{FOOTBALL_API_URL}/competitions/{competition}/matches"
-            r = requests.get(url, headers=headers, params=params, timeout=10)
-            if r.status_code == 200:
-                matches = r.json().get("matches", [])
-                # Filter only future matches
-                matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
-                logger.info(f"Got {len(matches)} from {competition}")
-                return matches
-            elif r.status_code == 429:
-                logger.warning(f"Rate limit hit for {competition}, waiting...")
-                time.sleep(6)
-                r = requests.get(url, headers=headers, params=params, timeout=10)
-                if r.status_code == 200:
-                    matches = r.json().get("matches", [])
-                    return [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
-            else:
-                logger.error(f"API error {r.status_code} for {competition}")
+            async with session.get(url, headers=headers, params=params) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    matches = data.get("matches", [])
+                    matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
+                    logger.info(f"Got {len(matches)} from {competition}")
+                    return matches
+                elif r.status == 429:
+                    logger.warning(f"Rate limit hit for {competition}, waiting...")
+                    await asyncio.sleep(6)
+                    async with session.get(url, headers=headers, params=params) as r2:
+                        if r2.status == 200:
+                            data = await r2.json()
+                            matches = data.get("matches", [])
+                            return [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
+                else:
+                    text = await r.text()
+                    logger.error(f"API error {r.status} for {competition}: {text[:100]}")
         except Exception as e:
             logger.error(f"Error getting matches for {competition}: {e}")
         return []
-    
+
     # Get from all leagues with rate limit awareness (Standard plan = 25 leagues, 60 req/min)
     all_matches = []
-    leagues = list(COMPETITIONS.keys())  # Use ALL configured leagues
-    
+    leagues = list(COMPETITIONS.keys())
+
     for code in leagues:
         try:
             url = f"{FOOTBALL_API_URL}/competitions/{code}/matches"
-            r = requests.get(url, headers=headers, params=params, timeout=10)
-            
-            if r.status_code == 200:
-                matches = r.json().get("matches", [])
-                # Filter only future matches
-                matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
-                all_matches.extend(matches)
-                logger.info(f"Got {len(matches)} from {code}")
-            elif r.status_code == 429:
-                logger.warning(f"Rate limit hit at {code}, waiting 6s...")
-                time.sleep(6)
-                r = requests.get(url, headers=headers, params=params, timeout=10)
-                if r.status_code == 200:
-                    matches = r.json().get("matches", [])
+            async with session.get(url, headers=headers, params=params) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    matches = data.get("matches", [])
                     matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
                     all_matches.extend(matches)
-                    logger.info(f"Retry got {len(matches)} from {code}")
-            else:
-                logger.error(f"API error {r.status_code} for {code}: {r.text[:100]}")
-            
-            time.sleep(0.3)
+                    logger.info(f"Got {len(matches)} from {code}")
+                elif r.status == 429:
+                    logger.warning(f"Rate limit hit at {code}, waiting 6s...")
+                    await asyncio.sleep(6)
+                    async with session.get(url, headers=headers, params=params) as r2:
+                        if r2.status == 200:
+                            data = await r2.json()
+                            matches = data.get("matches", [])
+                            matches = [m for m in matches if m.get("status") in ["SCHEDULED", "TIMED"]]
+                            all_matches.extend(matches)
+                            logger.info(f"Retry got {len(matches)} from {code}")
+                else:
+                    text = await r.text()
+                    logger.error(f"API error {r.status} for {code}: {text[:100]}")
+
+            await asyncio.sleep(0.3)
             
         except Exception as e:
             logger.error(f"Error: {e}")
@@ -857,186 +941,188 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
     return all_matches
 
 
-def get_standings(competition="PL"):
-    """Get league standings with home/away stats"""
+async def get_standings(competition: str = "PL") -> Optional[dict]:
+    """Get league standings with home/away stats (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+    session = await get_http_session()
+
     try:
         url = f"{FOOTBALL_API_URL}/competitions/{competition}/standings"
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            standings = data.get("standings", [])
-            
-            result = {"total": [], "home": [], "away": []}
-            for s in standings:
-                table_type = s.get("type", "TOTAL").lower()
-                if table_type in result:
-                    result[table_type] = s.get("table", [])
-            
-            return result
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+                standings = data.get("standings", [])
+
+                result = {"total": [], "home": [], "away": []}
+                for s in standings:
+                    table_type = s.get("type", "TOTAL").lower()
+                    if table_type in result:
+                        result[table_type] = s.get("table", [])
+
+                return result
     except Exception as e:
         logger.error(f"Standings error: {e}")
     return None
 
 
-def get_team_form(team_id, limit=5):
-    """Get team's recent form (last N matches)"""
+async def get_team_form(team_id: int, limit: int = 5) -> Optional[dict]:
+    """Get team's recent form (last N matches) (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+    session = await get_http_session()
+
     try:
         url = f"{FOOTBALL_API_URL}/teams/{team_id}/matches"
         params = {"status": "FINISHED", "limit": limit}
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-        
-        if r.status_code == 200:
-            matches = r.json().get("matches", [])
-            
-            form = []
-            goals_scored = 0
-            goals_conceded = 0
-            
-            for m in matches[:limit]:
-                home_id = m.get("homeTeam", {}).get("id")
-                score = m.get("score", {}).get("fullTime", {})
-                home_goals = score.get("home", 0) or 0
-                away_goals = score.get("away", 0) or 0
-                
-                if home_id == team_id:
-                    goals_scored += home_goals
-                    goals_conceded += away_goals
-                    if home_goals > away_goals:
-                        form.append("W")
-                    elif home_goals < away_goals:
-                        form.append("L")
+        async with session.get(url, headers=headers, params=params) as r:
+            if r.status == 200:
+                data = await r.json()
+                matches = data.get("matches", [])
+
+                form = []
+                goals_scored = 0
+                goals_conceded = 0
+
+                for m in matches[:limit]:
+                    home_id = m.get("homeTeam", {}).get("id")
+                    score = m.get("score", {}).get("fullTime", {})
+                    home_goals = score.get("home", 0) or 0
+                    away_goals = score.get("away", 0) or 0
+
+                    if home_id == team_id:
+                        goals_scored += home_goals
+                        goals_conceded += away_goals
+                        if home_goals > away_goals:
+                            form.append("W")
+                        elif home_goals < away_goals:
+                            form.append("L")
+                        else:
+                            form.append("D")
                     else:
-                        form.append("D")
-                else:
-                    goals_scored += away_goals
-                    goals_conceded += home_goals
-                    if away_goals > home_goals:
-                        form.append("W")
-                    elif away_goals < home_goals:
-                        form.append("L")
-                    else:
-                        form.append("D")
-            
-            return {
-                "form": "".join(form),
-                "wins": form.count("W"),
-                "draws": form.count("D"),
-                "losses": form.count("L"),
-                "goals_scored": goals_scored,
-                "goals_conceded": goals_conceded,
-                "matches": matches[:limit]
-            }
+                        goals_scored += away_goals
+                        goals_conceded += home_goals
+                        if away_goals > home_goals:
+                            form.append("W")
+                        elif away_goals < home_goals:
+                            form.append("L")
+                        else:
+                            form.append("D")
+
+                return {
+                    "form": "".join(form),
+                    "wins": form.count("W"),
+                    "draws": form.count("D"),
+                    "losses": form.count("L"),
+                    "goals_scored": goals_scored,
+                    "goals_conceded": goals_conceded,
+                    "matches": matches[:limit]
+                }
     except Exception as e:
         logger.error(f"Form error: {e}")
     return None
 
 
-def get_h2h(match_id):
-    """Get head-to-head history"""
+async def get_h2h(match_id: int) -> Optional[dict]:
+    """Get head-to-head history (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+    session = await get_http_session()
+
     try:
         url = f"{FOOTBALL_API_URL}/matches/{match_id}/head2head"
         params = {"limit": 10}
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-        
-        if r.status_code == 200:
-            data = r.json()
-            matches = data.get("matches", [])
-            aggregates = data.get("aggregates", {})
-            
-            home_wins = 0
-            away_wins = 0
-            draws = 0
-            total_goals = 0
-            btts_count = 0
-            over25_count = 0
-            
-            for m in matches:
-                score = m.get("score", {}).get("fullTime", {})
-                home_goals = score.get("home", 0) or 0
-                away_goals = score.get("away", 0) or 0
-                
-                total_goals += home_goals + away_goals
-                
-                if home_goals > 0 and away_goals > 0:
-                    btts_count += 1
-                
-                if home_goals + away_goals > 2.5:
-                    over25_count += 1
-                
-                if home_goals > away_goals:
-                    home_wins += 1
-                elif away_goals > home_goals:
-                    away_wins += 1
-                else:
-                    draws += 1
-            
-            num_matches = len(matches)
-            return {
-                "matches": matches,
-                "aggregates": aggregates,
-                "home_wins": home_wins,
-                "away_wins": away_wins,
-                "draws": draws,
-                "avg_goals": total_goals / num_matches if num_matches > 0 else 0,
-                "btts_percent": btts_count / num_matches * 100 if num_matches > 0 else 0,
-                "over25_percent": over25_count / num_matches * 100 if num_matches > 0 else 0
-            }
+        async with session.get(url, headers=headers, params=params) as r:
+            if r.status == 200:
+                data = await r.json()
+                matches = data.get("matches", [])
+                aggregates = data.get("aggregates", {})
+
+                home_wins = 0
+                away_wins = 0
+                draws = 0
+                total_goals = 0
+                btts_count = 0
+                over25_count = 0
+
+                for m in matches:
+                    score = m.get("score", {}).get("fullTime", {})
+                    home_goals = score.get("home", 0) or 0
+                    away_goals = score.get("away", 0) or 0
+
+                    total_goals += home_goals + away_goals
+
+                    if home_goals > 0 and away_goals > 0:
+                        btts_count += 1
+
+                    if home_goals + away_goals > 2.5:
+                        over25_count += 1
+
+                    if home_goals > away_goals:
+                        home_wins += 1
+                    elif away_goals > home_goals:
+                        away_wins += 1
+                    else:
+                        draws += 1
+
+                num_matches = len(matches)
+                return {
+                    "matches": matches,
+                    "aggregates": aggregates,
+                    "home_wins": home_wins,
+                    "away_wins": away_wins,
+                    "draws": draws,
+                    "avg_goals": total_goals / num_matches if num_matches > 0 else 0,
+                    "btts_percent": btts_count / num_matches * 100 if num_matches > 0 else 0,
+                    "over25_percent": over25_count / num_matches * 100 if num_matches > 0 else 0
+                }
     except Exception as e:
         logger.error(f"H2H error: {e}")
     return None
 
 
-def get_lineups(match_id):
-    """Get match lineups (Standard plan feature)"""
+async def get_lineups(match_id: int) -> Optional[dict]:
+    """Get match lineups (Standard plan feature) (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+    session = await get_http_session()
+
     try:
         url = f"{FOOTBALL_API_URL}/matches/{match_id}"
-        r = requests.get(url, headers=headers, timeout=10)
-        
-        if r.status_code == 200:
-            data = r.json()
-            
-            home_team = data.get("homeTeam", {}).get("name", "?")
-            away_team = data.get("awayTeam", {}).get("name", "?")
-            
-            # Get lineups if available
-            home_lineup = []
-            away_lineup = []
-            
-            home_data = data.get("homeTeam", {})
-            away_data = data.get("awayTeam", {})
-            
-            # Try to get lineup from match data
-            if "lineup" in home_data:
-                home_lineup = home_data.get("lineup", [])
-            if "lineup" in away_data:
-                away_lineup = away_data.get("lineup", [])
-            
-            # Get injured/suspended players
-            home_injuries = []
-            away_injuries = []
-            
-            # Check for injuries in team data
-            if home_data.get("injuries"):
-                home_injuries = home_data.get("injuries", [])
-            if away_data.get("injuries"):
-                away_injuries = away_data.get("injuries", [])
-            
-            return {
-                "home_team": home_team,
-                "away_team": away_team,
-                "home_lineup": home_lineup,
-                "away_lineup": away_lineup,
-                "home_injuries": home_injuries,
-                "away_injuries": away_injuries,
-                "status": data.get("status", "SCHEDULED"),
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+
+                home_team = data.get("homeTeam", {}).get("name", "?")
+                away_team = data.get("awayTeam", {}).get("name", "?")
+
+                # Get lineups if available
+                home_lineup = []
+                away_lineup = []
+
+                home_data = data.get("homeTeam", {})
+                away_data = data.get("awayTeam", {})
+
+                # Try to get lineup from match data
+                if "lineup" in home_data:
+                    home_lineup = home_data.get("lineup", [])
+                if "lineup" in away_data:
+                    away_lineup = away_data.get("lineup", [])
+
+                # Get injured/suspended players
+                home_injuries = []
+                away_injuries = []
+
+                # Check for injuries in team data
+                if home_data.get("injuries"):
+                    home_injuries = home_data.get("injuries", [])
+                if away_data.get("injuries"):
+                    away_injuries = away_data.get("injuries", [])
+
+                return {
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "home_lineup": home_lineup,
+                    "away_lineup": away_lineup,
+                    "home_injuries": home_injuries,
+                    "away_injuries": away_injuries,
+                    "status": data.get("status", "SCHEDULED"),
                 "venue": data.get("venue", "Unknown")
             }
     except Exception as e:
@@ -1044,66 +1130,68 @@ def get_lineups(match_id):
     return None
 
 
-def get_team_squad(team_id):
-    """Get team squad with player details"""
+async def get_team_squad(team_id: int) -> Optional[dict]:
+    """Get team squad with player details (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
+    session = await get_http_session()
+
     try:
         url = f"{FOOTBALL_API_URL}/teams/{team_id}"
-        r = requests.get(url, headers=headers, timeout=10)
-        
-        if r.status_code == 200:
-            data = r.json()
-            squad = data.get("squad", [])
-            
-            players_by_position = {
-                "Goalkeeper": [],
-                "Defence": [],
-                "Midfield": [],
-                "Offence": []
-            }
-            
-            key_players = []
-            
-            for player in squad:
-                position = player.get("position", "Unknown")
-                name = player.get("name", "?")
-                nationality = player.get("nationality", "?")
-                
-                if position in players_by_position:
-                    players_by_position[position].append({
-                        "name": name,
-                        "nationality": nationality,
-                        "id": player.get("id")
-                    })
-                
-                # Mark experienced players as key
-                if player.get("dateOfBirth"):
-                    try:
-                        birth = datetime.fromisoformat(player["dateOfBirth"].replace("Z", "+00:00"))
-                        age = (datetime.now(birth.tzinfo) - birth).days // 365
-                        if age > 28:  # Experienced player
-                            key_players.append(name)
-                    except:
-                        pass
-            
-            return {
-                "team_name": data.get("name", "?"),
-                "coach": data.get("coach", {}).get("name", "Unknown"),
-                "squad_size": len(squad),
-                "players_by_position": players_by_position,
-                "key_players": key_players[:5]  # Top 5 key players
-            }
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+                squad = data.get("squad", [])
+
+                players_by_position = {
+                    "Goalkeeper": [],
+                    "Defence": [],
+                    "Midfield": [],
+                    "Offence": []
+                }
+
+                key_players = []
+
+                for player in squad:
+                    position = player.get("position", "Unknown")
+                    name = player.get("name", "?")
+                    nationality = player.get("nationality", "?")
+
+                    if position in players_by_position:
+                        players_by_position[position].append({
+                            "name": name,
+                            "nationality": nationality,
+                            "id": player.get("id")
+                        })
+
+                    # Mark experienced players as key
+                    if player.get("dateOfBirth"):
+                        try:
+                            birth = datetime.fromisoformat(player["dateOfBirth"].replace("Z", "+00:00"))
+                            age = (datetime.now(birth.tzinfo) - birth).days // 365
+                            if age > 28:  # Experienced player
+                                key_players.append(name)
+                        except:
+                            pass
+
+                return {
+                    "team_name": data.get("name", "?"),
+                    "coach": data.get("coach", {}).get("name", "Unknown"),
+                    "squad_size": len(squad),
+                    "players_by_position": players_by_position,
+                    "key_players": key_players[:5]  # Top 5 key players
+                }
     except Exception as e:
         logger.error(f"Squad error: {e}")
     return None
 
 
-def get_odds(home_team, away_team):
-    """Get betting odds"""
+async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
+    """Get betting odds (ASYNC)"""
     if not ODDS_API_KEY:
         return None
-    
+
+    session = await get_http_session()
+
     try:
         url = f"{ODDS_API_URL}/sports/soccer/odds"
         params = {
@@ -1112,32 +1200,31 @@ def get_odds(home_team, away_team):
             "markets": "h2h,totals",
             "oddsFormat": "decimal"
         }
-        r = requests.get(url, params=params, timeout=10)
-        
-        if r.status_code == 200:
-            events = r.json()
-            
-            home_lower = (home_team or "").lower()
-            away_lower = (away_team or "").lower()
-            
-            for event in events:
-                event_home = (event.get("home_team") or "").lower()
-                event_away = (event.get("away_team") or "").lower()
-                
-                if (home_lower in event_home or away_lower in event_away):
-                    
-                    odds = {}
-                    for bookmaker in event.get("bookmakers", [])[:1]:
-                        for market in bookmaker.get("markets", []):
-                            if market.get("key") == "h2h":
-                                for outcome in market.get("outcomes", []):
-                                    odds[outcome.get("name")] = outcome.get("price")
-                            elif market.get("key") == "totals":
-                                for outcome in market.get("outcomes", []):
-                                    name = outcome.get("name")
-                                    point = outcome.get("point", 2.5)
-                                    odds[f"{name}_{point}"] = outcome.get("price")
-                    return odds
+        async with session.get(url, params=params) as r:
+            if r.status == 200:
+                events = await r.json()
+
+                home_lower = (home_team or "").lower()
+                away_lower = (away_team or "").lower()
+
+                for event in events:
+                    event_home = (event.get("home_team") or "").lower()
+                    event_away = (event.get("away_team") or "").lower()
+
+                    if (home_lower in event_home or away_lower in event_away):
+
+                        odds = {}
+                        for bookmaker in event.get("bookmakers", [])[:1]:
+                            for market in bookmaker.get("markets", []):
+                                if market.get("key") == "h2h":
+                                    for outcome in market.get("outcomes", []):
+                                        odds[outcome.get("name")] = outcome.get("price")
+                                elif market.get("key") == "totals":
+                                    for outcome in market.get("outcomes", []):
+                                        name = outcome.get("name")
+                                        point = outcome.get("point", 2.5)
+                                        odds[f"{name}_{point}"] = outcome.get("price")
+                        return odds
     except Exception as e:
         logger.error(f"Odds error: {e}")
     return None
@@ -1213,12 +1300,13 @@ def get_match_warnings(match, home_form, away_form, lang="ru"):
 
 # ===== ENHANCED ANALYSIS =====
 
-def analyze_match_enhanced(match, user_settings=None, lang="ru"):
-    """Enhanced match analysis with form, H2H, and home/away stats"""
-    
+async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = None,
+                                 lang: str = "ru") -> str:
+    """Enhanced match analysis with form, H2H, and home/away stats (ASYNC)"""
+
     if not claude_client:
         return "AI unavailable"
-    
+
     home = match.get("homeTeam", {}).get("name", "?")
     away = match.get("awayTeam", {}).get("name", "?")
     home_id = match.get("homeTeam", {}).get("id")
@@ -1226,17 +1314,17 @@ def analyze_match_enhanced(match, user_settings=None, lang="ru"):
     match_id = match.get("id")
     comp = match.get("competition", {}).get("name", "?")
     comp_code = match.get("competition", {}).get("code", "PL")
-    
-    # Get all data
-    home_form = get_team_form(home_id) if home_id else None
-    away_form = get_team_form(away_id) if away_id else None
-    h2h = get_h2h(match_id) if match_id else None
-    odds = get_odds(home, away)
-    standings = get_standings(comp_code)
-    lineups = get_lineups(match_id) if match_id else None
-    home_squad = get_team_squad(home_id) if home_id else None
-    away_squad = get_team_squad(away_id) if away_id else None
-    
+
+    # Get all data (async)
+    home_form = await get_team_form(home_id) if home_id else None
+    away_form = await get_team_form(away_id) if away_id else None
+    h2h = await get_h2h(match_id) if match_id else None
+    odds = await get_odds(home, away)
+    standings = await get_standings(comp_code)
+    lineups = await get_lineups(match_id) if match_id else None
+    home_squad = await get_team_squad(home_id) if home_id else None
+    away_squad = await get_team_squad(away_id) if away_id else None
+
     # Get warnings
     warnings = get_match_warnings(match, home_form, away_form, lang)
     
@@ -1399,17 +1487,20 @@ Bank %: 75%+=4-5%, 70-75%=3%, 65-70%=2%, 60-65%=1%, <60%=0.5%"""
         return f"Error: {e}"
 
 
-def get_recommendations_enhanced(matches, user_query="", user_settings=None, league_filter=None, lang="ru"):
-    """Enhanced recommendations with user preferences"""
-    
+async def get_recommendations_enhanced(matches: list, user_query: str = "",
+                                       user_settings: Optional[dict] = None,
+                                       league_filter: Optional[str] = None,
+                                       lang: str = "ru") -> Optional[str]:
+    """Enhanced recommendations with user preferences (ASYNC)"""
+
     logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
-    
+
     if not claude_client:
         return None
-    
+
     if not matches:
         return "❌ Нет доступных матчей." if lang == "ru" else "❌ No matches available."
-    
+
     # Filter by league
     if league_filter:
         league_names = {
@@ -1423,11 +1514,11 @@ def get_recommendations_enhanced(matches, user_query="", user_settings=None, lea
         }
         target_league = league_names.get(league_filter, league_filter) or ""
         matches = [m for m in matches if target_league.lower() in (m.get("competition", {}).get("name") or "").lower()]
-    
+
     if not matches:
         return "❌ Нет матчей для выбранной лиги." if lang == "ru" else "❌ No matches for selected league."
-    
-    # Get form data for top matches
+
+    # Get form data for top matches (async)
     matches_data = []
     for m in matches[:8]:
         home = m.get("homeTeam", {}).get("name", "?")
@@ -1435,13 +1526,13 @@ def get_recommendations_enhanced(matches, user_query="", user_settings=None, lea
         comp = m.get("competition", {}).get("name", "?")
         home_id = m.get("homeTeam", {}).get("id")
         away_id = m.get("awayTeam", {}).get("id")
-        
-        home_form = get_team_form(home_id) if home_id else None
-        away_form = get_team_form(away_id) if away_id else None
-        
+
+        home_form = await get_team_form(home_id) if home_id else None
+        away_form = await get_team_form(away_id) if away_id else None
+
         # Get warnings
         warnings = get_match_warnings(m, home_form, away_form, lang)
-        
+
         match_info = f"{home} vs {away} ({comp})"
         if warnings:
             match_info += f"\n  ⚠️ " + ", ".join(warnings)
@@ -1449,9 +1540,9 @@ def get_recommendations_enhanced(matches, user_query="", user_settings=None, lea
             match_info += f"\n  {home} форма: {home_form['form']}"
         if away_form:
             match_info += f"\n  {away} форма: {away_form['form']}"
-        
+
         matches_data.append(match_info)
-    
+
     matches_text = "\n\n".join(matches_data)
     
     # User preferences
@@ -1565,7 +1656,7 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     status = await update.message.reply_text(get_text("analyzing", lang))
     
-    matches = get_matches(date_filter="today")
+    matches = await get_matches(date_filter="today")
     
     if not matches:
         await status.edit_text(get_text("no_matches", lang))
@@ -1606,7 +1697,7 @@ async def tomorrow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     status = await update.message.reply_text(get_text("analyzing", lang))
     
-    matches = get_matches(date_filter="tomorrow")
+    matches = await get_matches(date_filter="tomorrow")
     
     if not matches:
         await status.edit_text(get_text("no_matches", lang))
@@ -1805,26 +1896,15 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
-async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get recommendations with user preferences"""
-    user_id = update.effective_user.id
-    user = get_user(user_id)
-    lang = user.get("language", "ru") if user else "ru"
-    
-    # Check daily limit
-    can_use, remaining = check_daily_limit(user_id)
-    if not can_use:
-        text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-    
-    status = await update.message.reply_text(get_text("analyzing", lang))
-
-
 async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Debug command to check user status and limits"""
+    """Debug command to check user status and limits (ADMIN ONLY)"""
     user_id = update.effective_user.id
+
+    # Check admin permission
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Эта команда доступна только администраторам.")
+        return
+
     user = get_user(user_id)
     
     if not user:
@@ -1881,14 +1961,14 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     status = await update.message.reply_text(get_text("analyzing", lang))
     
-    matches = get_matches(days=7)
+    matches = await get_matches(days=7)
     
     if not matches:
         await status.edit_text(get_text("no_matches", lang))
         return
     
     user_query = update.message.text or ""
-    recs = get_recommendations_enhanced(matches, user_query, user, lang=lang)
+    recs = await get_recommendations_enhanced(matches, user_query, user, lang=lang)
     
     if recs:
         # Add affiliate button
@@ -1982,9 +2062,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         await query.edit_message_text(get_text("analyzing", lang))
-        matches = get_matches(days=7)
+        matches = await get_matches(days=7)
         if matches:
-            recs = get_recommendations_enhanced(matches, "", user, lang=lang)
+            recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
                 [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
@@ -1997,7 +2077,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cmd_today":
         user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
         await query.edit_message_text(get_text("analyzing", lang))
-        matches = get_matches(date_filter="today")
+        matches = await get_matches(date_filter="today")
         if not matches:
             await query.edit_message_text(get_text("no_matches", lang))
             return
@@ -2029,7 +2109,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cmd_tomorrow":
         user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
         await query.edit_message_text(get_text("analyzing", lang))
-        matches = get_matches(date_filter="tomorrow")
+        matches = await get_matches(date_filter="tomorrow")
         if not matches:
             await query.edit_message_text(get_text("no_matches", lang))
             return
@@ -2097,7 +2177,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await settings_cmd(update, context)
     
     elif data == "debug_reset_limit":
-        # Reset daily limit for debugging
+        # ADMIN ONLY: Reset daily limit for debugging
+        if not is_admin(user_id):
+            await query.answer("⛔ Только для админов", show_alert=True)
+            return
         logger.info(f"DEBUG: Resetting limit for user {user_id}")
         update_user_settings(user_id, daily_requests=0, last_request_date="")
         user_after = get_user(user_id)
@@ -2108,9 +2191,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
             f"Теперь можешь делать {FREE_DAILY_LIMIT} новых прогнозов."
         )
-    
+
     elif data == "debug_remove_premium":
-        # Remove premium status for debugging
+        # ADMIN ONLY: Remove premium status for debugging
+        if not is_admin(user_id):
+            await query.answer("⛔ Только для админов", show_alert=True)
+            return
         user_before = get_user(user_id)
         logger.info(f"DEBUG: Before remove premium - is_premium={user_before.get('is_premium')}")
         update_user_settings(user_id, is_premium=0, daily_requests=0, last_request_date="")
@@ -2157,7 +2243,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("league_"):
         code = data.replace("league_", "")
         await query.edit_message_text(f"🔍 Загружаю {COMPETITIONS.get(code, code)}...")
-        matches = get_matches(code, days=14)
+        matches = await get_matches(code, days=14)
         
         if not matches:
             await query.edit_message_text(f"❌ Нет матчей {COMPETITIONS.get(code, code)}")
@@ -2194,14 +2280,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(get_text("analyzing", lang))
         
         if context_type == "today":
-            matches = get_matches(date_filter="today")
+            matches = await get_matches(date_filter="today")
         elif context_type == "tomorrow":
-            matches = get_matches(date_filter="tomorrow")
+            matches = await get_matches(date_filter="tomorrow")
         else:
-            matches = get_matches(context_type, days=14)
+            matches = await get_matches(context_type, days=14)
         
         if matches:
-            recs = get_recommendations_enhanced(matches, "", user, lang=lang)
+            recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
                 [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
@@ -2453,11 +2539,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         await status.edit_text("🔍 Анализирую лучшие ставки...")
-        matches = get_matches(days=7)
+        matches = await get_matches(days=7)
         if not matches:
             await status.edit_text(get_text("no_matches", lang))
             return
-        recs = get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
+        recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
         if recs:
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
@@ -2470,7 +2556,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if intent == "matches_list":
-        matches = get_matches(league, days=14) if league else get_matches(days=14)
+        matches = await get_matches(league, days=14) if league else await get_matches(days=14)
         if not matches:
             await status.edit_text(get_text("no_matches", lang))
             return
@@ -2506,7 +2592,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await status.edit_text("🔍 Ищу матч...")
     
-    matches = get_matches(days=14)
+    matches = await get_matches(days=14)
     match = None
     
     if teams:
@@ -2537,7 +2623,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status.edit_text(f"✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...")
     
     # Enhanced analysis
-    analysis = analyze_match_enhanced(match, user, lang)
+    analysis = await analyze_match_enhanced(match, user, lang)
     
     # Extract and save prediction - parse ONLY from MAIN BET section
     try:
@@ -2644,11 +2730,12 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== LIVE ALERTS SYSTEM =====
 
 async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle live alerts subscription"""
+    """Toggle live alerts subscription (with DB persistence)"""
     user_id = update.effective_user.id
-    
+
     if user_id in live_subscribers:
         live_subscribers.remove(user_id)
+        remove_live_subscriber(user_id)  # Save to DB
         await update.message.reply_text(
             "🔕 **Live-алерты выключены**\n\n"
             "Напиши /live чтобы включить снова.",
@@ -2656,6 +2743,7 @@ async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         live_subscribers.add(user_id)
+        add_live_subscriber(user_id)  # Save to DB
         await update.message.reply_text(
             "🔔 **Live-алерты включены!**\n\n"
             "Каждые 10 минут проверяю матчи.\n"
@@ -2674,7 +2762,7 @@ async def testalert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     was_subscribed = user_id in live_subscribers
     live_subscribers.add(user_id)
     
-    matches = get_matches(days=1, use_cache=False)
+    matches = await get_matches(days=1, use_cache=False)
     
     if not matches:
         await update.message.reply_text("❌ Нет матчей сегодня")
@@ -2777,7 +2865,7 @@ async def check_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text += f"   ⏳ Матч не завершён\n"
             
             text += "\n"
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             text += f"   ❌ Ошибка\n\n"
@@ -2795,7 +2883,7 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"Checking live for {len(live_subscribers)} subscribers...")
     
-    matches = get_matches(days=1)
+    matches = await get_matches(days=1)
     
     if not matches:
         return
@@ -2825,9 +2913,9 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         home_id = match.get("homeTeam", {}).get("id")
         away_id = match.get("awayTeam", {}).get("id")
         
-        home_form = get_team_form(home_id) if home_id else None
-        away_form = get_team_form(away_id) if away_id else None
-        odds = get_odds(home, away)
+        home_form = await get_team_form(home_id) if home_id else None
+        away_form = await get_team_form(away_id) if away_id else None
+        odds = await get_odds(home, away)
         
         form_text = ""
         if home_form:
@@ -2889,7 +2977,7 @@ ONLY respond "NO_ALERT" if no good bet exists."""
         except Exception as e:
             logger.error(f"Claude error: {e}")
         
-        time.sleep(1)
+        await asyncio.sleep(1)
 
 
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
@@ -2954,7 +3042,7 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                     except:
                         pass
             
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             logger.error(f"Error checking {pred['id']}: {e}")
@@ -2972,12 +3060,12 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
     
     logger.info("Sending daily digest...")
     
-    matches = get_matches(date_filter="today")
+    matches = await get_matches(date_filter="today")
     
     if not matches:
         return
     
-    recs = get_recommendations_enhanced(matches, "daily digest")
+    recs = await get_recommendations_enhanced(matches, "daily digest")
     
     if not recs:
         return
@@ -3004,10 +3092,15 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
 # ===== MAIN =====
 
 def main():
+    global live_subscribers
     init_db()
-    
-    print("🚀 Starting AI Betting Bot v13 Complete...")
+
+    # Load persistent subscribers from DB
+    live_subscribers = load_live_subscribers()
+
+    print("🚀 Starting AI Betting Bot v14 (Refactored)...")
     print(f"   💾 Database: {DB_PATH}")
+    print(f"   👥 Live subscribers: {len(live_subscribers)}")
     
     if not TELEGRAM_TOKEN:
         print("❌ TELEGRAM_TOKEN not set!")
@@ -3017,6 +3110,7 @@ def main():
     print(f"   ✅ Football Data ({len(COMPETITIONS)} leagues)" if FOOTBALL_API_KEY else "   ⚠️ No Football API")
     print("   ✅ Odds API (20K credits)" if ODDS_API_KEY else "   ⚠️ No Odds API")
     print("   ✅ Claude AI" if CLAUDE_API_KEY else "   ⚠️ No Claude API")
+    print(f"   👑 Admins: {len(ADMIN_IDS)}" if ADMIN_IDS else "   ⚠️ No admins configured")
     print(f"   🔗 Affiliate: 1win")
     
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -3050,7 +3144,7 @@ def main():
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
     job_queue.run_repeating(check_predictions_results, interval=3600, first=600)
     
-    print("\n✅ Bot v13 Complete running!")
+    print("\n✅ Bot v14 (Refactored) running!")
     print("   🔥 Features:")
     print("   • Reply keyboard menu (always visible)")
     print("   • Multi-language (RU/EN/PT/ES)")
@@ -3059,9 +3153,11 @@ def main():
     print("   • 1win affiliate integration")
     print("   • Cup/Top club warnings")
     print(f"   • {len(COMPETITIONS)} leagues (Standard plan)")
-    print("   • Live alerts system")
+    print("   • Live alerts system (persistent)")
     print("   • Prediction tracking")
     print("   • Daily digest")
+    print("   • Admin-only debug commands")
+    print("   • Async API calls (aiohttp)")
     
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
