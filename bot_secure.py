@@ -1357,6 +1357,265 @@ async def get_h2h(match_id: int) -> Optional[dict]:
     return None
 
 
+async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict]:
+    """Get enhanced team form with home/away split and average goals"""
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    session = await get_http_session()
+
+    try:
+        url = f"{FOOTBALL_API_URL}/teams/{team_id}/matches"
+        params = {"status": "FINISHED", "limit": limit}
+        async with session.get(url, headers=headers, params=params) as r:
+            if r.status == 200:
+                data = await r.json()
+                matches = data.get("matches", [])
+
+                # Overall stats
+                overall = {"w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "form": []}
+                # Home stats
+                home = {"w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "matches": 0}
+                # Away stats
+                away = {"w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "matches": 0}
+                # BTTS tracking
+                btts_count = 0
+                over25_count = 0
+
+                for m in matches[:limit]:
+                    home_id = m.get("homeTeam", {}).get("id")
+                    score = m.get("score", {}).get("fullTime", {})
+                    home_goals = score.get("home", 0) or 0
+                    away_goals = score.get("away", 0) or 0
+
+                    # BTTS and totals
+                    if home_goals > 0 and away_goals > 0:
+                        btts_count += 1
+                    if home_goals + away_goals > 2.5:
+                        over25_count += 1
+
+                    is_home = (home_id == team_id)
+                    team_goals = home_goals if is_home else away_goals
+                    opp_goals = away_goals if is_home else home_goals
+
+                    # Overall
+                    overall["gf"] += team_goals
+                    overall["ga"] += opp_goals
+
+                    if team_goals > opp_goals:
+                        overall["w"] += 1
+                        overall["form"].append("W")
+                    elif team_goals < opp_goals:
+                        overall["l"] += 1
+                        overall["form"].append("L")
+                    else:
+                        overall["d"] += 1
+                        overall["form"].append("D")
+
+                    # Home/Away split
+                    if is_home:
+                        home["matches"] += 1
+                        home["gf"] += team_goals
+                        home["ga"] += opp_goals
+                        if team_goals > opp_goals:
+                            home["w"] += 1
+                        elif team_goals < opp_goals:
+                            home["l"] += 1
+                        else:
+                            home["d"] += 1
+                    else:
+                        away["matches"] += 1
+                        away["gf"] += team_goals
+                        away["ga"] += opp_goals
+                        if team_goals > opp_goals:
+                            away["w"] += 1
+                        elif team_goals < opp_goals:
+                            away["l"] += 1
+                        else:
+                            away["d"] += 1
+
+                num_matches = len(matches[:limit])
+                home_matches = home["matches"] or 1
+                away_matches = away["matches"] or 1
+
+                return {
+                    "overall": {
+                        "form": "".join(overall["form"][:5]),
+                        "wins": overall["w"],
+                        "draws": overall["d"],
+                        "losses": overall["l"],
+                        "goals_scored": overall["gf"],
+                        "goals_conceded": overall["ga"],
+                        "avg_goals_scored": round(overall["gf"] / num_matches, 2) if num_matches > 0 else 0,
+                        "avg_goals_conceded": round(overall["ga"] / num_matches, 2) if num_matches > 0 else 0,
+                    },
+                    "home": {
+                        "matches": home["matches"],
+                        "wins": home["w"],
+                        "draws": home["d"],
+                        "losses": home["l"],
+                        "goals_scored": home["gf"],
+                        "goals_conceded": home["ga"],
+                        "avg_goals_scored": round(home["gf"] / home_matches, 2),
+                        "avg_goals_conceded": round(home["ga"] / home_matches, 2),
+                        "win_rate": round(home["w"] / home_matches * 100, 1),
+                    },
+                    "away": {
+                        "matches": away["matches"],
+                        "wins": away["w"],
+                        "draws": away["d"],
+                        "losses": away["l"],
+                        "goals_scored": away["gf"],
+                        "goals_conceded": away["ga"],
+                        "avg_goals_scored": round(away["gf"] / away_matches, 2),
+                        "avg_goals_conceded": round(away["ga"] / away_matches, 2),
+                        "win_rate": round(away["w"] / away_matches * 100, 1),
+                    },
+                    "btts_percent": round(btts_count / num_matches * 100, 1) if num_matches > 0 else 0,
+                    "over25_percent": round(over25_count / num_matches * 100, 1) if num_matches > 0 else 0,
+                }
+    except Exception as e:
+        logger.error(f"Enhanced form error: {e}")
+    return None
+
+
+async def get_top_scorers(competition: str = "PL", limit: int = 10) -> Optional[list]:
+    """Get top scorers of the competition (Standard plan feature)"""
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    session = await get_http_session()
+
+    try:
+        url = f"{FOOTBALL_API_URL}/competitions/{competition}/scorers"
+        params = {"limit": limit}
+        async with session.get(url, headers=headers, params=params) as r:
+            if r.status == 200:
+                data = await r.json()
+                scorers = data.get("scorers", [])
+
+                return [{
+                    "name": s.get("player", {}).get("name", "?"),
+                    "team": s.get("team", {}).get("name", "?"),
+                    "team_id": s.get("team", {}).get("id"),
+                    "goals": s.get("goals", 0),
+                    "assists": s.get("assists", 0),
+                    "played": s.get("playedMatches", 0),
+                    "goals_per_match": round(s.get("goals", 0) / max(s.get("playedMatches", 1), 1), 2)
+                } for s in scorers]
+    except Exception as e:
+        logger.error(f"Top scorers error: {e}")
+    return None
+
+
+def calculate_value_bet(confidence: float, odds: float) -> dict:
+    """Calculate if a bet has value based on confidence and odds"""
+    implied_prob = 1 / odds if odds > 0 else 0
+    our_prob = confidence / 100
+
+    value = our_prob - implied_prob
+    value_percent = round(value * 100, 1)
+
+    # Expected value calculation
+    ev = (our_prob * (odds - 1)) - (1 - our_prob)
+    ev_percent = round(ev * 100, 1)
+
+    return {
+        "implied_prob": round(implied_prob * 100, 1),
+        "our_prob": round(our_prob * 100, 1),
+        "value": value_percent,
+        "ev": ev_percent,
+        "is_value_bet": value > 0.05,  # 5%+ edge
+        "recommendation": "✅ VALUE" if value > 0.05 else "⚠️ FAIR" if value > -0.05 else "❌ NO VALUE"
+    }
+
+
+def get_bot_accuracy_stats() -> dict:
+    """Analyze historical predictions to find what works best"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    stats = {
+        "total": 0,
+        "correct": 0,
+        "overall_accuracy": 0,
+        "by_bet_type": {},
+        "by_confidence": {},
+        "by_league": {},
+        "best_bet_types": [],
+        "recommendations": []
+    }
+
+    try:
+        # Overall accuracy
+        c.execute("""
+            SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions WHERE is_correct IS NOT NULL
+        """)
+        row = c.fetchone()
+        if row and row[0] > 0:
+            stats["total"] = row[0]
+            stats["correct"] = row[1] or 0
+            stats["overall_accuracy"] = round(stats["correct"] / stats["total"] * 100, 1)
+
+        # Accuracy by bet type
+        c.execute("""
+            SELECT bet_type, COUNT(*) as total,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
+            FROM predictions
+            WHERE is_correct IS NOT NULL AND bet_type IS NOT NULL
+            GROUP BY bet_type
+            HAVING total >= 5
+            ORDER BY (wins * 1.0 / total) DESC
+        """)
+        for row in c.fetchall():
+            bet_type, total, wins = row
+            accuracy = round((wins or 0) / total * 100, 1)
+            stats["by_bet_type"][bet_type] = {
+                "total": total,
+                "wins": wins or 0,
+                "accuracy": accuracy
+            }
+            if accuracy >= 55:
+                stats["best_bet_types"].append(bet_type)
+
+        # Accuracy by confidence range
+        c.execute("""
+            SELECT
+                CASE
+                    WHEN confidence >= 80 THEN '80-100%'
+                    WHEN confidence >= 70 THEN '70-79%'
+                    WHEN confidence >= 60 THEN '60-69%'
+                    ELSE 'under 60%'
+                END as conf_range,
+                COUNT(*) as total,
+                SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
+            FROM predictions
+            WHERE is_correct IS NOT NULL AND confidence IS NOT NULL
+            GROUP BY conf_range
+        """)
+        for row in c.fetchall():
+            conf_range, total, wins = row
+            stats["by_confidence"][conf_range] = {
+                "total": total,
+                "wins": wins or 0,
+                "accuracy": round((wins or 0) / total * 100, 1) if total > 0 else 0
+            }
+
+        # Generate recommendations
+        if stats["best_bet_types"]:
+            stats["recommendations"].append(f"Best performing: {', '.join(stats['best_bet_types'][:3])}")
+
+        if stats["by_confidence"].get("80-100%", {}).get("accuracy", 0) > 65:
+            stats["recommendations"].append("High confidence (80%+) predictions are reliable")
+
+        if stats["by_confidence"].get("under 60%", {}).get("accuracy", 0) < 45:
+            stats["recommendations"].append("Avoid predictions under 60% confidence")
+
+    except Exception as e:
+        logger.error(f"Accuracy stats error: {e}")
+    finally:
+        conn.close()
+
+    return stats
+
+
 async def get_lineups(match_id: int) -> Optional[dict]:
     """Get match lineups (Standard plan feature) (ASYNC)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -1577,11 +1836,11 @@ def get_match_warnings(match, home_form, away_form, lang="ru"):
     return warnings
 
 
-# ===== ENHANCED ANALYSIS =====
+# ===== ENHANCED ANALYSIS v2 =====
 
 async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = None,
                                  lang: str = "ru") -> str:
-    """Enhanced match analysis with form, H2H, and home/away stats (ASYNC)"""
+    """Enhanced match analysis with form, H2H, home/away stats, top scorers, and value betting (ASYNC)"""
 
     if not claude_client:
         return "AI unavailable"
@@ -1594,104 +1853,126 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     comp = match.get("competition", {}).get("name", "?")
     comp_code = match.get("competition", {}).get("code", "PL")
 
-    # Get all data (async)
-    home_form = await get_team_form(home_id) if home_id else None
-    away_form = await get_team_form(away_id) if away_id else None
+    # Get all data (async) - using ENHANCED form function
+    home_form = await get_team_form_enhanced(home_id) if home_id else None
+    away_form = await get_team_form_enhanced(away_id) if away_id else None
     h2h = await get_h2h(match_id) if match_id else None
     odds = await get_odds(home, away)
     standings = await get_standings(comp_code)
     lineups = await get_lineups(match_id) if match_id else None
-    home_squad = await get_team_squad(home_id) if home_id else None
-    away_squad = await get_team_squad(away_id) if away_id else None
+    top_scorers = await get_top_scorers(comp_code, 15)
 
-    # Get warnings
-    warnings = get_match_warnings(match, home_form, away_form, lang)
-    
+    # Get bot's historical accuracy stats
+    bot_stats = get_bot_accuracy_stats()
+
+    # Get warnings (using overall form for compatibility)
+    home_form_simple = {"losses": home_form["overall"]["losses"]} if home_form else None
+    away_form_simple = {"losses": away_form["overall"]["losses"]} if away_form else None
+    warnings = get_match_warnings(match, home_form_simple, away_form_simple, lang)
+
     # Build analysis context
     analysis_data = f"Match: {home} vs {away}\nCompetition: {comp}\n\n"
-    
+
     # Add warnings to context
     if warnings:
         analysis_data += "⚠️ WARNINGS:\n"
         for w in warnings:
             analysis_data += f"  {w}\n"
         analysis_data += "\n"
-    
-    # Form analysis
+
+    # ENHANCED Form analysis with HOME/AWAY split
     if home_form:
-        analysis_data += f"📊 {home} форма (последние 5):\n"
-        analysis_data += f"  Результат: {home_form['form']} ({home_form['wins']}W-{home_form['draws']}D-{home_form['losses']}L)\n"
-        analysis_data += f"  Голы: забито {home_form['goals_scored']}, пропущено {home_form['goals_conceded']}\n\n"
-    
+        hf = home_form
+        analysis_data += f"📊 {home} ФОРМА (последние 10 матчей):\n"
+        analysis_data += f"  Общая: {hf['overall']['form']} ({hf['overall']['wins']}W-{hf['overall']['draws']}D-{hf['overall']['losses']}L)\n"
+        analysis_data += f"  🏠 ДОМА: {hf['home']['wins']}W-{hf['home']['draws']}D-{hf['home']['losses']}L (винрейт {hf['home']['win_rate']}%)\n"
+        analysis_data += f"      Средние голы: забито {hf['home']['avg_goals_scored']}, пропущено {hf['home']['avg_goals_conceded']}\n"
+        analysis_data += f"  ✈️ В гостях: {hf['away']['wins']}W-{hf['away']['draws']}D-{hf['away']['losses']}L (винрейт {hf['away']['win_rate']}%)\n"
+        analysis_data += f"  📈 BTTS: {hf['btts_percent']}% | Тотал >2.5: {hf['over25_percent']}%\n\n"
+
     if away_form:
-        analysis_data += f"📊 {away} форма (последние 5):\n"
-        analysis_data += f"  Результат: {away_form['form']} ({away_form['wins']}W-{away_form['draws']}D-{away_form['losses']}L)\n"
-        analysis_data += f"  Голы: забито {away_form['goals_scored']}, пропущено {away_form['goals_conceded']}\n\n"
-    
+        af = away_form
+        analysis_data += f"📊 {away} ФОРМА (последние 10 матчей):\n"
+        analysis_data += f"  Общая: {af['overall']['form']} ({af['overall']['wins']}W-{af['overall']['draws']}D-{af['overall']['losses']}L)\n"
+        analysis_data += f"  🏠 Дома: {af['home']['wins']}W-{af['home']['draws']}D-{af['home']['losses']}L (винрейт {af['home']['win_rate']}%)\n"
+        analysis_data += f"  ✈️ В ГОСТЯХ: {af['away']['wins']}W-{af['away']['draws']}D-{af['away']['losses']}L (винрейт {af['away']['win_rate']}%)\n"
+        analysis_data += f"      Средние голы: забито {af['away']['avg_goals_scored']}, пропущено {af['away']['avg_goals_conceded']}\n"
+        analysis_data += f"  📈 BTTS: {af['btts_percent']}% | Тотал >2.5: {af['over25_percent']}%\n\n"
+
+    # EXPECTED GOALS calculation
+    if home_form and away_form:
+        expected_home = (home_form['home']['avg_goals_scored'] + away_form['away']['avg_goals_conceded']) / 2
+        expected_away = (away_form['away']['avg_goals_scored'] + home_form['home']['avg_goals_conceded']) / 2
+        expected_total = expected_home + expected_away
+        analysis_data += f"🎯 ОЖИДАЕМЫЕ ГОЛЫ (расчёт):\n"
+        analysis_data += f"  {home}: ~{expected_home:.1f} голов\n"
+        analysis_data += f"  {away}: ~{expected_away:.1f} голов\n"
+        analysis_data += f"  Ожидаемый тотал: ~{expected_total:.1f}\n\n"
+
     # H2H analysis
     if h2h:
         analysis_data += f"⚔️ H2H (последние {len(h2h.get('matches', []))} матчей):\n"
         analysis_data += f"  {home}: {h2h['home_wins']} побед | Ничьи: {h2h['draws']} | {away}: {h2h['away_wins']} побед\n"
         analysis_data += f"  Средние голы: {h2h['avg_goals']:.1f} за матч\n"
         analysis_data += f"  Обе забьют: {h2h['btts_percent']:.0f}%\n"
-        analysis_data += f"  Тотал больше 2.5: {h2h['over25_percent']:.0f}%\n\n"
-    
-    # Home/Away standings
+        analysis_data += f"  Тотал >2.5: {h2h['over25_percent']:.0f}%\n\n"
+
+    # TOP SCORERS in this match
+    if top_scorers:
+        home_scorers = [s for s in top_scorers if s['team'].lower() in home.lower() or home.lower() in s['team'].lower()]
+        away_scorers = [s for s in top_scorers if s['team'].lower() in away.lower() or away.lower() in s['team'].lower()]
+
+        if home_scorers or away_scorers:
+            analysis_data += "⭐ ТОП-БОМБАРДИРЫ В ЭТОМ МАТЧЕ:\n"
+            for s in home_scorers[:2]:
+                analysis_data += f"  {home}: {s['name']} - {s['goals']} голов ({s['goals_per_match']} за матч)\n"
+            for s in away_scorers[:2]:
+                analysis_data += f"  {away}: {s['name']} - {s['goals']} голов ({s['goals_per_match']} за матч)\n"
+            analysis_data += "\n"
+
+    # Home/Away standings from league table
     if standings:
-        home_stats = None
-        away_stats = None
-        
+        home_pos = None
+        away_pos = None
+
         for team in standings.get("home", []):
             if home.lower() in team.get("team", {}).get("name", "").lower():
-                home_stats = team
-            if away.lower() in team.get("team", {}).get("name", "").lower():
-                away_stats = team
-        
-        if home_stats:
-            analysis_data += f"🏠 {home} дома:\n"
-            analysis_data += f"  Позиция: {home_stats.get('position', '?')}\n"
-            analysis_data += f"  Очки: {home_stats.get('points', '?')} ({home_stats.get('won', 0)}W-{home_stats.get('draw', 0)}D-{home_stats.get('lost', 0)}L)\n"
-            analysis_data += f"  Голы: {home_stats.get('goalsFor', 0)}-{home_stats.get('goalsAgainst', 0)}\n\n"
-        
+                home_pos = team.get('position')
+
         for team in standings.get("away", []):
             if away.lower() in team.get("team", {}).get("name", "").lower():
-                away_stats = team
-                break
-        
-        if away_stats:
-            analysis_data += f"✈️ {away} в гостях:\n"
-            analysis_data += f"  Позиция: {away_stats.get('position', '?')}\n"
-            analysis_data += f"  Очки: {away_stats.get('points', '?')} ({away_stats.get('won', 0)}W-{away_stats.get('draw', 0)}D-{away_stats.get('lost', 0)}L)\n"
-            analysis_data += f"  Голы: {away_stats.get('goalsFor', 0)}-{away_stats.get('goalsAgainst', 0)}\n\n"
-    
-    # Squad and lineup info (Standard plan feature)
-    if home_squad:
-        analysis_data += f"👥 {home} состав:\n"
-        analysis_data += f"  Тренер: {home_squad.get('coach', '?')}\n"
-        analysis_data += f"  Размер состава: {home_squad.get('squad_size', '?')}\n"
-        if home_squad.get('key_players'):
-            analysis_data += f"  Ключевые игроки: {', '.join(home_squad['key_players'][:3])}\n"
-        analysis_data += "\n"
-    
-    if away_squad:
-        analysis_data += f"👥 {away} состав:\n"
-        analysis_data += f"  Тренер: {away_squad.get('coach', '?')}\n"
-        analysis_data += f"  Размер состава: {away_squad.get('squad_size', '?')}\n"
-        if away_squad.get('key_players'):
-            analysis_data += f"  Ключевые игроки: {', '.join(away_squad['key_players'][:3])}\n"
-        analysis_data += "\n"
-    
-    if lineups:
-        if lineups.get('venue'):
-            analysis_data += f"🏟️ Стадион: {lineups['venue']}\n\n"
-    
-    # Odds
+                away_pos = team.get('position')
+
+        if home_pos and away_pos:
+            analysis_data += f"📋 ПОЗИЦИИ В ТАБЛИЦЕ:\n"
+            analysis_data += f"  {home} (дома): {home_pos}-е место\n"
+            analysis_data += f"  {away} (в гостях): {away_pos}-е место\n"
+            analysis_data += f"  Разница: {abs(home_pos - away_pos)} позиций\n\n"
+
+    if lineups and lineups.get('venue'):
+        analysis_data += f"🏟️ Стадион: {lineups['venue']}\n\n"
+
+    # Odds with VALUE calculation
     if odds:
-        analysis_data += "💰 Коэффициенты:\n"
+        analysis_data += "💰 КОЭФФИЦИЕНТЫ И VALUE:\n"
         for k, v in odds.items():
-            analysis_data += f"  {k}: {v}\n"
+            if isinstance(v, (int, float)) and v > 1:
+                implied = round(1 / v * 100, 1)
+                analysis_data += f"  {k}: {v} (implied prob: {implied}%)\n"
+            else:
+                analysis_data += f"  {k}: {v}\n"
         analysis_data += "\n"
-    
+
+    # Bot's historical performance (to inform AI)
+    if bot_stats["total"] >= 10:
+        analysis_data += "📈 ИСТОРИЧЕСКАЯ ТОЧНОСТЬ БОТА:\n"
+        analysis_data += f"  Общая: {bot_stats['overall_accuracy']}% ({bot_stats['correct']}/{bot_stats['total']})\n"
+        if bot_stats["best_bet_types"]:
+            analysis_data += f"  Лучшие типы ставок: {', '.join(bot_stats['best_bet_types'][:3])}\n"
+        for rec in bot_stats["recommendations"][:2]:
+            analysis_data += f"  💡 {rec}\n"
+        analysis_data += "\n"
+
     # User settings for filtering
     filter_info = ""
     if user_settings:
@@ -1701,7 +1982,7 @@ User preferences:
 - Max odds: {user_settings.get('max_odds', 3.0)}
 - Risk level: {user_settings.get('risk_level', 'medium')}
 """
-    
+
     # Language instruction
     lang_map = {
         "ru": "Отвечай на русском языке.",
@@ -1710,49 +1991,74 @@ User preferences:
         "es": "Responde en español."
     }
     lang_instruction = lang_map.get(lang, lang_map["ru"])
-    
+
     prompt = f"""{lang_instruction}
 
-You are an expert betting analyst. Analyze this match with available data:
+You are an expert betting analyst. Analyze this match using ALL provided data:
 
 {analysis_data}
 
 {filter_info}
 
-CRITICAL RULES:
-1. ALWAYS give a prediction even if some data is missing
-2. If opponent data is missing - still analyze based on what you have
-3. If it's a cup match or lower division team - acknowledge it but still predict
-4. NEVER say "cannot analyze" or "need more data" - work with what's available
-5. Use common football knowledge if specific stats are missing
-6. DIVERSIFY bet types - not only totals! Include outcomes, BTTS, double chance
-7. For TOP CLUBS (Real, Barca, Bayern, Liverpool, City) - never bet against them even if bad form
-8. Consider VALUE BETTING: confidence × odds > 1.0 means value exists
+CRITICAL ANALYSIS RULES:
 
-PROVIDE ANALYSIS IN THIS FORMAT:
+1. HOME/AWAY FORM IS KEY:
+   - If home team has 80%+ win rate at HOME → П1 confidence +15%
+   - If away team has <30% win rate AWAY → П1 confidence +10%
+   - Always compare HOME form vs AWAY form, not overall
 
-📊 **СТАТИСТИКА:**
-• Форма хозяев: [анализ или "данные недоступны"]
-• Форма гостей: [анализ или "данные недоступны"]
-• H2H тренд: [если есть] 
-• Контекст: [кубковый матч / лига / дерби и т.д.]
+2. EXPECTED GOALS FOR TOTALS:
+   - Use the calculated expected goals for total predictions
+   - If expected total > 2.8 → favor Over 2.5
+   - If expected total < 2.2 → favor Under 2.5
+
+3. VALUE BETTING (MANDATORY):
+   - Calculate: your_confidence - implied_probability
+   - Only recommend bets with VALUE > 5%
+   - Show value calculation in analysis
+
+4. TOP SCORERS MATTER:
+   - If team has top-3 league scorer → +10% goal probability
+   - Factor this into BTTS and totals
+
+5. CONFIDENCE CALCULATION:
+   - Base on statistical data, not feelings
+   - 80%+: Strong statistical edge + good value
+   - 70-79%: Clear favorite + decent value
+   - 60-69%: Slight edge, moderate risk
+   - <60%: High risk, only if excellent value
+
+6. DIVERSIFY BET TYPES based on data:
+   - High home win rate → П1 or 1X
+   - High expected goals → Totals
+   - Both teams score often → BTTS
+   - Close match → X2 or 1X (double chance)
+
+RESPONSE FORMAT:
+
+📊 **АНАЛИЗ ДАННЫХ:**
+• Форма {home} ДОМА: [конкретные цифры]
+• Форма {away} В ГОСТЯХ: [конкретные цифры]
+• Ожидаемые голы: [расчёт]
+• H2H тренд: [если есть]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
+📊 Value: [ваша вероятность]% - [implied]% = [+X% VALUE или NO VALUE]
 💰 Банк: X%
-📝 Почему: [2-3 предложения]
+📝 Почему: [основано на конкретных данных выше]
 
 📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
-1. [Исход/Тотал/BTTS] - X% - коэфф ~X.XX
-2. [Другой тип] - X% - коэфф ~X.XX  
-3. [Точный счёт] - X% - коэфф ~X.XX
+1. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
+2. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
+3. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
 
 ⚠️ **РИСКИ:**
-[Риски включая предупреждения выше]
+[Конкретные риски на основе данных]
 
-✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК]
+✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК / ПРОПУСТИТЬ]
 
-Bank %: 75%+=4-5%, 70-75%=3%, 65-70%=2%, 60-65%=1%, <60%=0.5%"""
+Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"""
 
     try:
         message = claude_client.messages.create(
