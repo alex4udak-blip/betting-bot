@@ -158,7 +158,7 @@ def get_main_keyboard(lang="ru"):
         [KeyboardButton(get_text("stats", lang)), KeyboardButton(get_text("favorites", lang))],
         [KeyboardButton(get_text("settings", lang)), KeyboardButton(get_text("help_btn", lang))]
     ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, persistent=True)
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def detect_language(user):
     """Detect user language from Telegram settings"""
@@ -832,6 +832,113 @@ def get_h2h(match_id):
     return None
 
 
+def get_lineups(match_id):
+    """Get match lineups (Standard plan feature)"""
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    try:
+        url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            data = r.json()
+            
+            home_team = data.get("homeTeam", {}).get("name", "?")
+            away_team = data.get("awayTeam", {}).get("name", "?")
+            
+            # Get lineups if available
+            home_lineup = []
+            away_lineup = []
+            
+            home_data = data.get("homeTeam", {})
+            away_data = data.get("awayTeam", {})
+            
+            # Try to get lineup from match data
+            if "lineup" in home_data:
+                home_lineup = home_data.get("lineup", [])
+            if "lineup" in away_data:
+                away_lineup = away_data.get("lineup", [])
+            
+            # Get injured/suspended players
+            home_injuries = []
+            away_injuries = []
+            
+            # Check for injuries in team data
+            if home_data.get("injuries"):
+                home_injuries = home_data.get("injuries", [])
+            if away_data.get("injuries"):
+                away_injuries = away_data.get("injuries", [])
+            
+            return {
+                "home_team": home_team,
+                "away_team": away_team,
+                "home_lineup": home_lineup,
+                "away_lineup": away_lineup,
+                "home_injuries": home_injuries,
+                "away_injuries": away_injuries,
+                "status": data.get("status", "SCHEDULED"),
+                "venue": data.get("venue", "Unknown")
+            }
+    except Exception as e:
+        logger.error(f"Lineups error: {e}")
+    return None
+
+
+def get_team_squad(team_id):
+    """Get team squad with player details"""
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    
+    try:
+        url = f"{FOOTBALL_API_URL}/teams/{team_id}"
+        r = requests.get(url, headers=headers, timeout=10)
+        
+        if r.status_code == 200:
+            data = r.json()
+            squad = data.get("squad", [])
+            
+            players_by_position = {
+                "Goalkeeper": [],
+                "Defence": [],
+                "Midfield": [],
+                "Offence": []
+            }
+            
+            key_players = []
+            
+            for player in squad:
+                position = player.get("position", "Unknown")
+                name = player.get("name", "?")
+                nationality = player.get("nationality", "?")
+                
+                if position in players_by_position:
+                    players_by_position[position].append({
+                        "name": name,
+                        "nationality": nationality,
+                        "id": player.get("id")
+                    })
+                
+                # Mark experienced players as key
+                if player.get("dateOfBirth"):
+                    try:
+                        birth = datetime.fromisoformat(player["dateOfBirth"].replace("Z", "+00:00"))
+                        age = (datetime.now(birth.tzinfo) - birth).days // 365
+                        if age > 28:  # Experienced player
+                            key_players.append(name)
+                    except:
+                        pass
+            
+            return {
+                "team_name": data.get("name", "?"),
+                "coach": data.get("coach", {}).get("name", "Unknown"),
+                "squad_size": len(squad),
+                "players_by_position": players_by_position,
+                "key_players": key_players[:5]  # Top 5 key players
+            }
+    except Exception as e:
+        logger.error(f"Squad error: {e}")
+    return None
+
+
 def get_odds(home_team, away_team):
     """Get betting odds"""
     if not ODDS_API_KEY:
@@ -957,6 +1064,9 @@ def analyze_match_enhanced(match, user_settings=None, lang="ru"):
     h2h = get_h2h(match_id) if match_id else None
     odds = get_odds(home, away)
     standings = get_standings(comp_code)
+    lineups = get_lineups(match_id) if match_id else None
+    home_squad = get_team_squad(home_id) if home_id else None
+    away_squad = get_team_squad(away_id) if away_id else None
     
     # Get warnings
     warnings = get_match_warnings(match, home_form, away_form, lang)
@@ -1017,6 +1127,27 @@ def analyze_match_enhanced(match, user_settings=None, lang="ru"):
             analysis_data += f"  Позиция: {away_stats.get('position', '?')}\n"
             analysis_data += f"  Очки: {away_stats.get('points', '?')} ({away_stats.get('won', 0)}W-{away_stats.get('draw', 0)}D-{away_stats.get('lost', 0)}L)\n"
             analysis_data += f"  Голы: {away_stats.get('goalsFor', 0)}-{away_stats.get('goalsAgainst', 0)}\n\n"
+    
+    # Squad and lineup info (Standard plan feature)
+    if home_squad:
+        analysis_data += f"👥 {home} состав:\n"
+        analysis_data += f"  Тренер: {home_squad.get('coach', '?')}\n"
+        analysis_data += f"  Размер состава: {home_squad.get('squad_size', '?')}\n"
+        if home_squad.get('key_players'):
+            analysis_data += f"  Ключевые игроки: {', '.join(home_squad['key_players'][:3])}\n"
+        analysis_data += "\n"
+    
+    if away_squad:
+        analysis_data += f"👥 {away} состав:\n"
+        analysis_data += f"  Тренер: {away_squad.get('coach', '?')}\n"
+        analysis_data += f"  Размер состава: {away_squad.get('squad_size', '?')}\n"
+        if away_squad.get('key_players'):
+            analysis_data += f"  Ключевые игроки: {', '.join(away_squad['key_players'][:3])}\n"
+        analysis_data += "\n"
+    
+    if lineups:
+        if lineups.get('venue'):
+            analysis_data += f"🏟️ Стадион: {lineups['venue']}\n\n"
     
     # Odds
     if odds:
@@ -2010,7 +2141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
         
-        await status.edit_text(get_text("analyzing", lang))
+        await status.edit_text("🔍 Анализирую лучшие ставки...")
         matches = get_matches(days=7)
         if not matches:
             await status.edit_text(get_text("no_matches", lang))
