@@ -813,7 +813,7 @@ def get_matches(competition=None, date_filter=None, days=7, use_cache=True):
     
     # Get from all leagues with rate limit awareness (Standard plan = 25 leagues, 60 req/min)
     all_matches = []
-    leagues = ["PL", "PD", "BL1", "SA", "FL1", "ELC", "DED", "PPL", "BSA", "CL", "EL"]
+    leagues = list(COMPETITIONS.keys())  # Use ALL configured leagues
     
     for code in leagues:
         try:
@@ -1808,6 +1808,48 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     status = await update.message.reply_text(get_text("analyzing", lang))
+
+
+async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Debug command to check user status and limits"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    
+    if not user:
+        await update.message.reply_text(f"❌ User {user_id} not found in DB")
+        return
+    
+    can_use, remaining = check_daily_limit(user_id)
+    
+    text = f"""🔧 **DEBUG INFO**
+
+👤 **User ID:** `{user_id}`
+📛 **Username:** {user.get('username', 'N/A')}
+
+📊 **Limits:**
+• Daily requests: {user.get('daily_requests', 0)}/{FREE_DAILY_LIMIT}
+• Last request date: {user.get('last_request_date', 'Never')}
+• Can use: {'✅ Yes' if can_use else '❌ No'}
+• Remaining: {remaining}
+
+💎 **Premium:** {'✅ Yes' if user.get('is_premium') else '❌ No'}
+
+⚙️ **Settings:**
+• Min odds: {user.get('min_odds', 1.3)}
+• Max odds: {user.get('max_odds', 3.0)}
+• Risk: {user.get('risk_level', 'medium')}
+• Language: {user.get('language', 'ru')}
+• Timezone: {user.get('timezone', 'Europe/Moscow')}
+
+🏆 **Leagues:** {len(COMPETITIONS)} configured
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 Reset Limit", callback_data="debug_reset_limit")],
+        [InlineKeyboardButton("🔙 Back", callback_data="cmd_start")]
+    ]
+    
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     matches = get_matches(days=7)
     
@@ -2023,6 +2065,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "cmd_settings":
         await settings_cmd(update, context)
+    
+    elif data == "debug_reset_limit":
+        # Reset daily limit for debugging
+        update_user_settings(user_id, daily_requests=0, last_request_date=None)
+        await query.edit_message_text(
+            f"✅ **Лимит сброшен!**\n\n"
+            f"User ID: `{user_id}`\n"
+            f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
+            f"Теперь можешь делать {FREE_DAILY_LIMIT} новых прогнозов.",
+            parse_mode="Markdown"
+        )
     
     elif data == "cmd_favorites":
         await favorites_cmd(update, context)
@@ -2914,7 +2967,7 @@ def main():
         return
     
     print("   ✅ Telegram")
-    print("   ✅ Football Data (Standard 25 leagues)" if FOOTBALL_API_KEY else "   ⚠️ No Football API")
+    print(f"   ✅ Football Data ({len(COMPETITIONS)} leagues)" if FOOTBALL_API_KEY else "   ⚠️ No Football API")
     print("   ✅ Odds API (20K credits)" if ODDS_API_KEY else "   ⚠️ No Odds API")
     print("   ✅ Claude AI" if CLAUDE_API_KEY else "   ⚠️ No Claude API")
     print(f"   🔗 Affiliate: 1win")
@@ -2933,6 +2986,7 @@ def main():
     app.add_handler(CommandHandler("live", live_cmd))
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
+    app.add_handler(CommandHandler("debug", debug_cmd))
     
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
@@ -2957,7 +3011,7 @@ def main():
     print("   • Stats by bet category")
     print("   • 1win affiliate integration")
     print("   • Cup/Top club warnings")
-    print("   • 25 leagues (Standard plan)")
+    print(f"   • {len(COMPETITIONS)} leagues (Standard plan)")
     print("   • Live alerts system")
     print("   • Prediction tracking")
     print("   • Daily digest")
