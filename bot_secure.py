@@ -137,6 +137,64 @@ TRANSLATIONS = {
         "rotation_warning": "⚠️ Возможна ротация состава",
         "top_club_warning": "⚠️ Топ-клуб — не ставь против",
         "unlimited": "🎰 Безлимитный доступ",
+        # New translations
+        "choose_action": "Выбери действие:",
+        "recommendations": "📊 Рекомендации",
+        "today": "📅 Сегодня",
+        "tomorrow": "📆 Завтра",
+        "leagues": "🏆 Лиги",
+        "live_alerts": "🔔 Live-алерты",
+        "help": "❓ Помощь",
+        "matches_today": "📅 **МАТЧИ СЕГОДНЯ**",
+        "matches_tomorrow": "📆 **МАТЧИ ЗАВТРА**",
+        "recs_today": "📊 Рекомендации на сегодня",
+        "recs_tomorrow": "📊 Рекомендации на завтра",
+        "top_leagues": "🏆 **Топ лиги:**",
+        "other_leagues": "🏆 **Другие лиги:**",
+        "more_leagues": "➕ Ещё лиги",
+        "back": "🔙 Назад",
+        "back_to_leagues": "🔙 К лигам",
+        "loading": "🔍 Загружаю {name}...",
+        "no_matches_league": "❌ Нет матчей {name}",
+        "free_predictions": "💎 Бесплатно: {limit} прогноза/день",
+        "unlimited_deposit": "🔓 Безлимит: сделай депозит по ссылке",
+        "live_alerts_on": "🔔 **Live-алерты включены!**\n\nКаждые 10 минут проверяю матчи.\nЕсли найду ставку 70%+ за 1-3 часа — пришлю алерт!\n\nНапиши /live чтобы выключить.",
+        "live_alerts_off": "🔕 **Live-алерты выключены**\n\nНапиши /live чтобы включить снова.",
+        "live_alert_title": "🚨 LIVE АЛЕРТ!",
+        "in_hours": "Через {hours} часа",
+        "bet": "⚡ СТАВКА:",
+        "confidence": "📊 Уверенность:",
+        "odds": "💰 Коэфф:",
+        "reason": "📝 Почему:",
+        "first_start_title": "🎉 **Добро пожаловать в AI Betting Bot!**",
+        "first_start_text": "Я помогу тебе делать умные ставки на футбол с помощью AI-анализа.",
+        "detected_settings": "🌍 Определил твои настройки:",
+        "language_label": "Язык",
+        "timezone_label": "Часовой пояс",
+        "change_in_settings": "Можешь изменить в настройках",
+        # Settings UI
+        "admin_only": "⛔ Только для админов",
+        "limit_reset": "✅ Лимит сброшен!\n\nUser ID: {user_id}\nDaily requests: 0/{limit}\n\nТеперь можешь делать {limit} новых прогнозов.",
+        "premium_removed": "✅ Premium статус убран!\n\nUser ID: {user_id}\nPremium: {premium}\nDaily requests: {requests}/{limit}\n\nТеперь лимит будет работать.",
+        "select_min_odds": "📉 Выбери минимальный коэффициент:",
+        "min_odds_set": "✅ Минимальный коэфф: {value}",
+        "select_max_odds": "📈 Выбери максимальный коэффициент:",
+        "max_odds_set": "✅ Максимальный коэфф: {value}",
+        "select_risk": "⚠️ Выбери уровень риска:",
+        "risk_set": "✅ Риск: {value}",
+        "select_language": "🌍 Выбери язык:",
+        "select_timezone": "🕐 Выбери часовой пояс:",
+        "select_league": "➕ Выбери лигу:",
+        "league_added": "✅ {name} добавлена!",
+        "team_added": "✅ {name} добавлена в избранное!",
+        "greeting_response": "👋 Привет! Выбери действие или напиши название команды:",
+        "upcoming_matches": "⚽ **Ближайшие матчи:**",
+        "analyzing_bets": "🔍 Анализирую лучшие ставки...",
+        "analysis_error": "❌ Ошибка анализа.",
+        "searching_match": "🔍 Ищу матч...",
+        "match_not_found": "😕 Не нашёл матч: {query}",
+        "available_matches": "📋 **Доступные матчи:**",
+        "match_found": "✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -154,6 +212,64 @@ TRANSLATIONS = {
         "rotation_warning": "⚠️ Possible squad rotation",
         "top_club_warning": "⚠️ Top club — don't bet against",
         "unlimited": "🎰 Get unlimited access",
+        # New translations
+        "choose_action": "Choose an action:",
+        "recommendations": "📊 Recommendations",
+        "today": "📅 Today",
+        "tomorrow": "📆 Tomorrow",
+        "leagues": "🏆 Leagues",
+        "live_alerts": "🔔 Live alerts",
+        "help": "❓ Help",
+        "matches_today": "📅 **TODAY'S MATCHES**",
+        "matches_tomorrow": "📆 **TOMORROW'S MATCHES**",
+        "recs_today": "📊 Today's recommendations",
+        "recs_tomorrow": "📊 Tomorrow's recommendations",
+        "top_leagues": "🏆 **Top Leagues:**",
+        "other_leagues": "🏆 **Other Leagues:**",
+        "more_leagues": "➕ More leagues",
+        "back": "🔙 Back",
+        "back_to_leagues": "🔙 To leagues",
+        "loading": "🔍 Loading {name}...",
+        "no_matches_league": "❌ No matches for {name}",
+        "free_predictions": "💎 Free: {limit} predictions/day",
+        "unlimited_deposit": "🔓 Unlimited: make a deposit via link",
+        "live_alerts_on": "🔔 **Live alerts enabled!**\n\nChecking matches every 10 minutes.\nIf I find a 70%+ bet 1-3 hours before — I'll send an alert!\n\nType /live to disable.",
+        "live_alerts_off": "🔕 **Live alerts disabled**\n\nType /live to enable again.",
+        "live_alert_title": "🚨 LIVE ALERT!",
+        "in_hours": "In {hours} hours",
+        "bet": "⚡ BET:",
+        "confidence": "📊 Confidence:",
+        "odds": "💰 Odds:",
+        "reason": "📝 Why:",
+        "first_start_title": "🎉 **Welcome to AI Betting Bot!**",
+        "first_start_text": "I'll help you make smart football bets using AI analysis.",
+        "detected_settings": "🌍 Detected your settings:",
+        "language_label": "Language",
+        "timezone_label": "Timezone",
+        "change_in_settings": "You can change this in settings",
+        # Settings UI
+        "admin_only": "⛔ Admin only",
+        "limit_reset": "✅ Limit reset!\n\nUser ID: {user_id}\nDaily requests: 0/{limit}\n\nYou can make {limit} new predictions.",
+        "premium_removed": "✅ Premium status removed!\n\nUser ID: {user_id}\nPremium: {premium}\nDaily requests: {requests}/{limit}\n\nLimit is now active.",
+        "select_min_odds": "📉 Select minimum odds:",
+        "min_odds_set": "✅ Min odds: {value}",
+        "select_max_odds": "📈 Select maximum odds:",
+        "max_odds_set": "✅ Max odds: {value}",
+        "select_risk": "⚠️ Select risk level:",
+        "risk_set": "✅ Risk: {value}",
+        "select_language": "🌍 Select language:",
+        "select_timezone": "🕐 Select timezone:",
+        "select_league": "➕ Select league:",
+        "league_added": "✅ {name} added!",
+        "team_added": "✅ {name} added to favorites!",
+        "greeting_response": "👋 Hello! Choose an action or type a team name:",
+        "upcoming_matches": "⚽ **Upcoming matches:**",
+        "analyzing_bets": "🔍 Analyzing best bets...",
+        "analysis_error": "❌ Analysis error.",
+        "searching_match": "🔍 Searching match...",
+        "match_not_found": "😕 Match not found: {query}",
+        "available_matches": "📋 **Available matches:**",
+        "match_found": "✅ Found: {home} vs {away}\n🏆 {comp}\n\n⏳ Gathering stats...",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -171,6 +287,64 @@ TRANSLATIONS = {
         "rotation_warning": "⚠️ Possível rotação",
         "top_club_warning": "⚠️ Clube top — não aposte contra",
         "unlimited": "🎰 Acesso ilimitado",
+        # New translations
+        "choose_action": "Escolha uma ação:",
+        "recommendations": "📊 Recomendações",
+        "today": "📅 Hoje",
+        "tomorrow": "📆 Amanhã",
+        "leagues": "🏆 Ligas",
+        "live_alerts": "🔔 Alertas ao vivo",
+        "help": "❓ Ajuda",
+        "matches_today": "📅 **JOGOS DE HOJE**",
+        "matches_tomorrow": "📆 **JOGOS DE AMANHÃ**",
+        "recs_today": "📊 Recomendações de hoje",
+        "recs_tomorrow": "📊 Recomendações de amanhã",
+        "top_leagues": "🏆 **Top Ligas:**",
+        "other_leagues": "🏆 **Outras Ligas:**",
+        "more_leagues": "➕ Mais ligas",
+        "back": "🔙 Voltar",
+        "back_to_leagues": "🔙 Para ligas",
+        "loading": "🔍 Carregando {name}...",
+        "no_matches_league": "❌ Sem jogos para {name}",
+        "free_predictions": "💎 Grátis: {limit} previsões/dia",
+        "unlimited_deposit": "🔓 Ilimitado: faça um depósito",
+        "live_alerts_on": "🔔 **Alertas ao vivo ativados!**\n\nVerificando jogos a cada 10 minutos.\nSe encontrar aposta 70%+ em 1-3h — envio alerta!\n\nDigite /live para desativar.",
+        "live_alerts_off": "🔕 **Alertas ao vivo desativados**\n\nDigite /live para ativar.",
+        "live_alert_title": "🚨 ALERTA AO VIVO!",
+        "in_hours": "Em {hours} horas",
+        "bet": "⚡ APOSTA:",
+        "confidence": "📊 Confiança:",
+        "odds": "💰 Odds:",
+        "reason": "📝 Por quê:",
+        "first_start_title": "🎉 **Bem-vindo ao AI Betting Bot!**",
+        "first_start_text": "Vou ajudá-lo a fazer apostas inteligentes no futebol usando análise de IA.",
+        "detected_settings": "🌍 Detectei suas configurações:",
+        "language_label": "Idioma",
+        "timezone_label": "Fuso horário",
+        "change_in_settings": "Você pode mudar nas configurações",
+        # Settings UI
+        "admin_only": "⛔ Somente admin",
+        "limit_reset": "✅ Limite zerado!\n\nUser ID: {user_id}\nDaily requests: 0/{limit}\n\nVocê pode fazer {limit} novas previsões.",
+        "premium_removed": "✅ Premium removido!\n\nUser ID: {user_id}\nPremium: {premium}\nDaily requests: {requests}/{limit}\n\nLimite agora ativo.",
+        "select_min_odds": "📉 Selecione odds mínimas:",
+        "min_odds_set": "✅ Odds mín: {value}",
+        "select_max_odds": "📈 Selecione odds máximas:",
+        "max_odds_set": "✅ Odds máx: {value}",
+        "select_risk": "⚠️ Selecione nível de risco:",
+        "risk_set": "✅ Risco: {value}",
+        "select_language": "🌍 Selecione idioma:",
+        "select_timezone": "🕐 Selecione fuso horário:",
+        "select_league": "➕ Selecione liga:",
+        "league_added": "✅ {name} adicionada!",
+        "team_added": "✅ {name} adicionado aos favoritos!",
+        "greeting_response": "👋 Olá! Escolha uma ação ou digite o nome do time:",
+        "upcoming_matches": "⚽ **Próximos jogos:**",
+        "analyzing_bets": "🔍 Analisando melhores apostas...",
+        "analysis_error": "❌ Erro na análise.",
+        "searching_match": "🔍 Procurando jogo...",
+        "match_not_found": "😕 Jogo não encontrado: {query}",
+        "available_matches": "📋 **Jogos disponíveis:**",
+        "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Coletando estatísticas...",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -188,6 +362,64 @@ TRANSLATIONS = {
         "rotation_warning": "⚠️ Posible rotación",
         "top_club_warning": "⚠️ Club top — no apuestes en contra",
         "unlimited": "🎰 Acceso ilimitado",
+        # New translations
+        "choose_action": "Elige una acción:",
+        "recommendations": "📊 Recomendaciones",
+        "today": "📅 Hoy",
+        "tomorrow": "📆 Mañana",
+        "leagues": "🏆 Ligas",
+        "live_alerts": "🔔 Alertas en vivo",
+        "help": "❓ Ayuda",
+        "matches_today": "📅 **PARTIDOS DE HOY**",
+        "matches_tomorrow": "📆 **PARTIDOS DE MAÑANA**",
+        "recs_today": "📊 Recomendaciones de hoy",
+        "recs_tomorrow": "📊 Recomendaciones de mañana",
+        "top_leagues": "🏆 **Top Ligas:**",
+        "other_leagues": "🏆 **Otras Ligas:**",
+        "more_leagues": "➕ Más ligas",
+        "back": "🔙 Atrás",
+        "back_to_leagues": "🔙 A ligas",
+        "loading": "🔍 Cargando {name}...",
+        "no_matches_league": "❌ Sin partidos para {name}",
+        "free_predictions": "💎 Gratis: {limit} pronósticos/día",
+        "unlimited_deposit": "🔓 Ilimitado: haz un depósito",
+        "live_alerts_on": "🔔 **¡Alertas en vivo activadas!**\n\nRevisando partidos cada 10 minutos.\nSi encuentro apuesta 70%+ en 1-3h — ¡te aviso!\n\nEscribe /live para desactivar.",
+        "live_alerts_off": "🔕 **Alertas en vivo desactivadas**\n\nEscribe /live para activar.",
+        "live_alert_title": "🚨 ¡ALERTA EN VIVO!",
+        "in_hours": "En {hours} horas",
+        "bet": "⚡ APUESTA:",
+        "confidence": "📊 Confianza:",
+        "odds": "💰 Cuota:",
+        "reason": "📝 Por qué:",
+        "first_start_title": "🎉 **¡Bienvenido a AI Betting Bot!**",
+        "first_start_text": "Te ayudaré a hacer apuestas inteligentes en fútbol usando análisis de IA.",
+        "detected_settings": "🌍 Detecté tus ajustes:",
+        "language_label": "Idioma",
+        "timezone_label": "Zona horaria",
+        "change_in_settings": "Puedes cambiarlo en ajustes",
+        # Settings UI
+        "admin_only": "⛔ Solo admin",
+        "limit_reset": "✅ ¡Límite reiniciado!\n\nUser ID: {user_id}\nDaily requests: 0/{limit}\n\nPuedes hacer {limit} pronósticos nuevos.",
+        "premium_removed": "✅ ¡Premium eliminado!\n\nUser ID: {user_id}\nPremium: {premium}\nDaily requests: {requests}/{limit}\n\nEl límite está activo.",
+        "select_min_odds": "📉 Selecciona cuota mínima:",
+        "min_odds_set": "✅ Cuota mín: {value}",
+        "select_max_odds": "📈 Selecciona cuota máxima:",
+        "max_odds_set": "✅ Cuota máx: {value}",
+        "select_risk": "⚠️ Selecciona nivel de riesgo:",
+        "risk_set": "✅ Riesgo: {value}",
+        "select_language": "🌍 Selecciona idioma:",
+        "select_timezone": "🕐 Selecciona zona horaria:",
+        "select_league": "➕ Selecciona liga:",
+        "league_added": "✅ ¡{name} añadida!",
+        "team_added": "✅ ¡{name} añadido a favoritos!",
+        "greeting_response": "👋 ¡Hola! Elige una acción o escribe el nombre del equipo:",
+        "upcoming_matches": "⚽ **Próximos partidos:**",
+        "analyzing_bets": "🔍 Analizando mejores apuestas...",
+        "analysis_error": "❌ Error de análisis.",
+        "searching_match": "🔍 Buscando partido...",
+        "match_not_found": "😕 Partido no encontrado: {query}",
+        "available_matches": "📋 **Partidos disponibles:**",
+        "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Recopilando estadísticas...",
     }
 }
 
@@ -206,7 +438,54 @@ def get_main_keyboard(lang="ru"):
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def detect_language(user):
+# Timezone mapping by language/country code
+LANGUAGE_TIMEZONE_MAP = {
+    "ru": "Europe/Moscow",
+    "uk": "Europe/Kiev",
+    "en": "Europe/London",
+    "en-US": "America/New_York",
+    "en-GB": "Europe/London",
+    "pt": "America/Sao_Paulo",
+    "pt-BR": "America/Sao_Paulo",
+    "pt-PT": "Europe/Lisbon",
+    "es": "Europe/Madrid",
+    "es-MX": "America/Mexico_City",
+    "es-AR": "America/Argentina/Buenos_Aires",
+    "de": "Europe/Berlin",
+    "fr": "Europe/Paris",
+    "it": "Europe/Rome",
+    "tr": "Europe/Istanbul",
+    "ar": "Asia/Dubai",
+    "hi": "Asia/Kolkata",
+    "id": "Asia/Jakarta",
+    "zh": "Asia/Shanghai",
+    "ja": "Asia/Tokyo",
+    "ko": "Asia/Seoul",
+}
+
+# Language names for display
+LANGUAGE_NAMES = {
+    "ru": "🇷🇺 Русский",
+    "en": "🇬🇧 English",
+    "pt": "🇧🇷 Português",
+    "es": "🇪🇸 Español",
+}
+
+
+def detect_timezone(user) -> str:
+    """Detect timezone from Telegram language_code"""
+    lang_code = user.language_code or "ru"
+
+    # Try exact match first (e.g., en-US, pt-BR)
+    if lang_code in LANGUAGE_TIMEZONE_MAP:
+        return LANGUAGE_TIMEZONE_MAP[lang_code]
+
+    # Try base language (e.g., en, pt)
+    base_lang = lang_code.split("-")[0] if "-" in lang_code else lang_code
+    return LANGUAGE_TIMEZONE_MAP.get(base_lang, "Europe/Moscow")
+
+
+def detect_language(user) -> str:
     """Detect user language from Telegram settings"""
     lang_code = user.language_code or "ru"
     if lang_code.startswith("pt"):
@@ -1611,39 +1890,79 @@ FORMAT:
 # ===== TELEGRAM HANDLERS =====
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command with reply keyboard"""
+    """Start command - first launch with onboarding or regular menu"""
     user = update.effective_user
     lang = detect_language(user)
-    
-    if not get_user(user.id):
+    detected_tz = detect_timezone(user)
+    is_new_user = not get_user(user.id)
+
+    if is_new_user:
+        # Create user with auto-detected settings
         create_user(user.id, user.username, lang)
-    
+        update_user_settings(user.id, timezone=detected_tz)
+
+        # Show beautiful welcome message for new users
+        tz_display = get_tz_offset_str(detected_tz)
+        welcome_text = f"""{get_text('first_start_title', lang)}
+
+{get_text('first_start_text', lang)}
+
+{get_text('detected_settings', lang)}
+• {get_text('language_label', lang)}: {LANGUAGE_NAMES.get(lang, lang)}
+• {get_text('timezone_label', lang)}: {tz_display}
+
+_{get_text('change_in_settings', lang)}_"""
+
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=get_main_keyboard(lang),
+            parse_mode="Markdown"
+        )
+
+    # Show main menu
+    await show_main_menu(update, context, lang)
+
+
+async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show main menu (can be called anytime)"""
+    user_data = get_user(update.effective_user.id)
+    if not user_data:
+        lang = detect_language(update.effective_user)
+        create_user(update.effective_user.id, update.effective_user.username, lang)
+    else:
+        lang = user_data.get("language", "ru")
+
+    await show_main_menu(update, context, lang)
+
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Show the main inline menu"""
     keyboard = [
-        [InlineKeyboardButton("📊 Рекомендации", callback_data="cmd_recommend"),
-         InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")],
-        [InlineKeyboardButton("📆 Завтра", callback_data="cmd_tomorrow"),
-         InlineKeyboardButton("🏆 Лиги", callback_data="cmd_leagues")],
-        [InlineKeyboardButton("🔔 Live-алерты", callback_data="cmd_live"),
-         InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings")],
-        [InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites"),
-         InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats")],
-        [InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
+        [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend"),
+         InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
+        [InlineKeyboardButton(get_text("tomorrow", lang), callback_data="cmd_tomorrow"),
+         InlineKeyboardButton(get_text("leagues", lang), callback_data="cmd_leagues")],
+        [InlineKeyboardButton(get_text("live_alerts", lang), callback_data="cmd_live"),
+         InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
+        [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
+         InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
+        [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
     ]
-    
-    text = f"""⚽ **AI Betting Bot v13**
+
+    text = f"""⚽ **AI Betting Bot v14**
 
 {get_text('welcome', lang)}
 
-💎 Бесплатно: {FREE_DAILY_LIMIT} прогноза/день
-🔓 Безлимит: сделай депозит по ссылке"""
-    
+{get_text('free_predictions', lang).format(limit=FREE_DAILY_LIMIT)}
+{get_text('unlimited_deposit', lang)}"""
+
     await update.message.reply_text(
-        text, 
+        text,
         reply_markup=get_main_keyboard(lang),
         parse_mode="Markdown"
     )
     await update.message.reply_text(
-        "Выбери действие:",
+        get_text("choose_action", lang),
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -1743,25 +2062,35 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tz = user.get("timezone", "Europe/Moscow")
     tz_display = get_tz_offset_str(user_tz)
     
+    # Localized settings labels
+    settings_labels = {
+        "ru": {"title": "⚙️ **НАСТРОЙКИ**", "min": "Мин. коэфф", "max": "Макс. коэфф", "risk": "Риск", "tz": "Часовой пояс", "premium": "Премиум", "yes": "Да", "no": "Нет", "tap_to_change": "Нажми на параметр чтобы изменить:"},
+        "en": {"title": "⚙️ **SETTINGS**", "min": "Min odds", "max": "Max odds", "risk": "Risk", "tz": "Timezone", "premium": "Premium", "yes": "Yes", "no": "No", "tap_to_change": "Tap to change:"},
+        "pt": {"title": "⚙️ **CONFIGURAÇÕES**", "min": "Odds mín", "max": "Odds máx", "risk": "Risco", "tz": "Fuso horário", "premium": "Premium", "yes": "Sim", "no": "Não", "tap_to_change": "Toque para alterar:"},
+        "es": {"title": "⚙️ **AJUSTES**", "min": "Cuota mín", "max": "Cuota máx", "risk": "Riesgo", "tz": "Zona horaria", "premium": "Premium", "yes": "Sí", "no": "No", "tap_to_change": "Toca para cambiar:"},
+    }
+    sl = settings_labels.get(lang, settings_labels["ru"])
+
     keyboard = [
-        [InlineKeyboardButton(f"📉 Мин. коэфф: {user['min_odds']}", callback_data="set_min_odds")],
-        [InlineKeyboardButton(f"📈 Макс. коэфф: {user['max_odds']}", callback_data="set_max_odds")],
-        [InlineKeyboardButton(f"⚠️ Риск: {user['risk_level']}", callback_data="set_risk")],
-        [InlineKeyboardButton("🌍 Язык / Language", callback_data="set_language")],
-        [InlineKeyboardButton(f"🕐 Часовой пояс: {tz_display}", callback_data="set_timezone")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+        [InlineKeyboardButton(f"📉 {sl['min']}: {user['min_odds']}", callback_data="set_min_odds")],
+        [InlineKeyboardButton(f"📈 {sl['max']}: {user['max_odds']}", callback_data="set_max_odds")],
+        [InlineKeyboardButton(f"⚠️ {sl['risk']}: {user['risk_level']}", callback_data="set_risk")],
+        [InlineKeyboardButton("🌍 Language", callback_data="set_language")],
+        [InlineKeyboardButton(f"🕐 {sl['tz']}: {tz_display}", callback_data="set_timezone")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
     ]
-    
-    text = f"""⚙️ **НАСТРОЙКИ**
 
-📉 **Минимальный коэфф:** {user['min_odds']}
-📈 **Максимальный коэфф:** {user['max_odds']}
-⚠️ **Уровень риска:** {user['risk_level']}
-🌍 **Язык:** {lang.upper()}
-🕐 **Часовой пояс:** {tz_display}
-💎 **Премиум:** {'✅ Да' if user.get('is_premium') else '❌ Нет'}
+    premium_status = f"✅ {sl['yes']}" if user.get('is_premium') else f"❌ {sl['no']}"
+    text = f"""{sl['title']}
 
-Нажми на параметр чтобы изменить:"""
+📉 **{sl['min']}:** {user['min_odds']}
+📈 **{sl['max']}:** {user['max_odds']}
+⚠️ **{sl['risk']}:** {user['risk_level']}
+🌍 **Language:** {lang.upper()}
+🕐 **{sl['tz']}:** {tz_display}
+💎 **{sl['premium']}:** {premium_status}
+
+{sl['tap_to_change']}"""
     
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -1798,9 +2127,10 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text += "\n💡 Напиши название команды и нажми ⭐" if lang == "ru" else "\n💡 Type team name and tap ⭐"
     
+    add_league_label = {"ru": "➕ Добавить лигу", "en": "➕ Add league", "pt": "➕ Adicionar liga", "es": "➕ Añadir liga"}
     keyboard = [
-        [InlineKeyboardButton("➕ Добавить лигу", callback_data="add_fav_league")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+        [InlineKeyboardButton(add_league_label.get(lang, add_league_label["en"]), callback_data="add_fav_league")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
     ]
     
     if update.callback_query:
@@ -1885,9 +2215,10 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"{emoji} {home_short} - {away_short}\n"
         text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
     
+    refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar"}
     keyboard = [
-        [InlineKeyboardButton("🔄 Обновить", callback_data="cmd_stats")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+        [InlineKeyboardButton(refresh_label.get(lang, refresh_label["en"]), callback_data="cmd_stats")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
     ]
     
     if update.callback_query:
@@ -2017,8 +2348,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • ТБ/ТМ 2.5 - Тоталы
 • BTTS - Обе забьют
 • 1X/X2 - Двойной шанс"""
-    
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]]
+
+    keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
     
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -2039,17 +2370,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Command callbacks
     if data == "cmd_start":
         keyboard = [
-            [InlineKeyboardButton("📊 Рекомендации", callback_data="cmd_recommend"),
-             InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")],
-            [InlineKeyboardButton("📆 Завтра", callback_data="cmd_tomorrow"),
-             InlineKeyboardButton("🏆 Лиги", callback_data="cmd_leagues")],
-            [InlineKeyboardButton("🔔 Live-алерты", callback_data="cmd_live"),
-             InlineKeyboardButton("⚙️ Настройки", callback_data="cmd_settings")],
-            [InlineKeyboardButton("⭐ Избранное", callback_data="cmd_favorites"),
-             InlineKeyboardButton("📈 Статистика", callback_data="cmd_stats")],
-            [InlineKeyboardButton("❓ Помощь", callback_data="cmd_help")]
+            [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend"),
+             InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
+            [InlineKeyboardButton(get_text("tomorrow", lang), callback_data="cmd_tomorrow"),
+             InlineKeyboardButton(get_text("leagues", lang), callback_data="cmd_leagues")],
+            [InlineKeyboardButton(get_text("live_alerts", lang), callback_data="cmd_live"),
+             InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
+            [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
+             InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
+            [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
         ]
-        await query.edit_message_text("⚽ **AI Betting Bot v13** - Выбери действие:", 
+        await query.edit_message_text(f"⚽ **AI Betting Bot v14** - {get_text('choose_action', lang)}",
                                        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     elif data == "cmd_recommend":
@@ -2067,10 +2398,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
-                [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+                [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
-            await query.edit_message_text(recs or "❌ Ошибка", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(recs or get_text("no_matches", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await query.edit_message_text(get_text("no_matches", lang))
     
@@ -2090,7 +2421,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             by_comp[comp].append(m)
         
         tz_info = get_tz_offset_str(user_tz)
-        text = f"📅 **МАТЧИ СЕГОДНЯ** ({tz_info}):\n\n"
+        text = f"{get_text('matches_today', lang)} ({tz_info}):\n\n"
         for comp, ms in by_comp.items():
             text += f"🏆 **{comp}**\n"
             for m in ms[:5]:
@@ -2099,10 +2430,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
                 text += f"  ⏰ {time_str} | {home} vs {away}\n"
             text += "\n"
-        
+
         keyboard = [
-            [InlineKeyboardButton("📊 Рекомендации", callback_data="rec_today")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+            [InlineKeyboardButton(get_text("recs_today", lang), callback_data="rec_today")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
@@ -2122,7 +2453,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             by_comp[comp].append(m)
         
         tz_info = get_tz_offset_str(user_tz)
-        text = f"📆 **МАТЧИ ЗАВТРА** ({tz_info}):\n\n"
+        text = f"{get_text('matches_tomorrow', lang)} ({tz_info}):\n\n"
         for comp, ms in by_comp.items():
             text += f"🏆 **{comp}**\n"
             for m in ms[:5]:
@@ -2133,11 +2464,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += "\n"
         
         keyboard = [
-            [InlineKeyboardButton("📊 Рекомендации", callback_data="rec_tomorrow")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+            [InlineKeyboardButton(get_text("recs_tomorrow", lang), callback_data="rec_tomorrow")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    
+
     elif data == "cmd_leagues":
         keyboard = [
             [InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", callback_data="league_PL"),
@@ -2150,10 +2481,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("🇧🇷 Brasileirão", callback_data="league_BSA")],
             [InlineKeyboardButton("🇪🇺 Champions League", callback_data="league_CL"),
              InlineKeyboardButton("🇪🇺 Europa League", callback_data="league_EL")],
-            [InlineKeyboardButton("➕ Ещё лиги", callback_data="cmd_leagues2")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+            [InlineKeyboardButton(get_text("more_leagues", lang), callback_data="cmd_leagues2")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
-        await query.edit_message_text("🏆 **Топ лиги:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(get_text("top_leagues", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     elif data == "cmd_leagues2":
         keyboard = [
@@ -2169,9 +2500,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("🇺🇸 MLS", callback_data="league_MLS")],
             [InlineKeyboardButton("🏆 FA Cup", callback_data="league_FAC"),
              InlineKeyboardButton("🏆 DFB-Pokal", callback_data="league_DFB")],
-            [InlineKeyboardButton("🔙 Топ лиги", callback_data="cmd_leagues")]
+            [InlineKeyboardButton(get_text("top_leagues", lang).replace("**", "").replace(":", ""), callback_data="cmd_leagues")]
         ]
-        await query.edit_message_text("🏆 **Другие лиги:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(get_text("other_leagues", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     elif data == "cmd_settings":
         await settings_cmd(update, context)
@@ -2179,23 +2510,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "debug_reset_limit":
         # ADMIN ONLY: Reset daily limit for debugging
         if not is_admin(user_id):
-            await query.answer("⛔ Только для админов", show_alert=True)
+            await query.answer(get_text("admin_only", lang), show_alert=True)
             return
         logger.info(f"DEBUG: Resetting limit for user {user_id}")
         update_user_settings(user_id, daily_requests=0, last_request_date="")
         user_after = get_user(user_id)
         logger.info(f"DEBUG: After reset - requests={user_after.get('daily_requests')}, last_date={user_after.get('last_request_date')}")
         await query.edit_message_text(
-            f"✅ Лимит сброшен!\n\n"
-            f"User ID: {user_id}\n"
-            f"Daily requests: 0/{FREE_DAILY_LIMIT}\n\n"
-            f"Теперь можешь делать {FREE_DAILY_LIMIT} новых прогнозов."
+            get_text("limit_reset", lang).format(user_id=user_id, limit=FREE_DAILY_LIMIT)
         )
 
     elif data == "debug_remove_premium":
         # ADMIN ONLY: Remove premium status for debugging
         if not is_admin(user_id):
-            await query.answer("⛔ Только для админов", show_alert=True)
+            await query.answer(get_text("admin_only", lang), show_alert=True)
             return
         user_before = get_user(user_id)
         logger.info(f"DEBUG: Before remove premium - is_premium={user_before.get('is_premium')}")
@@ -2203,11 +2531,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_after = get_user(user_id)
         logger.info(f"DEBUG: After remove premium - is_premium={user_after.get('is_premium')}, requests={user_after.get('daily_requests')}")
         await query.edit_message_text(
-            f"✅ Premium статус убран!\n\n"
-            f"User ID: {user_id}\n"
-            f"Premium: {user_after.get('is_premium')}\n"
-            f"Daily requests: {user_after.get('daily_requests')}/{FREE_DAILY_LIMIT}\n\n"
-            f"Теперь лимит будет работать."
+            get_text("premium_removed", lang).format(
+                user_id=user_id,
+                premium=user_after.get('is_premium'),
+                requests=user_after.get('daily_requests'),
+                limit=FREE_DAILY_LIMIT
+            )
         )
     
     elif data == "cmd_favorites":
@@ -2222,19 +2551,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cmd_live":
         if user_id in live_subscribers:
             live_subscribers.remove(user_id)
+            remove_live_subscriber(user_id)
             await query.edit_message_text(
-                "🔕 **Live-алерты выключены**\n\n"
-                "Напиши /live чтобы включить снова.",
+                get_text("live_alerts_off", lang),
                 parse_mode="Markdown"
             )
         else:
             live_subscribers.add(user_id)
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]]
+            add_live_subscriber(user_id)
+            keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
             await query.edit_message_text(
-                "🔔 **Live-алерты включены!**\n\n"
-                "Каждые 10 минут проверяю матчи.\n"
-                "Если найду ставку с 70%+ за 1-3 часа — пришлю алерт!\n\n"
-                "Напиши /live чтобы выключить.",
+                get_text("live_alerts_on", lang),
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
@@ -2242,14 +2569,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # League selection
     elif data.startswith("league_"):
         code = data.replace("league_", "")
-        await query.edit_message_text(f"🔍 Загружаю {COMPETITIONS.get(code, code)}...")
+        league_name = COMPETITIONS.get(code, code)
+        await query.edit_message_text(get_text("loading", lang).format(name=league_name))
         matches = await get_matches(code, days=14)
-        
+
         if not matches:
-            await query.edit_message_text(f"❌ Нет матчей {COMPETITIONS.get(code, code)}")
+            await query.edit_message_text(get_text("no_matches_league", lang).format(name=league_name))
             return
-        
-        text = f"🏆 **{COMPETITIONS.get(code, code)}**\n\n"
+
+        text = f"🏆 **{league_name}**\n\n"
         for m in matches[:10]:
             home = m.get("homeTeam", {}).get("name", "?")
             away = m.get("awayTeam", {}).get("name", "?")
@@ -2259,10 +2587,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 date_str = ""
             text += f"📅 {date_str}\n   {home} vs {away}\n\n"
-        
+
         keyboard = [
-            [InlineKeyboardButton("📊 Рекомендации", callback_data=f"rec_{code}")],
-            [InlineKeyboardButton("🔙 К лигам", callback_data="cmd_leagues")]
+            [InlineKeyboardButton(get_text("recommendations", lang), callback_data=f"rec_{code}")],
+            [InlineKeyboardButton(get_text("back_to_leagues", lang), callback_data="cmd_leagues")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
@@ -2290,10 +2618,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
-                [InlineKeyboardButton("🔙 Назад", callback_data="cmd_start")]
+                [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
-            await query.edit_message_text(recs or "❌ Ошибка", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(recs or get_text("no_matches", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await query.edit_message_text(get_text("no_matches", lang))
     
@@ -2306,16 +2634,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("1.7", callback_data="min_1.7"),
              InlineKeyboardButton("2.0", callback_data="min_2.0"),
              InlineKeyboardButton("2.5", callback_data="min_2.5")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
-        await query.edit_message_text("📉 Выбери минимальный коэффициент:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
+        await query.edit_message_text(get_text("select_min_odds", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("min_"):
         value = float(data.replace("min_", ""))
         update_user_settings(user_id, min_odds=value)
-        await query.answer(f"✅ Минимальный коэфф: {value}")
+        await query.answer(get_text("min_odds_set", lang).format(value=value))
         await settings_cmd(update, context)
-    
+
     elif data == "set_max_odds":
         keyboard = [
             [InlineKeyboardButton("2.0", callback_data="max_2.0"),
@@ -2324,40 +2652,40 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("4.0", callback_data="max_4.0"),
              InlineKeyboardButton("5.0", callback_data="max_5.0"),
              InlineKeyboardButton("10.0", callback_data="max_10.0")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
-        await query.edit_message_text("📈 Выбери максимальный коэффициент:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
+        await query.edit_message_text(get_text("select_max_odds", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("max_"):
         value = float(data.replace("max_", ""))
         update_user_settings(user_id, max_odds=value)
-        await query.answer(f"✅ Максимальный коэфф: {value}")
+        await query.answer(get_text("max_odds_set", lang).format(value=value))
         await settings_cmd(update, context)
-    
+
     elif data == "set_risk":
         keyboard = [
-            [InlineKeyboardButton("🟢 Низкий (safe)", callback_data="risk_low")],
-            [InlineKeyboardButton("🟡 Средний (balanced)", callback_data="risk_medium")],
-            [InlineKeyboardButton("🔴 Высокий (aggressive)", callback_data="risk_high")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+            [InlineKeyboardButton("🟢 Low (safe)", callback_data="risk_low")],
+            [InlineKeyboardButton("🟡 Medium (balanced)", callback_data="risk_medium")],
+            [InlineKeyboardButton("🔴 High (aggressive)", callback_data="risk_high")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
-        await query.edit_message_text("⚠️ Выбери уровень риска:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
+        await query.edit_message_text(get_text("select_risk", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("risk_"):
         value = data.replace("risk_", "")
         update_user_settings(user_id, risk_level=value)
-        await query.answer(f"✅ Риск: {value}")
+        await query.answer(get_text("risk_set", lang).format(value=value))
         await settings_cmd(update, context)
-    
+
     elif data == "set_language":
         keyboard = [
             [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
              InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
             [InlineKeyboardButton("🇧🇷 Português", callback_data="lang_pt"),
              InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
-        await query.edit_message_text("🌍 Выбери язык / Choose language:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(get_text("select_language", lang), reply_markup=InlineKeyboardMarkup(keyboard))
     
     elif data.startswith("lang_"):
         new_lang = data.replace("lang_", "")
@@ -2381,22 +2709,22 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Timezone selection
     elif data == "set_timezone":
         keyboard = [
-            [InlineKeyboardButton("🇷🇺 Москва", callback_data="tz_msk"),
-             InlineKeyboardButton("🇺🇦 Киев", callback_data="tz_kiev")],
-            [InlineKeyboardButton("🇬🇧 Лондон", callback_data="tz_london"),
-             InlineKeyboardButton("🇫🇷 Париж", callback_data="tz_paris")],
-            [InlineKeyboardButton("🇹🇷 Стамбул", callback_data="tz_istanbul"),
-             InlineKeyboardButton("🇦🇪 Дубай", callback_data="tz_dubai")],
-            [InlineKeyboardButton("🇮🇳 Мумбаи", callback_data="tz_mumbai"),
-             InlineKeyboardButton("🇮🇩 Джакарта", callback_data="tz_jakarta")],
-            [InlineKeyboardButton("🇵🇭 Манила", callback_data="tz_manila"),
-             InlineKeyboardButton("🇧🇷 Сан-Паулу", callback_data="tz_sao_paulo")],
-            [InlineKeyboardButton("🇳🇬 Лагос", callback_data="tz_lagos"),
-             InlineKeyboardButton("🇺🇸 Нью-Йорк", callback_data="tz_new_york")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_settings")]
+            [InlineKeyboardButton("🇷🇺 Moscow", callback_data="tz_msk"),
+             InlineKeyboardButton("🇺🇦 Kyiv", callback_data="tz_kiev")],
+            [InlineKeyboardButton("🇬🇧 London", callback_data="tz_london"),
+             InlineKeyboardButton("🇫🇷 Paris", callback_data="tz_paris")],
+            [InlineKeyboardButton("🇹🇷 Istanbul", callback_data="tz_istanbul"),
+             InlineKeyboardButton("🇦🇪 Dubai", callback_data="tz_dubai")],
+            [InlineKeyboardButton("🇮🇳 Mumbai", callback_data="tz_mumbai"),
+             InlineKeyboardButton("🇮🇩 Jakarta", callback_data="tz_jakarta")],
+            [InlineKeyboardButton("🇵🇭 Manila", callback_data="tz_manila"),
+             InlineKeyboardButton("🇧🇷 São Paulo", callback_data="tz_sao_paulo")],
+            [InlineKeyboardButton("🇳🇬 Lagos", callback_data="tz_lagos"),
+             InlineKeyboardButton("🇺🇸 New York", callback_data="tz_new_york")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
-        await query.edit_message_text("🕐 Выбери часовой пояс:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
+        await query.edit_message_text(get_text("select_timezone", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("tz_"):
         tz_key = data.replace("tz_", "")
         if tz_key in TIMEZONES:
@@ -2404,7 +2732,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update_user_settings(user_id, timezone=tz_value)
             await query.answer(f"✅ {tz_name}")
             await settings_cmd(update, context)
-    
+
     # Add favorite league
     elif data == "add_fav_league":
         keyboard = [
@@ -2415,20 +2743,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("🇫🇷 Ligue 1", callback_data="fav_league_FL1"),
              InlineKeyboardButton("🇪🇺 CL", callback_data="fav_league_CL")],
             [InlineKeyboardButton("🇧🇷 BSA", callback_data="fav_league_BSA")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_favorites")]
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_favorites")]
         ]
-        await query.edit_message_text("➕ Выбери лигу:", reply_markup=InlineKeyboardMarkup(keyboard))
-    
+        await query.edit_message_text(get_text("select_league", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
     elif data.startswith("fav_league_"):
         code = data.replace("fav_league_", "")
         add_favorite_league(user_id, code)
-        await query.answer(f"✅ {COMPETITIONS.get(code, code)} добавлена!")
+        await query.answer(get_text("league_added", lang).format(name=COMPETITIONS.get(code, code)))
         await favorites_cmd(update, context)
-    
+
     elif data.startswith("fav_team_"):
         team_name = data.replace("fav_team_", "")
         add_favorite_team(user_id, team_name)
-        await query.answer(f"✅ {team_name} добавлена в избранное!")
+        await query.answer(get_text("team_added", lang).format(name=team_name))
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2492,10 +2820,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Handle intents
     if intent == "greeting":
         keyboard = [
-            [InlineKeyboardButton("📊 Рекомендации", callback_data="cmd_recommend"),
-             InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
+            [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend"),
+             InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
         ]
-        await status.edit_text("👋 Привет! Выбери действие или напиши название команды:", 
+        await status.edit_text(get_text("greeting_response", lang),
                                reply_markup=InlineKeyboardMarkup(keyboard))
         return
     
@@ -2538,7 +2866,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
         
-        await status.edit_text("🔍 Анализирую лучшие ставки...")
+        await status.edit_text(get_text("analyzing_bets", lang))
         matches = await get_matches(days=7)
         if not matches:
             await status.edit_text(get_text("no_matches", lang))
@@ -2547,12 +2875,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if recs:
             keyboard = [
                 [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
-                [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
+                [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
             ]
             increment_daily_usage(user_id)
             await status.edit_text(recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
-            await status.edit_text("❌ Ошибка анализа.")
+            await status.edit_text(get_text("analysis_error", lang))
         return
     
     if intent == "matches_list":
@@ -2568,7 +2896,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 by_comp[comp] = []
             by_comp[comp].append(m)
         
-        text = "⚽ **Ближайшие матчи:**\n\n"
+        text = get_text("upcoming_matches", lang) + "\n\n"
         for comp, ms in list(by_comp.items())[:5]:
             text += f"🏆 **{comp}**\n"
             for m in ms[:3]:
@@ -2577,10 +2905,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text += f"  • {home} vs {away}\n"
             text += "\n"
         
-        keyboard = [[InlineKeyboardButton("📊 Рекомендации", callback_data="cmd_recommend")]]
+        keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
-    
+
     # Team search - detailed analysis
     # Check limit first
     can_use, _ = check_daily_limit(user_id)
@@ -2589,8 +2917,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
-    await status.edit_text("🔍 Ищу матч...")
+
+    await status.edit_text(get_text("searching_match", lang))
     
     matches = await get_matches(days=14)
     match = None
@@ -2602,25 +2930,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         match = find_match([user_text], matches)
     
     if not match:
-        text = f"😕 Не нашёл матч: {', '.join(teams) if teams else user_text}\n\n"
+        query = ', '.join(teams) if teams else user_text
+        text = get_text("match_not_found", lang).format(query=query) + "\n\n"
         if matches:
-            text += "📋 **Доступные матчи:**\n"
+            text += get_text("available_matches", lang) + "\n"
             for m in matches[:5]:
                 home = m.get("homeTeam", {}).get("name", "?")
                 away = m.get("awayTeam", {}).get("name", "?")
                 text += f"  • {home} vs {away}\n"
-        
-        keyboard = [[InlineKeyboardButton("📊 Рекомендации", callback_data="cmd_recommend")]]
+
+        keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         return
-    
+
     # Found match - do enhanced analysis
     home = match.get("homeTeam", {}).get("name", "?")
     away = match.get("awayTeam", {}).get("name", "?")
     comp = match.get("competition", {}).get("name", "?")
     match_id = match.get("id")
-    
-    await status.edit_text(f"✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...")
+
+    await status.edit_text(get_text("match_found", lang).format(home=home, away=away, comp=comp))
     
     # Enhanced analysis
     analysis = await analyze_match_enhanced(match, user, lang)
@@ -2732,23 +3061,21 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Toggle live alerts subscription (with DB persistence)"""
     user_id = update.effective_user.id
+    user_data = get_user(user_id)
+    lang = user_data.get("language", "ru") if user_data else "ru"
 
     if user_id in live_subscribers:
         live_subscribers.remove(user_id)
         remove_live_subscriber(user_id)  # Save to DB
         await update.message.reply_text(
-            "🔕 **Live-алерты выключены**\n\n"
-            "Напиши /live чтобы включить снова.",
+            get_text("live_alerts_off", lang),
             parse_mode="Markdown"
         )
     else:
         live_subscribers.add(user_id)
         add_live_subscriber(user_id)  # Save to DB
         await update.message.reply_text(
-            "🔔 **Live-алерты включены!**\n\n"
-            "Каждые 10 минут проверяю матчи.\n"
-            "Если найду ставку 70%+ за 1-3 часа — пришлю алерт!\n\n"
-            "Напиши /live чтобы выключить.",
+            get_text("live_alerts_on", lang),
             parse_mode="Markdown"
         )
 
@@ -2756,8 +3083,10 @@ async def live_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def testalert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Test alert - manually trigger check"""
     user_id = update.effective_user.id
-    
-    await update.message.reply_text("🔍 Проверяю матчи для алертов...")
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    await update.message.reply_text(get_text("analyzing", lang))
     
     was_subscribed = user_id in live_subscribers
     live_subscribers.add(user_id)
@@ -2765,7 +3094,7 @@ async def testalert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matches = await get_matches(days=1, use_cache=False)
     
     if not matches:
-        await update.message.reply_text("❌ Нет матчей сегодня")
+        await update.message.reply_text(get_text("no_matches", lang))
         if not was_subscribed:
             live_subscribers.discard(user_id)
         return
@@ -2929,45 +3258,72 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
                 if not k.startswith("Over") and not k.startswith("Under"):
                     odds_text += f"{k}: {v}, "
         
-        prompt = f"""Quick analysis for live alert:
+        # Analyze match and send alerts in user's language
+        analysis_prompt = f"""Analyze this match for betting:
 
 Match: {home} vs {away}
 Competition: {comp}
 Form: {form_text if form_text else "Limited data"}
 Odds: {odds_text if odds_text else "Not available"}
 
-If you find a reasonable bet (70%+ confidence), respond with:
+If you find a good bet (70%+ confidence), respond with JSON:
+{{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
 
-🚨 LIVE ALERT!
-
-⚽ {home} vs {away}
-🏆 {comp}
-⏰ Через 1-3 часа
-
-⚡ СТАВКА: [bet type]
-📊 Уверенность: X%
-💰 Коэфф: ~X.XX
-📝 Почему: [1 sentence]
-
-ONLY respond "NO_ALERT" if no good bet exists."""
+If no good bet exists, respond: {{"alert": false}}"""
 
         try:
             message = claude_client.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=300,
-                messages=[{"role": "user", "content": prompt}]
+                max_tokens=400,
+                messages=[{"role": "user", "content": analysis_prompt}]
             )
-            
-            response = message.content[0].text
-            
-            if "NO_ALERT" not in response and "LIVE ALERT" in response:
-                keyboard = [[InlineKeyboardButton("🎰 Поставить", url=AFFILIATE_LINK)]]
-                
+
+            response_text = message.content[0].text
+
+            # Try to parse JSON from response
+            try:
+                # Extract JSON from response
+                import json
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    alert_data = json.loads(json_match.group())
+                else:
+                    alert_data = {"alert": False}
+            except:
+                alert_data = {"alert": False}
+
+            if alert_data.get("alert"):
+                bet_type = alert_data.get("bet_type", "?")
+                confidence = alert_data.get("confidence", 70)
+                odds_val = alert_data.get("odds", 1.5)
+
+                # Send to each subscriber in their language
                 for user_id in live_subscribers:
                     try:
+                        user_data = get_user(user_id)
+                        lang = user_data.get("language", "ru") if user_data else "ru"
+
+                        # Get localized reason
+                        reason_key = f"reason_{lang}"
+                        reason = alert_data.get(reason_key, alert_data.get("reason_en", "Good value bet"))
+
+                        # Build localized alert message
+                        alert_msg = f"""{get_text("live_alert_title", lang)}
+
+⚽ **{home}** vs **{away}**
+🏆 {comp}
+⏰ {get_text("in_hours", lang).format(hours="1-3")}
+
+{get_text("bet", lang)} {bet_type}
+{get_text("confidence", lang)} {confidence}%
+{get_text("odds", lang)} ~{odds_val}
+{get_text("reason", lang)} {reason}"""
+
+                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)]]
+
                         await context.bot.send_message(
                             chat_id=user_id,
-                            text=response,
+                            text=alert_msg,
                             reply_markup=InlineKeyboardMarkup(keyboard),
                             parse_mode="Markdown"
                         )
@@ -3117,6 +3473,7 @@ def main():
     
     # Commands
     app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("recommend", recommend_cmd))
     app.add_handler(CommandHandler("today", today_cmd))
