@@ -358,52 +358,63 @@ def update_user_settings(user_id, **kwargs):
 
 def check_daily_limit(user_id):
     """Check if user has reached daily limit. Returns (can_use, remaining)"""
+    logger.info(f"check_daily_limit called for user {user_id}")
+    
     user = get_user(user_id)
     if not user:
-        logger.info(f"User {user_id} not found, allowing request")
+        logger.info(f"User {user_id} not found in DB, allowing request")
         return True, FREE_DAILY_LIMIT
     
     # Premium users have no limit
     if user.get("is_premium", 0):
+        logger.info(f"User {user_id} is PREMIUM, no limit")
         return True, 999
     
     today = datetime.now().strftime("%Y-%m-%d")
     last_date = user.get("last_request_date")
     daily_requests = user.get("daily_requests", 0)
     
-    logger.info(f"User {user_id}: daily_requests={daily_requests}, last_date={last_date}, today={today}, limit={FREE_DAILY_LIMIT}")
+    logger.info(f"User {user_id}: requests={daily_requests}, last_date={last_date}, today={today}, limit={FREE_DAILY_LIMIT}")
     
     # Reset counter if new day
     if last_date != today:
         update_user_settings(user_id, daily_requests=0, last_request_date=today)
-        logger.info(f"User {user_id}: New day, reset counter")
+        logger.info(f"User {user_id}: New day, reset to 0")
         return True, FREE_DAILY_LIMIT
     
     if daily_requests >= FREE_DAILY_LIMIT:
-        logger.info(f"User {user_id}: LIMIT REACHED ({daily_requests} >= {FREE_DAILY_LIMIT})")
+        logger.info(f"User {user_id}: ⛔ LIMIT REACHED ({daily_requests} >= {FREE_DAILY_LIMIT})")
         return False, 0
     
     remaining = FREE_DAILY_LIMIT - daily_requests
-    logger.info(f"User {user_id}: OK, remaining={remaining}")
+    logger.info(f"User {user_id}: ✅ OK, remaining={remaining}")
     return True, remaining
 
 def increment_daily_usage(user_id):
     """Increment daily usage counter"""
+    logger.info(f"increment_daily_usage called for user {user_id}")
+    
     user = get_user(user_id)
     if not user:
+        logger.warning(f"User {user_id} not found, cannot increment")
+        return
+    
+    # Don't increment for premium users
+    if user.get("is_premium", 0):
+        logger.info(f"User {user_id} is premium, not incrementing")
         return
     
     today = datetime.now().strftime("%Y-%m-%d")
     last_date = user.get("last_request_date")
+    current = user.get("daily_requests", 0)
     
     if last_date != today:
         update_user_settings(user_id, daily_requests=1, last_request_date=today)
-        logger.info(f"User {user_id}: First request today, set to 1")
+        logger.info(f"User {user_id}: First request today → 1")
     else:
-        current = user.get("daily_requests", 0)
         new_count = current + 1
         update_user_settings(user_id, daily_requests=new_count)
-        logger.info(f"User {user_id}: Incremented to {new_count}")
+        logger.info(f"User {user_id}: {current} → {new_count}")
 
 def add_favorite_team(user_id, team_name):
     """Add favorite team"""
@@ -2421,7 +2432,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 confidence = int(conf_match.group(1))
         
         # Detect bet type from main bet section ONLY
-        if "фора" in main_bet_section or "handicap" in main_bet_section:
+        # IMPORTANT: Check double chances FIRST (before single outcomes)
+        
+        # Double chance 1X (home or draw)
+        if "п1 или х" in main_bet_section or "1x" in main_bet_section or "п1/х" in main_bet_section or "1 или х" in main_bet_section or "home or draw" in main_bet_section:
+            bet_type = "1X"
+        # Double chance X2 (draw or away)
+        elif "х или п2" in main_bet_section or "x2" in main_bet_section or "2x" in main_bet_section or "х/п2" in main_bet_section or "draw or away" in main_bet_section:
+            bet_type = "X2"
+        # Double chance 12 (home or away, no draw)
+        elif "п1 или п2" in main_bet_section or " 12 " in main_bet_section or "не ничья" in main_bet_section or "no draw" in main_bet_section:
+            bet_type = "12"
+        # Handicaps
+        elif "фора" in main_bet_section or "handicap" in main_bet_section:
             # Parse handicap value
             fora_match = re.search(r'фора\s*[12]?\s*\(?([-+]?\d+\.?\d*)\)?', main_bet_section)
             if fora_match:
@@ -2442,18 +2465,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bet_type = "ТМ 2.5"
         elif "обе забьют" in main_bet_section or "btts" in main_bet_section:
             bet_type = "BTTS"
+        # Single outcomes (check AFTER double chances)
         elif "п2" in main_bet_section or "победа гостей" in main_bet_section:
             bet_type = "П2"
         elif "п1" in main_bet_section or "победа хозя" in main_bet_section:
             bet_type = "П1"
         elif "ничья" in main_bet_section or " х " in main_bet_section:
             bet_type = "Х"
-        elif "1x" in main_bet_section:
-            bet_type = "1X"
-        elif "x2" in main_bet_section or "2x" in main_bet_section:
-            bet_type = "X2"
-        elif "12" in main_bet_section or "не ничья" in main_bet_section:
-            bet_type = "12"
         
         # Get odds from main bet section
         odds_match = re.search(r'@\s*~?(\d+\.?\d*)', main_bet_section)
