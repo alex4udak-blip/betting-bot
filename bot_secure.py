@@ -71,6 +71,9 @@ def is_admin(user_id: int) -> bool:
     """Check if user is an admin"""
     return user_id in ADMIN_IDS
 
+# Support username for manual payment/help (without @)
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "alex4udak")
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -230,6 +233,7 @@ TRANSLATIONS = {
         "upcoming_matches": "⚽ **Ближайшие матчи:**",
         "analyzing_bets": "🔍 Анализирую лучшие ставки...",
         "analysis_error": "❌ Ошибка анализа.",
+        "sure_searching": "🎯 Ищу уверенные ставки (75%+)...",
         "searching_match": "🔍 Ищу матч...",
         "match_not_found": "😕 Не нашёл матч: {query}",
         "available_matches": "📋 **Доступные матчи:**",
@@ -266,6 +270,24 @@ TRANSLATIONS = {
         "notif_welcome_back": "👋 С возвращением! Вот топ ставки на сегодня:",
         "notif_hot_match": "🔥 **Горячий матч через {hours}ч!**\n\n{match}\n📊 Уверенность: {confidence}%",
         "notif_daily_digest": "📊 **Твоя статистика за день:**\n• Прогнозов: {predictions}\n• Выигрышей: {wins}\n• Серия: {streak} дней 🔥",
+        # Premium page
+        "premium_title": "💎 **ПРЕМИУМ ДОСТУП**",
+        "premium_unlimited": "🎯 Безлимитные прогнозы с точностью 70%+",
+        "premium_option1_title": "**Вариант 1: Депозит в 1win** 🎰",
+        "premium_option1_desc": "Сделай депозит — получи премиум автоматически!",
+        "premium_option2_title": "**Вариант 2: Крипта (USDT/TON)** 💰",
+        "premium_option2_crypto": "Выбери тариф ниже — оплата через @CryptoBot",
+        "premium_option2_manual": "Напиши @{support} для оплаты",
+        "premium_free_title": "👥 **Бесплатный способ!**",
+        "premium_free_desc": "Приглашай друзей — получай **+3 дня** за каждого!",
+        "premium_earned": "Уже заработано: **{days} дней**",
+        "premium_click_below": "Нажми кнопку ниже 👇",
+        "premium_after_payment": "После оплаты — скинь скрин @{support}",
+        "premium_deposit_btn": "🎰 Депозит в 1win",
+        "premium_contact_btn": "💬 Написать @{support}",
+        "premium_friends_btn": "👥 Бесплатно (друзья)",
+        "premium_status": "✅ У тебя премиум до: {date}",
+        "friend_fallback": "Друг",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -337,6 +359,7 @@ TRANSLATIONS = {
         "upcoming_matches": "⚽ **Upcoming matches:**",
         "analyzing_bets": "🔍 Analyzing best bets...",
         "analysis_error": "❌ Analysis error.",
+        "sure_searching": "🎯 Searching high confidence bets (75%+)...",
         "searching_match": "🔍 Searching match...",
         "match_not_found": "😕 Match not found: {query}",
         "available_matches": "📋 **Available matches:**",
@@ -373,6 +396,24 @@ TRANSLATIONS = {
         "notif_welcome_back": "👋 Welcome back! Here are today's top bets:",
         "notif_hot_match": "🔥 **Hot match in {hours}h!**\n\n{match}\n📊 Confidence: {confidence}%",
         "notif_daily_digest": "📊 **Your daily stats:**\n• Predictions: {predictions}\n• Wins: {wins}\n• Streak: {streak} days 🔥",
+        # Premium page
+        "premium_title": "💎 **PREMIUM ACCESS**",
+        "premium_unlimited": "🎯 Unlimited predictions with 70%+ accuracy",
+        "premium_option1_title": "**Option 1: Deposit on 1win** 🎰",
+        "premium_option1_desc": "Make a deposit — get premium automatically!",
+        "premium_option2_title": "**Option 2: Crypto (USDT/TON)** 💰",
+        "premium_option2_crypto": "Choose plan below — pay via @CryptoBot",
+        "premium_option2_manual": "Contact @{support} to pay",
+        "premium_free_title": "👥 **Free method!**",
+        "premium_free_desc": "Invite friends — get **+3 days** per friend!",
+        "premium_earned": "Already earned: **{days} days**",
+        "premium_click_below": "Click button below 👇",
+        "premium_after_payment": "After payment — send screenshot to @{support}",
+        "premium_deposit_btn": "🎰 Deposit on 1win",
+        "premium_contact_btn": "💬 Contact @{support}",
+        "premium_friends_btn": "👥 Free (invite friends)",
+        "premium_status": "✅ You have premium until: {date}",
+        "friend_fallback": "Friend",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -444,6 +485,7 @@ TRANSLATIONS = {
         "upcoming_matches": "⚽ **Próximos jogos:**",
         "analyzing_bets": "🔍 Analisando melhores apostas...",
         "analysis_error": "❌ Erro na análise.",
+        "sure_searching": "🎯 Buscando apostas confiáveis (75%+)...",
         "searching_match": "🔍 Procurando jogo...",
         "match_not_found": "😕 Jogo não encontrado: {query}",
         "available_matches": "📋 **Jogos disponíveis:**",
@@ -480,6 +522,24 @@ TRANSLATIONS = {
         "notif_welcome_back": "👋 Bem-vindo de volta! Aqui estão as melhores apostas de hoje:",
         "notif_hot_match": "🔥 **Jogo quente em {hours}h!**\n\n{match}\n📊 Confiança: {confidence}%",
         "notif_daily_digest": "📊 **Suas estatísticas do dia:**\n• Previsões: {predictions}\n• Vitórias: {wins}\n• Sequência: {streak} dias 🔥",
+        # Premium page
+        "premium_title": "💎 **ACESSO PREMIUM**",
+        "premium_unlimited": "🎯 Previsões ilimitadas com 70%+ de precisão",
+        "premium_option1_title": "**Opção 1: Depósito no 1win** 🎰",
+        "premium_option1_desc": "Faça um depósito — ganhe premium automaticamente!",
+        "premium_option2_title": "**Opção 2: Cripto (USDT/TON)** 💰",
+        "premium_option2_crypto": "Escolha o plano abaixo — pague via @CryptoBot",
+        "premium_option2_manual": "Contate @{support} para pagar",
+        "premium_free_title": "👥 **Método gratuito!**",
+        "premium_free_desc": "Convide amigos — ganhe **+3 dias** por amigo!",
+        "premium_earned": "Já ganhou: **{days} dias**",
+        "premium_click_below": "Clique no botão abaixo 👇",
+        "premium_after_payment": "Após o pagamento — envie print para @{support}",
+        "premium_deposit_btn": "🎰 Depósito no 1win",
+        "premium_contact_btn": "💬 Contatar @{support}",
+        "premium_friends_btn": "👥 Grátis (convide amigos)",
+        "premium_status": "✅ Você tem premium até: {date}",
+        "friend_fallback": "Amigo",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -551,6 +611,7 @@ TRANSLATIONS = {
         "upcoming_matches": "⚽ **Próximos partidos:**",
         "analyzing_bets": "🔍 Analizando mejores apuestas...",
         "analysis_error": "❌ Error de análisis.",
+        "sure_searching": "🎯 Buscando apuestas seguras (75%+)...",
         "searching_match": "🔍 Buscando partido...",
         "match_not_found": "😕 Partido no encontrado: {query}",
         "available_matches": "📋 **Partidos disponibles:**",
@@ -587,6 +648,24 @@ TRANSLATIONS = {
         "notif_welcome_back": "👋 ¡Bienvenido de vuelta! Aquí están las mejores apuestas de hoy:",
         "notif_hot_match": "🔥 **¡Partido caliente en {hours}h!**\n\n{match}\n📊 Confianza: {confidence}%",
         "notif_daily_digest": "📊 **Tus estadísticas del día:**\n• Pronósticos: {predictions}\n• Victorias: {wins}\n• Racha: {streak} días 🔥",
+        # Premium page
+        "premium_title": "💎 **ACCESO PREMIUM**",
+        "premium_unlimited": "🎯 Pronósticos ilimitados con 70%+ de precisión",
+        "premium_option1_title": "**Opción 1: Depósito en 1win** 🎰",
+        "premium_option1_desc": "¡Haz un depósito — obtén premium automáticamente!",
+        "premium_option2_title": "**Opción 2: Cripto (USDT/TON)** 💰",
+        "premium_option2_crypto": "Elige el plan abajo — paga vía @CryptoBot",
+        "premium_option2_manual": "Contacta @{support} para pagar",
+        "premium_free_title": "👥 **¡Método gratuito!**",
+        "premium_free_desc": "¡Invita amigos — gana **+3 días** por amigo!",
+        "premium_earned": "Ya ganaste: **{days} días**",
+        "premium_click_below": "Haz clic en el botón abajo 👇",
+        "premium_after_payment": "Después del pago — envía captura a @{support}",
+        "premium_deposit_btn": "🎰 Depósito en 1win",
+        "premium_contact_btn": "💬 Contactar @{support}",
+        "premium_friends_btn": "👥 Gratis (invita amigos)",
+        "premium_status": "✅ Tienes premium hasta: {date}",
+        "friend_fallback": "Amigo",
     }
 }
 
@@ -1400,7 +1479,7 @@ def get_social_stats() -> dict:
         return {"wins_today": 0, "wins_week": 0, "accuracy": 0, "best_win": None}
 
 
-def get_friend_wins(user_id: int) -> list:
+def get_friend_wins(user_id: int, lang: str = "ru") -> list:
     """Get recent wins from user's referrals (friends)."""
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1422,7 +1501,7 @@ def get_friend_wins(user_id: int) -> list:
         wins = []
         for row in c.fetchall():
             username, first_name, home, away, bet, odds = row
-            name = username or first_name or "Друг"
+            name = username or first_name or get_text("friend_fallback", lang)
             wins.append({
                 "name": name,
                 "match": f"{home} vs {away}",
@@ -4143,8 +4222,8 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         by_comp[comp].append(m)
     
     tz_info = get_tz_offset_str(user_tz)
-    text = f"📅 **МАТЧИ СЕГОДНЯ** ({tz_info}):\n\n" if lang == "ru" else f"📅 **TODAY'S MATCHES** ({tz_info}):\n\n"
-    
+    text = f"{get_text('matches_today', lang)} ({tz_info}):\n\n"
+
     for comp, ms in by_comp.items():
         text += f"🏆 **{comp}**\n"
         for m in ms[:5]:
@@ -4153,10 +4232,10 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
             text += f"  ⏰ {time_str} | {home} vs {away}\n"
         text += "\n"
-    
+
     keyboard = [
-        [InlineKeyboardButton("📊 Рекомендации на сегодня", callback_data="rec_today")],
-        [InlineKeyboardButton("📆 Завтра", callback_data="cmd_tomorrow")]
+        [InlineKeyboardButton(get_text("recs_today", lang), callback_data="rec_today")],
+        [InlineKeyboardButton(get_text("tomorrow", lang), callback_data="cmd_tomorrow")]
     ]
     
     await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4184,8 +4263,8 @@ async def tomorrow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         by_comp[comp].append(m)
     
     tz_info = get_tz_offset_str(user_tz)
-    text = f"📆 **МАТЧИ ЗАВТРА** ({tz_info}):\n\n" if lang == "ru" else f"📆 **TOMORROW'S MATCHES** ({tz_info}):\n\n"
-    
+    text = f"{get_text('matches_tomorrow', lang)} ({tz_info}):\n\n"
+
     for comp, ms in by_comp.items():
         text += f"🏆 **{comp}**\n"
         for m in ms[:5]:
@@ -4194,10 +4273,10 @@ async def tomorrow_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             time_str = convert_utc_to_user_tz(m.get("utcDate", ""), user_tz)
             text += f"  ⏰ {time_str} | {home} vs {away}\n"
         text += "\n"
-    
+
     keyboard = [
-        [InlineKeyboardButton("📊 Рекомендации на завтра", callback_data="rec_tomorrow")],
-        [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
+        [InlineKeyboardButton(get_text("recs_tomorrow", lang), callback_data="rec_tomorrow")],
+        [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
     ]
     
     await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4524,13 +4603,13 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Add affiliate button with referral
         keyboard = [
             [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today"),
+            [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today"),
              InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
         ]
         increment_daily_usage(user_id)
         await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
-        await status.edit_text("❌ Ошибка анализа.")
+        await status.edit_text(get_text("analysis_error", lang))
 
 
 async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4551,7 +4630,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    status = await update.message.reply_text("🎯 Ищу уверенные ставки (75%+)...")
+    status = await update.message.reply_text(get_text("sure_searching", lang))
 
     matches = await get_matches(days=7)
     matches = filter_cup_matches(matches, exclude=bool(exclude_cups))
@@ -4638,7 +4717,7 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     expires = user.get("premium_expires") if user else None
 
     if is_prem and expires:
-        status_text = f"✅ У тебя премиум до: {expires[:10]}\n\n"
+        status_text = get_text("premium_status", lang).format(date=expires[:10]) + "\n\n"
     else:
         status_text = ""
 
@@ -4648,41 +4727,53 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get referral stats
     ref_stats = get_referral_stats(user_id)
 
-    text = f"""💎 **ПРЕМИУМ ДОСТУП**
+    # Build option 2 text
+    if crypto_enabled:
+        option2_text = get_text("premium_option2_crypto", lang)
+    else:
+        option2_text = get_text("premium_option2_manual", lang).format(support=SUPPORT_USERNAME)
 
-{status_text}🎯 Безлимитные прогнозы с точностью 70%+
+    # Build earned/click text
+    if ref_stats['earned_days'] > 0:
+        earned_text = get_text("premium_earned", lang).format(days=ref_stats['earned_days'])
+    else:
+        earned_text = get_text("premium_click_below", lang)
 
-━━━━━━━━━━━━━━━━━━━━
+    text = f"""{get_text("premium_title", lang)}
 
-**Вариант 1: Депозит в 1win** 🎰
-Сделай депозит — получи премиум автоматически!
-
-• R$200+ (~$40) → 7 дней
-• R$500+ (~$100) → 30 дней
-• R$1000+ (~$200) → Навсегда
-
-━━━━━━━━━━━━━━━━━━━━
-
-**Вариант 2: Крипта (USDT/TON)** 💰
-{"Выбери тариф ниже — оплата через @CryptoBot" if crypto_enabled else "Напиши @alex4udak для оплаты"}
-
-• $15 → 7 дней
-• $40 → 30 дней
-• $100 → 1 год
+{status_text}{get_text("premium_unlimited", lang)}
 
 ━━━━━━━━━━━━━━━━━━━━
 
-👥 **Бесплатный способ!**
-Приглашай друзей — получай **+3 дня** за каждого!
-{"Уже заработано: **" + str(ref_stats['earned_days']) + " дней**" if ref_stats['earned_days'] > 0 else "Нажми кнопку ниже 👇"}"""
+{get_text("premium_option1_title", lang)}
+{get_text("premium_option1_desc", lang)}
+
+• R$200+ (~$40) → 7 days
+• R$500+ (~$100) → 30 days
+• R$1000+ (~$200) → Lifetime
+
+━━━━━━━━━━━━━━━━━━━━
+
+{get_text("premium_option2_title", lang)}
+{option2_text}
+
+• $15 → 7 days
+• $40 → 30 days
+• $100 → 1 year
+
+━━━━━━━━━━━━━━━━━━━━
+
+{get_text("premium_free_title", lang)}
+{get_text("premium_free_desc", lang)}
+{earned_text}"""
 
     if crypto_enabled:
         keyboard = [
-            [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("💳 $15 / 7 дней", callback_data="pay_crypto_7"),
-             InlineKeyboardButton("💳 $40 / 30 дней", callback_data="pay_crypto_30")],
-            [InlineKeyboardButton("💳 $100 / 1 год", callback_data="pay_crypto_365")],
-            [InlineKeyboardButton("👥 Бесплатно (друзья)", callback_data="cmd_referral")],
+            [InlineKeyboardButton(get_text("premium_deposit_btn", lang), url=get_affiliate_link(user_id))],
+            [InlineKeyboardButton("💳 $15 / 7 days", callback_data="pay_crypto_7"),
+             InlineKeyboardButton("💳 $40 / 30 days", callback_data="pay_crypto_30")],
+            [InlineKeyboardButton("💳 $100 / 1 year", callback_data="pay_crypto_365")],
+            [InlineKeyboardButton(get_text("premium_friends_btn", lang), callback_data="cmd_referral")],
             [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
     else:
@@ -4695,11 +4786,11 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **TON:**
 `{CRYPTO_WALLETS['TON']}`
 
-После оплаты — скинь скрин @alex4udak"""
+{get_text("premium_after_payment", lang).format(support=SUPPORT_USERNAME)}"""
         keyboard = [
-            [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
-            [InlineKeyboardButton("👥 Бесплатно (друзья)", callback_data="cmd_referral")],
+            [InlineKeyboardButton(get_text("premium_deposit_btn", lang), url=get_affiliate_link(user_id))],
+            [InlineKeyboardButton(get_text("premium_contact_btn", lang).format(support=SUPPORT_USERNAME), url=f"https://t.me/{SUPPORT_USERNAME}")],
+            [InlineKeyboardButton(get_text("premium_friends_btn", lang), callback_data="cmd_referral")],
             [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
 
@@ -5290,7 +5381,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         result = await create_crypto_invoice(user_id, days, currency)
 
         if "error" in result:
-            text = f"❌ Ошибка: {result['error']}\n\nПопробуй позже или напиши @alex4udak"
+            text = f"❌ Ошибка: {result['error']}\n\nПопробуй позже или напиши @{SUPPORT_USERNAME}"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_premium")]]
         else:
             pay_url = result["pay_url"]
@@ -6856,7 +6947,7 @@ async def send_marketing_notifications(context: ContextTypes.DEFAULT_TYPE):
 
             elif notification_type == "friend_wins":
                 # Notify about friend wins
-                friend_wins = get_friend_wins(user_id)
+                friend_wins = get_friend_wins(user_id, lang)
                 if friend_wins:
                     win = friend_wins[0]
                     text = get_text("social_friend_won", lang).format(
