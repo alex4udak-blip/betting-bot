@@ -3745,11 +3745,15 @@ def get_match_warnings(match, home_form, away_form, lang="ru"):
 # ===== ENHANCED ANALYSIS v2 =====
 
 async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = None,
-                                 lang: str = "ru") -> str:
-    """Enhanced match analysis with form, H2H, home/away stats, top scorers, and value betting (ASYNC)"""
+                                 lang: str = "ru") -> tuple:
+    """Enhanced match analysis with form, H2H, home/away stats, top scorers, and value betting (ASYNC)
+
+    Returns:
+        tuple: (analysis_text, ml_features) - analysis text and features dict for ML training
+    """
 
     if not claude_client:
-        return "AI unavailable"
+        return "AI unavailable", None
 
     home = match.get("homeTeam", {}).get("name", "?")
     away = match.get("awayTeam", {}).get("name", "?")
@@ -4021,10 +4025,10 @@ Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
-        return message.content[0].text
+        return message.content[0].text, ml_features
     except Exception as e:
         logger.error(f"Analysis error: {e}")
-        return f"Error: {e}"
+        return f"Error: {e}", None
 
 
 async def get_recommendations_enhanced(matches: list, user_query: str = "",
@@ -6482,10 +6486,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     match_id = match.get("id")
 
     await status.edit_text(get_text("match_found", lang).format(home=home, away=away, comp=comp))
-    
-    # Enhanced analysis
-    analysis = await analyze_match_enhanced(match, user, lang)
-    
+
+    # Enhanced analysis - returns (text, ml_features)
+    analysis, ml_features = await analyze_match_enhanced(match, user, lang)
+
     # Extract and save prediction - parse ONLY from MAIN BET section
     try:
         confidence = 70
@@ -6599,16 +6603,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
 
-        # Save MAIN prediction (bet_rank=1)
-        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value, bet_rank=1)
+        # Save MAIN prediction (bet_rank=1) with ML features
+        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
+                        ml_features=ml_features, bet_rank=1)
         increment_daily_usage(user_id)
-        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
+        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}, features={'yes' if ml_features else 'no'}")
 
-        # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4)
+        # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4) with same ML features
         alternatives = parse_alternative_bets(analysis)
         for idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives, start=2):
             if alt_type and alt_type != bet_type:  # Don't duplicate main bet
-                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds, bet_rank=idx)
+                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
+                                ml_features=ml_features, bet_rank=idx)
                 logger.info(f"Saved ALT{idx-1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
