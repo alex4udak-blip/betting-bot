@@ -234,6 +234,8 @@ TRANSLATIONS = {
         "match_not_found": "😕 Не нашёл матч: {query}",
         "available_matches": "📋 **Доступные матчи:**",
         "match_found": "✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...",
+        "premium_btn": "💎 Премиум",
+        "no_sure_bets": "❌ Нет уверенных ставок 75%+ на ближайшие дни.",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -309,6 +311,8 @@ TRANSLATIONS = {
         "match_not_found": "😕 Match not found: {query}",
         "available_matches": "📋 **Available matches:**",
         "match_found": "✅ Found: {home} vs {away}\n🏆 {comp}\n\n⏳ Gathering stats...",
+        "premium_btn": "💎 Premium",
+        "no_sure_bets": "❌ No confident bets 75%+ found for upcoming days.",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -384,6 +388,8 @@ TRANSLATIONS = {
         "match_not_found": "😕 Jogo não encontrado: {query}",
         "available_matches": "📋 **Jogos disponíveis:**",
         "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Coletando estatísticas...",
+        "premium_btn": "💎 Premium",
+        "no_sure_bets": "❌ Nenhuma aposta confiável 75%+ encontrada para os próximos dias.",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -459,6 +465,8 @@ TRANSLATIONS = {
         "match_not_found": "😕 Partido no encontrado: {query}",
         "available_matches": "📋 **Partidos disponibles:**",
         "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Recopilando estadísticas...",
+        "premium_btn": "💎 Premium",
+        "no_sure_bets": "❌ No se encontraron apuestas seguras 75%+ para los próximos días.",
     }
 }
 
@@ -3565,37 +3573,41 @@ FORMAT:
 # ===== TELEGRAM HANDLERS =====
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command - first launch with onboarding or regular menu"""
+    """Start command - first launch with language selection or regular menu"""
     user = update.effective_user
-    lang = detect_language(user)
-    detected_tz = detect_timezone(user)
-    is_new_user = not get_user(user.id)
+    existing_user = get_user(user.id)
 
-    if is_new_user:
-        # Create user with auto-detected settings
-        create_user(user.id, user.username, lang)
-        update_user_settings(user.id, timezone=detected_tz)
+    if not existing_user:
+        # NEW USER - show language selection first
+        detected_lang = detect_language(user)
 
-        # Show beautiful welcome message for new users
-        tz_display = get_tz_offset_str(detected_tz)
-        welcome_text = f"""{get_text('first_start_title', lang)}
+        text = """🌍 **Welcome / Добро пожаловать!**
 
-{get_text('first_start_text', lang)}
+Please select your language:
+Пожалуйста, выберите язык:
 
-{get_text('detected_settings', lang)}
-• {get_text('language_label', lang)}: {LANGUAGE_NAMES.get(lang, lang)}
-• {get_text('timezone_label', lang)}: {tz_display}
+Por favor, selecione seu idioma:
+Por favor, selecciona tu idioma:"""
 
-_{get_text('change_in_settings', lang)}_"""
+        keyboard = [
+            [InlineKeyboardButton("🇷🇺 Русский", callback_data=f"set_initial_lang_ru"),
+             InlineKeyboardButton("🇬🇧 English", callback_data=f"set_initial_lang_en")],
+            [InlineKeyboardButton("🇧🇷 Português", callback_data=f"set_initial_lang_pt"),
+             InlineKeyboardButton("🇪🇸 Español", callback_data=f"set_initial_lang_es")]
+        ]
+
+        # Pre-select detected language hint
+        hint = f"\n\n💡 _Detected / Определён: {LANGUAGE_NAMES.get(detected_lang, detected_lang)}_"
 
         await update.message.reply_text(
-            welcome_text,
-            reply_markup=get_main_keyboard(lang),
+            text + hint,
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
-
-    # Show main menu
-    await show_main_menu(update, context, lang)
+    else:
+        # Existing user - show main menu
+        lang = existing_user.get("language", "ru")
+        await show_main_menu(update, context, lang)
 
 
 async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4075,7 +4087,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         increment_daily_usage(user_id)
         await status.edit_text(header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
-        await status.edit_text("❌ Нет уверенных ставок 75%+ на ближайшие дни.")
+        await status.edit_text(get_text("no_sure_bets", lang))
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4632,7 +4644,49 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    
+
+    # Initial language selection for new users
+    if data.startswith("set_initial_lang_"):
+        selected_lang = data.replace("set_initial_lang_", "")
+        tg_user = query.from_user
+        detected_tz = detect_timezone(tg_user)
+
+        # Create user with selected language
+        create_user(user_id, tg_user.username, selected_lang)
+        update_user_settings(user_id, timezone=detected_tz)
+
+        # Show welcome message
+        tz_display = get_tz_offset_str(detected_tz)
+        welcome_text = f"""{get_text('first_start_title', selected_lang)}
+
+{get_text('first_start_text', selected_lang)}
+
+{get_text('detected_settings', selected_lang)}
+• {get_text('timezone_label', selected_lang)}: {tz_display}
+
+_{get_text('change_in_settings', selected_lang)}_"""
+
+        # Build main menu keyboard
+        keyboard = [
+            [InlineKeyboardButton(get_text("recommendations", selected_lang), callback_data="cmd_recommend"),
+             InlineKeyboardButton(get_text("today", selected_lang), callback_data="cmd_today")],
+            [InlineKeyboardButton(get_text("tomorrow", selected_lang), callback_data="cmd_tomorrow"),
+             InlineKeyboardButton(get_text("leagues", selected_lang), callback_data="cmd_leagues")],
+            [InlineKeyboardButton(get_text("live_alerts", selected_lang), callback_data="cmd_live"),
+             InlineKeyboardButton(get_text("settings", selected_lang), callback_data="cmd_settings")],
+            [InlineKeyboardButton(get_text("favorites", selected_lang), callback_data="cmd_favorites"),
+             InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats")],
+            [InlineKeyboardButton(get_text("premium_btn", selected_lang), callback_data="cmd_premium"),
+             InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
+        ]
+
+        await query.edit_message_text(
+            welcome_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+        return
+
     # Command callbacks
     if data == "cmd_start":
         keyboard = [
@@ -4644,7 +4698,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
             [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
              InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
-            [InlineKeyboardButton("💎 Премиум", callback_data="cmd_premium"),
+            [InlineKeyboardButton(get_text("premium_btn", lang), callback_data="cmd_premium"),
              InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
         ]
         await query.edit_message_text(f"⚽ **AI Betting Bot v14** - {get_text('choose_action', lang)}",
@@ -5029,37 +5083,41 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⛔ Только для администраторов")
             return
 
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
 
-        # Get recent users
-        c.execute("""
-            SELECT user_id, username, is_premium, created_at
-            FROM users
-            ORDER BY created_at DESC
-            LIMIT 20
-        """)
-        users = c.fetchall()
+            # Get recent users
+            c.execute("""
+                SELECT user_id, username, is_premium, created_at
+                FROM users
+                ORDER BY COALESCE(created_at, '1970-01-01') DESC
+                LIMIT 20
+            """)
+            users = c.fetchall()
 
-        # Stats
-        c.execute("SELECT COUNT(*) FROM users")
-        total = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
-        premium = c.fetchone()[0]
-        conn.close()
+            # Stats
+            c.execute("SELECT COUNT(*) FROM users")
+            total = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
+            premium = c.fetchone()[0]
+            conn.close()
 
-        text = f"""👥 **Пользователи** ({total} всего, {premium} premium)
+            text = f"""👥 **Пользователи** ({total} всего, {premium} premium)
 
 **Последние 20:**
 """
-        for uid, uname, is_prem, created in users:
-            prem_icon = "💎" if is_prem else ""
-            name = f"@{uname}" if uname else f"ID:{uid}"
-            date = created[:10] if created else "?"
-            text += f"• {prem_icon}{name} ({date})\n"
+            for uid, uname, is_prem, created in users:
+                prem_icon = "💎" if is_prem else ""
+                name = f"@{uname}" if uname else f"ID:{uid}"
+                date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
+                text += f"• {prem_icon}{name} ({date})\n"
 
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin users error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
 
     elif data == "admin_stats":
         if not is_admin(user_id):
