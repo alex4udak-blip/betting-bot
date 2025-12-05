@@ -570,7 +570,7 @@ DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db
 
 # ML Models directory
 ML_MODELS_DIR = "/data/ml_models" if os.path.exists("/data") else "ml_models"
-ML_MIN_SAMPLES = 100  # Minimum predictions to train model
+ML_MIN_SAMPLES = 50  # Minimum predictions to train model (lowered for faster start)
 
 def init_db():
     """Initialize SQLite database"""
@@ -1054,6 +1054,63 @@ def get_clean_stats() -> dict:
         "with_dups_accuracy": round(correct_with_dups / total_with_dups * 100, 1) if total_with_dups > 0 else 0,
         "duplicates_count": total_with_dups - total
     }
+
+
+def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, away_form: dict) -> tuple:
+    """Validate totals prediction against expected goals.
+    Returns (validated_bet_type, validated_confidence, warning_message)"""
+
+    if not bet_type or not home_form or not away_form:
+        return bet_type, confidence, None
+
+    bet_lower = bet_type.lower()
+
+    # Only validate totals bets
+    if "тб" not in bet_lower and "тм" not in bet_lower and "over" not in bet_lower and "under" not in bet_lower:
+        return bet_type, confidence, None
+
+    # Calculate expected goals from form
+    try:
+        home_scored = home_form.get('goals_scored', 7.5) / 5  # 5 matches
+        home_conceded = home_form.get('goals_conceded', 5) / 5
+        away_scored = away_form.get('goals_scored', 5) / 5
+        away_conceded = away_form.get('goals_conceded', 7.5) / 5
+
+        expected_home = (home_scored + away_conceded) / 2
+        expected_away = (away_scored + home_conceded) / 2
+        expected_total = expected_home + expected_away
+
+        logger.info(f"Totals validation: expected_total={expected_total:.2f}, bet_type={bet_type}")
+
+        is_over = "тб" in bet_lower or "over" in bet_lower or "больше" in bet_lower
+        is_under = "тм" in bet_lower or "under" in bet_lower or "меньше" in bet_lower
+
+        # STRICT VALIDATION
+        if is_over and expected_total < 2.3:
+            # Over recommended but expected goals too low!
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} < 2.5, ТБ рискован!"
+            logger.warning(f"Totals mismatch: Over recommended but expected={expected_total:.2f}")
+            # Reduce confidence significantly
+            new_confidence = min(confidence, 60)
+            return bet_type, new_confidence, warning
+
+        if is_under and expected_total > 2.7:
+            # Under recommended but expected goals too high!
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} > 2.5, ТМ рискован!"
+            logger.warning(f"Totals mismatch: Under recommended but expected={expected_total:.2f}")
+            new_confidence = min(confidence, 60)
+            return bet_type, new_confidence, warning
+
+        # Good match - boost confidence slightly if strong signal
+        if is_over and expected_total > 3.0:
+            return bet_type, min(confidence + 5, 85), None
+        if is_under and expected_total < 2.0:
+            return bet_type, min(confidence + 5, 85), None
+
+    except Exception as e:
+        logger.error(f"Totals validation error: {e}")
+
+    return bet_type, confidence, None
 
 
 def check_bet_result(bet_type, home_score, away_score):
@@ -2622,10 +2679,14 @@ CRITICAL ANALYSIS RULES:
    - If away team has <30% win rate AWAY → П1 confidence +10%
    - Always compare HOME form vs AWAY form, not overall
 
-2. EXPECTED GOALS FOR TOTALS:
-   - Use the calculated expected goals for total predictions
-   - If expected total > 2.8 → favor Over 2.5
-   - If expected total < 2.2 → favor Under 2.5
+2. EXPECTED GOALS FOR TOTALS (STRICT RULES!):
+   - CALCULATE expected_total = (home_avg_scored + away_avg_conceded)/2 + (away_avg_scored + home_avg_conceded)/2
+   - If expected_total > 2.8 → ONLY then recommend Over 2.5
+   - If expected_total < 2.2 → ONLY then recommend Under 2.5
+   - If expected_total is 2.2-2.8 → DO NOT recommend totals! Too risky.
+   - NEVER recommend Over 2.5 if expected_total < 2.5 (this is a HARD RULE!)
+   - NEVER recommend Under 2.5 if expected_total > 2.5 (this is a HARD RULE!)
+   - When in doubt about totals → recommend BTTS or outcomes instead
 
 3. H2H RELIABILITY CHECK (CRITICAL!):
    - If H2H has < 5 matches → IGNORE H2H for totals prediction!
@@ -4356,7 +4417,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
             if odds_match:
                 odds_value = float(odds_match.group(1))
-        
+
+        # COUNTER-CHECK: Validate totals predictions against expected goals
+        totals_warning = None
+        if "тб" in bet_type.lower() or "тм" in bet_type.lower():
+            home_id = match.get("homeTeam", {}).get("id")
+            away_id = match.get("awayTeam", {}).get("id")
+            if home_id and away_id:
+                home_form = await get_team_form(home_id)
+                away_form = await get_team_form(away_id)
+                bet_type, confidence, totals_warning = validate_totals_prediction(
+                    bet_type, confidence, home_form, away_form
+                )
+                if totals_warning:
+                    logger.warning(f"Totals counter-check triggered: {totals_warning}")
+                    # Add warning to analysis
+                    analysis = analysis + f"\n\n{totals_warning}"
+
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
         increment_daily_usage(user_id)
         logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
