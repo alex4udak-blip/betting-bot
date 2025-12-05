@@ -6921,13 +6921,49 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         home = match.get("homeTeam", {}).get("name", "?")
         away = match.get("awayTeam", {}).get("name", "?")
         comp = match.get("competition", {}).get("name", "?")
+        comp_code = match.get("competition", {}).get("code", "PL")
         home_id = match.get("homeTeam", {}).get("id")
         away_id = match.get("awayTeam", {}).get("id")
 
-        home_form = await get_team_form(home_id) if home_id else None
-        away_form = await get_team_form(away_id) if away_id else None
+        # Use enhanced form for ML features
+        home_form_enhanced = await get_team_form_enhanced(home_id) if home_id else None
+        away_form_enhanced = await get_team_form_enhanced(away_id) if away_id else None
         odds = await get_odds(home, away)
         h2h = await get_h2h(match_id) if match_id else None
+        standings = await get_standings(comp_code)
+
+        # Extract ML features for training
+        ml_features = extract_features(
+            home_form=home_form_enhanced,
+            away_form=away_form_enhanced,
+            standings=standings,
+            odds=odds,
+            h2h=h2h.get("matches", []) if h2h else [],
+            home_team=home,
+            away_team=away
+        )
+
+        # Convert enhanced form to simple form for text generation
+        home_form = None
+        away_form = None
+        if home_form_enhanced:
+            home_form = {
+                "form": home_form_enhanced.get("overall", {}).get("form", ""),
+                "wins": home_form_enhanced.get("overall", {}).get("wins", 0),
+                "draws": home_form_enhanced.get("overall", {}).get("draws", 0),
+                "losses": home_form_enhanced.get("overall", {}).get("losses", 0),
+                "goals_scored": home_form_enhanced.get("overall", {}).get("avg_goals_scored", 1.5) * 5,
+                "goals_conceded": home_form_enhanced.get("overall", {}).get("avg_goals_conceded", 1.0) * 5,
+            }
+        if away_form_enhanced:
+            away_form = {
+                "form": away_form_enhanced.get("overall", {}).get("form", ""),
+                "wins": away_form_enhanced.get("overall", {}).get("wins", 0),
+                "draws": away_form_enhanced.get("overall", {}).get("draws", 0),
+                "losses": away_form_enhanced.get("overall", {}).get("losses", 0),
+                "goals_scored": away_form_enhanced.get("overall", {}).get("avg_goals_scored", 1.0) * 5,
+                "goals_conceded": away_form_enhanced.get("overall", {}).get("avg_goals_conceded", 1.5) * 5,
+            }
 
         # Build detailed form text
         form_text = ""
@@ -7060,10 +7096,11 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                             parse_mode="Markdown"
                         )
 
-                        # Save prediction to database for statistics tracking
+                        # Save prediction to database for statistics tracking (with ML features)
                         if match_id:
-                            save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_val)
-                            logger.info(f"Live alert prediction saved: {home} vs {away}, {bet_type} for user {user_id}")
+                            save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_val,
+                                            ml_features=ml_features, bet_rank=1)
+                            logger.info(f"Live alert prediction saved: {home} vs {away}, {bet_type} for user {user_id}, features={'yes' if ml_features else 'no'}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
                         
