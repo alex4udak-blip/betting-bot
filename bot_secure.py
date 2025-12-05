@@ -131,6 +131,17 @@ TOP_CLUBS = [
 # Cup competitions (higher upset risk)
 CUP_KEYWORDS = ["Cup", "Copa", "Coupe", "Pokal", "Coppa", "EFL", "FA Cup"]
 
+def is_cup_match(match: dict) -> bool:
+    """Check if match is a cup competition"""
+    competition = match.get("competition", {}).get("name") or ""
+    return any(kw in competition for kw in CUP_KEYWORDS)
+
+def filter_cup_matches(matches: list, exclude: bool = False) -> list:
+    """Filter matches - if exclude=True, remove cup matches"""
+    if not exclude:
+        return matches
+    return [m for m in matches if not is_cup_match(m)]
+
 # ===== TRANSLATIONS =====
 TRANSLATIONS = {
     "ru": {
@@ -570,7 +581,7 @@ DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db
 
 # ML Models directory
 ML_MODELS_DIR = "/data/ml_models" if os.path.exists("/data") else "ml_models"
-ML_MIN_SAMPLES = 100  # Minimum predictions to train model
+ML_MIN_SAMPLES = 50  # Minimum predictions to train model (lowered for faster start)
 
 def init_db():
     """Initialize SQLite database"""
@@ -686,6 +697,10 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN exclude_cups INTEGER DEFAULT 0")
+    except:
+        pass
 
     conn.commit()
     conn.close()
@@ -713,7 +728,8 @@ def get_user(user_id):
             "is_premium": data.get("is_premium", 0),
             "daily_requests": data.get("daily_requests", 0),
             "last_request_date": data.get("last_request_date"),
-            "timezone": data.get("timezone", "Europe/Moscow")
+            "timezone": data.get("timezone", "Europe/Moscow"),
+            "exclude_cups": data.get("exclude_cups", 0)
         }
     return None
 
@@ -729,7 +745,8 @@ def create_user(user_id, username=None, language="ru"):
 # Whitelist of allowed settings fields (prevents SQL injection)
 ALLOWED_USER_SETTINGS = frozenset({
     'min_odds', 'max_odds', 'risk_level', 'language',
-    'is_premium', 'daily_requests', 'last_request_date', 'timezone'
+    'is_premium', 'daily_requests', 'last_request_date', 'timezone',
+    'exclude_cups'
 })
 
 def update_user_settings(user_id: int, **kwargs) -> None:
@@ -1054,6 +1071,242 @@ def get_clean_stats() -> dict:
         "with_dups_accuracy": round(correct_with_dups / total_with_dups * 100, 1) if total_with_dups > 0 else 0,
         "duplicates_count": total_with_dups - total
     }
+
+
+def get_roi_stats(user_id: int = None) -> dict:
+    """Calculate ROI (Return on Investment) for predictions.
+    Assumes flat betting (1 unit per bet)."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    where_clause = "WHERE is_correct IS NOT NULL"
+    params = ()
+    if user_id:
+        where_clause += " AND user_id = ?"
+        params = (user_id,)
+
+    c.execute(f"""
+        SELECT odds, is_correct FROM predictions
+        {where_clause}
+    """, params)
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"total_bets": 0, "roi": 0, "profit": 0, "units_won": 0, "units_lost": 0}
+
+    total_bets = len(rows)
+    units_staked = total_bets  # 1 unit per bet
+    units_won = 0
+    units_lost = 0
+
+    for odds, is_correct in rows:
+        if is_correct == 1:  # Win
+            units_won += (odds - 1) if odds else 0.8  # profit = odds - 1
+        elif is_correct == 0:  # Loss
+            units_lost += 1
+        # is_correct == 2 is push (no profit/loss)
+
+    profit = units_won - units_lost
+    roi = (profit / units_staked * 100) if units_staked > 0 else 0
+
+    return {
+        "total_bets": total_bets,
+        "units_staked": units_staked,
+        "units_won": round(units_won, 2),
+        "units_lost": units_lost,
+        "profit": round(profit, 2),
+        "roi": round(roi, 1)
+    }
+
+
+def get_streak_info(user_id: int = None) -> dict:
+    """Get current streak and best/worst streaks."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    where_clause = "WHERE is_correct IS NOT NULL"
+    params = ()
+    if user_id:
+        where_clause += " AND user_id = ?"
+        params = (user_id,)
+
+    c.execute(f"""
+        SELECT is_correct FROM predictions
+        {where_clause}
+        ORDER BY checked_at DESC
+    """, params)
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"current_streak": 0, "streak_type": None, "best_win_streak": 0, "worst_lose_streak": 0}
+
+    results = [r[0] for r in rows]
+
+    # Current streak
+    current_streak = 0
+    streak_type = None
+    if results:
+        first = results[0]
+        if first in (0, 1):
+            streak_type = "win" if first == 1 else "lose"
+            for r in results:
+                if r == first:
+                    current_streak += 1
+                else:
+                    break
+
+    # Best win streak and worst lose streak
+    best_win = 0
+    worst_lose = 0
+    temp_win = 0
+    temp_lose = 0
+
+    for r in results:
+        if r == 1:
+            temp_win += 1
+            temp_lose = 0
+            best_win = max(best_win, temp_win)
+        elif r == 0:
+            temp_lose += 1
+            temp_win = 0
+            worst_lose = max(worst_lose, temp_lose)
+        else:
+            temp_win = 0
+            temp_lose = 0
+
+    return {
+        "current_streak": current_streak,
+        "streak_type": streak_type,
+        "best_win_streak": best_win,
+        "worst_lose_streak": worst_lose
+    }
+
+
+def get_stats_by_league() -> dict:
+    """Get accuracy statistics broken down by league/competition."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT
+            CASE
+                WHEN home_team LIKE '%Premier%' OR away_team LIKE '%Premier%' THEN 'Premier League'
+                WHEN home_team LIKE '%Barcelona%' OR home_team LIKE '%Madrid%' OR home_team LIKE '%Atletico%' THEN 'La Liga'
+                WHEN home_team LIKE '%Bayern%' OR home_team LIKE '%Dortmund%' THEN 'Bundesliga'
+                WHEN home_team LIKE '%Juventus%' OR home_team LIKE '%Milan%' OR home_team LIKE '%Inter%' OR home_team LIKE '%Roma%' THEN 'Serie A'
+                WHEN home_team LIKE '%PSG%' OR home_team LIKE '%Lyon%' OR home_team LIKE '%Marseille%' THEN 'Ligue 1'
+                ELSE 'Other'
+            END as league,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins,
+            bet_category
+        FROM predictions
+        WHERE is_correct IS NOT NULL
+        GROUP BY league, bet_category
+        ORDER BY total DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+
+    stats = {}
+    for league, total, wins, category in rows:
+        if league not in stats:
+            stats[league] = {"total": 0, "wins": 0, "by_type": {}}
+        stats[league]["total"] += total
+        stats[league]["wins"] += wins
+        if category:
+            if category not in stats[league]["by_type"]:
+                stats[league]["by_type"][category] = {"total": 0, "wins": 0}
+            stats[league]["by_type"][category]["total"] += total
+            stats[league]["by_type"][category]["wins"] += wins
+
+    # Calculate accuracies
+    for league in stats:
+        stats[league]["accuracy"] = round(stats[league]["wins"] / stats[league]["total"] * 100, 1) if stats[league]["total"] > 0 else 0
+        for cat in stats[league]["by_type"]:
+            cat_data = stats[league]["by_type"][cat]
+            cat_data["accuracy"] = round(cat_data["wins"] / cat_data["total"] * 100, 1) if cat_data["total"] > 0 else 0
+
+    return stats
+
+
+def calculate_kelly(probability: float, odds: float) -> float:
+    """Calculate Kelly Criterion stake size.
+    Returns fraction of bankroll to bet (0-1)."""
+    if odds <= 1 or probability <= 0 or probability >= 1:
+        return 0
+
+    # Kelly formula: (bp - q) / b
+    # b = decimal odds - 1
+    # p = probability of winning
+    # q = probability of losing (1 - p)
+    b = odds - 1
+    p = probability / 100 if probability > 1 else probability
+    q = 1 - p
+
+    kelly = (b * p - q) / b
+
+    # Never bet more than 25% (quarter Kelly is safer)
+    return max(0, min(kelly / 4, 0.25))
+
+
+def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, away_form: dict) -> tuple:
+    """Validate totals prediction against expected goals.
+    Returns (validated_bet_type, validated_confidence, warning_message)"""
+
+    if not bet_type or not home_form or not away_form:
+        return bet_type, confidence, None
+
+    bet_lower = bet_type.lower()
+
+    # Only validate totals bets
+    if "тб" not in bet_lower and "тм" not in bet_lower and "over" not in bet_lower and "under" not in bet_lower:
+        return bet_type, confidence, None
+
+    # Calculate expected goals from form
+    try:
+        home_scored = home_form.get('goals_scored', 7.5) / 5  # 5 matches
+        home_conceded = home_form.get('goals_conceded', 5) / 5
+        away_scored = away_form.get('goals_scored', 5) / 5
+        away_conceded = away_form.get('goals_conceded', 7.5) / 5
+
+        expected_home = (home_scored + away_conceded) / 2
+        expected_away = (away_scored + home_conceded) / 2
+        expected_total = expected_home + expected_away
+
+        logger.info(f"Totals validation: expected_total={expected_total:.2f}, bet_type={bet_type}")
+
+        is_over = "тб" in bet_lower or "over" in bet_lower or "больше" in bet_lower
+        is_under = "тм" in bet_lower or "under" in bet_lower or "меньше" in bet_lower
+
+        # STRICT VALIDATION
+        if is_over and expected_total < 2.3:
+            # Over recommended but expected goals too low!
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} < 2.5, ТБ рискован!"
+            logger.warning(f"Totals mismatch: Over recommended but expected={expected_total:.2f}")
+            # Reduce confidence significantly
+            new_confidence = min(confidence, 60)
+            return bet_type, new_confidence, warning
+
+        if is_under and expected_total > 2.7:
+            # Under recommended but expected goals too high!
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} > 2.5, ТМ рискован!"
+            logger.warning(f"Totals mismatch: Under recommended but expected={expected_total:.2f}")
+            new_confidence = min(confidence, 60)
+            return bet_type, new_confidence, warning
+
+        # Good match - boost confidence slightly if strong signal
+        if is_over and expected_total > 3.0:
+            return bet_type, min(confidence + 5, 85), None
+        if is_under and expected_total < 2.0:
+            return bet_type, min(confidence + 5, 85), None
+
+    except Exception as e:
+        logger.error(f"Totals validation error: {e}")
+
+    return bet_type, confidence, None
 
 
 def check_bet_result(bet_type, home_score, away_score):
@@ -2622,10 +2875,14 @@ CRITICAL ANALYSIS RULES:
    - If away team has <30% win rate AWAY → П1 confidence +10%
    - Always compare HOME form vs AWAY form, not overall
 
-2. EXPECTED GOALS FOR TOTALS:
-   - Use the calculated expected goals for total predictions
-   - If expected total > 2.8 → favor Over 2.5
-   - If expected total < 2.2 → favor Under 2.5
+2. EXPECTED GOALS FOR TOTALS (STRICT RULES!):
+   - CALCULATE expected_total = (home_avg_scored + away_avg_conceded)/2 + (away_avg_scored + home_avg_conceded)/2
+   - If expected_total > 2.8 → ONLY then recommend Over 2.5
+   - If expected_total < 2.2 → ONLY then recommend Under 2.5
+   - If expected_total is 2.2-2.8 → DO NOT recommend totals! Too risky.
+   - NEVER recommend Over 2.5 if expected_total < 2.5 (this is a HARD RULE!)
+   - NEVER recommend Under 2.5 if expected_total > 2.5 (this is a HARD RULE!)
+   - When in doubt about totals → recommend BTTS or outcomes instead
 
 3. H2H RELIABILITY CHECK (CRITICAL!):
    - If H2H has < 5 matches → IGNORE H2H for totals prediction!
@@ -2696,8 +2953,13 @@ Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"
 async def get_recommendations_enhanced(matches: list, user_query: str = "",
                                        user_settings: Optional[dict] = None,
                                        league_filter: Optional[str] = None,
-                                       lang: str = "ru") -> Optional[str]:
-    """Enhanced recommendations with user preferences (ASYNC)"""
+                                       lang: str = "ru",
+                                       min_confidence: int = 0) -> Optional[str]:
+    """Enhanced recommendations with user preferences (ASYNC)
+
+    Args:
+        min_confidence: Minimum confidence threshold (0 = no filter, 75 = only high confidence)
+    """
 
     logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
 
@@ -2789,6 +3051,7 @@ RULES:
 3. Cup matches = higher upset risk, lower confidence
 4. Consider VALUE: confidence × odds > 1.0
 5. If warnings present - adjust confidence accordingly
+{f'6. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
 
 FORMAT:
 🔥 **ТОП СТАВКИ:**
@@ -2899,11 +3162,13 @@ async def today_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     lang = user.get("language", "ru") if user else "ru"
     user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
-    
+    exclude_cups = user.get("exclude_cups", 0) if user else 0
+
     status = await update.message.reply_text(get_text("analyzing", lang))
-    
+
     matches = await get_matches(date_filter="today")
-    
+    matches = filter_cup_matches(matches, exclude=bool(exclude_cups))
+
     if not matches:
         await status.edit_text(get_text("no_matches", lang))
         return
@@ -2991,17 +3256,22 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Localized settings labels
     settings_labels = {
-        "ru": {"title": "⚙️ **НАСТРОЙКИ**", "min": "Мин. коэфф", "max": "Макс. коэфф", "risk": "Риск", "tz": "Часовой пояс", "premium": "Премиум", "yes": "Да", "no": "Нет", "tap_to_change": "Нажми на параметр чтобы изменить:"},
-        "en": {"title": "⚙️ **SETTINGS**", "min": "Min odds", "max": "Max odds", "risk": "Risk", "tz": "Timezone", "premium": "Premium", "yes": "Yes", "no": "No", "tap_to_change": "Tap to change:"},
-        "pt": {"title": "⚙️ **CONFIGURAÇÕES**", "min": "Odds mín", "max": "Odds máx", "risk": "Risco", "tz": "Fuso horário", "premium": "Premium", "yes": "Sim", "no": "Não", "tap_to_change": "Toque para alterar:"},
-        "es": {"title": "⚙️ **AJUSTES**", "min": "Cuota mín", "max": "Cuota máx", "risk": "Riesgo", "tz": "Zona horaria", "premium": "Premium", "yes": "Sí", "no": "No", "tap_to_change": "Toca para cambiar:"},
+        "ru": {"title": "⚙️ **НАСТРОЙКИ**", "min": "Мин. коэфф", "max": "Макс. коэфф", "risk": "Риск", "tz": "Часовой пояс", "premium": "Премиум", "yes": "Да", "no": "Нет", "tap_to_change": "Нажми на параметр чтобы изменить:", "exclude_cups": "Исключить кубки"},
+        "en": {"title": "⚙️ **SETTINGS**", "min": "Min odds", "max": "Max odds", "risk": "Risk", "tz": "Timezone", "premium": "Premium", "yes": "Yes", "no": "No", "tap_to_change": "Tap to change:", "exclude_cups": "Exclude cups"},
+        "pt": {"title": "⚙️ **CONFIGURAÇÕES**", "min": "Odds mín", "max": "Odds máx", "risk": "Risco", "tz": "Fuso horário", "premium": "Premium", "yes": "Sim", "no": "Não", "tap_to_change": "Toque para alterar:", "exclude_cups": "Excluir copas"},
+        "es": {"title": "⚙️ **AJUSTES**", "min": "Cuota mín", "max": "Cuota máx", "risk": "Riesgo", "tz": "Zona horaria", "premium": "Premium", "yes": "Sí", "no": "No", "tap_to_change": "Toca para cambiar:", "exclude_cups": "Excluir copas"},
     }
     sl = settings_labels.get(lang, settings_labels["ru"])
+
+    # Exclude cups toggle
+    exclude_cups = user.get('exclude_cups', 0)
+    cups_status = f"✅ {sl['yes']}" if exclude_cups else f"❌ {sl['no']}"
 
     keyboard = [
         [InlineKeyboardButton(f"📉 {sl['min']}: {user['min_odds']}", callback_data="set_min_odds")],
         [InlineKeyboardButton(f"📈 {sl['max']}: {user['max_odds']}", callback_data="set_max_odds")],
         [InlineKeyboardButton(f"⚠️ {sl['risk']}: {user['risk_level']}", callback_data="set_risk")],
+        [InlineKeyboardButton(f"🏆 {sl['exclude_cups']}: {cups_status}", callback_data="toggle_exclude_cups")],
         [InlineKeyboardButton("🌍 Language", callback_data="set_language")],
         [InlineKeyboardButton(f"🕐 {sl['tz']}: {tz_display}", callback_data="set_timezone")],
         [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
@@ -3013,6 +3283,7 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📉 **{sl['min']}:** {user['min_odds']}
 📈 **{sl['max']}:** {user['max_odds']}
 ⚠️ **{sl['risk']}:** {user['risk_level']}
+🏆 **{sl['exclude_cups']}:** {cups_status}
 🌍 **Language:** {lang.upper()}
 🕐 **{sl['tz']}:** {tz_display}
 💎 **{sl['premium']}:** {premium_status}
@@ -3071,9 +3342,9 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    
+
     stats = get_user_stats(user_id)
-    
+
     if stats["total"] == 0:
         text = "📈 **СТАТИСТИКА**\n\nПока нет данных. Напиши название команды!" if lang == "ru" else "📈 **STATS**\n\nNo data yet. Type a team name!"
         if update.callback_query:
@@ -3081,21 +3352,41 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(text, parse_mode="Markdown")
         return
-    
+
     win_emoji = "🔥" if stats["win_rate"] >= 70 else "✅" if stats["win_rate"] >= 50 else "📉"
-    
+
+    # Get ROI and streak info
+    roi = get_roi_stats(user_id)
+    streak = get_streak_info(user_id)
+
+    # Format streak
+    streak_text = ""
+    if streak["current_streak"] > 0:
+        if streak["streak_type"] == "win":
+            streak_text = f"🔥 Серия: {streak['current_streak']} побед!"
+        else:
+            streak_text = f"❄️ Серия: {streak['current_streak']} поражений"
+
+    # Format ROI
+    roi_emoji = "💰" if roi["roi"] > 0 else "📉" if roi["roi"] < 0 else "➖"
+    roi_text = f"{roi_emoji} **ROI:** {roi['roi']:+.1f}% (профит: {roi['profit']:+.1f} ед.)"
+
     # Build stats string with push
     decided = stats['correct'] + stats.get('incorrect', 0)
     push_str = f"\n🔄 **Возвраты:** {stats['push']}" if stats.get('push', 0) > 0 else ""
-    
+
     text = f"""📈 **СТАТИСТИКА**
 
 {win_emoji} **Точность:** {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
+{roi_text}
+{streak_text}
 
 📊 **Всего прогнозов:** {stats['total']}
 ✅ **Верных:** {stats['correct']}
 ❌ **Неверных:** {stats.get('incorrect', 0)}{push_str}
 ⏳ **Ожидают:** {stats['pending']}
+
+🏆 **Рекорды:** лучшая серия {streak['best_win_streak']}W | худшая {streak['worst_lose_streak']}L
 
 """
     
@@ -3208,7 +3499,8 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
-    
+    exclude_cups = user.get("exclude_cups", 0) if user else 0
+
     # Check daily limit
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
@@ -3216,11 +3508,12 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
-    
+
     status = await update.message.reply_text(get_text("analyzing", lang))
-    
+
     matches = await get_matches(days=7)
-    
+    matches = filter_cup_matches(matches, exclude=bool(exclude_cups))
+
     if not matches:
         await status.edit_text(get_text("no_matches", lang))
         return
@@ -3240,6 +3533,44 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text("❌ Ошибка анализа.")
 
 
+async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get only HIGH CONFIDENCE (75%+) recommendations"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+    exclude_cups = user.get("exclude_cups", 0) if user else 0
+
+    # Check daily limit
+    can_use, remaining = check_daily_limit(user_id)
+    if not can_use:
+        text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    status = await update.message.reply_text("🎯 Ищу уверенные ставки (75%+)...")
+
+    matches = await get_matches(days=7)
+    matches = filter_cup_matches(matches, exclude=bool(exclude_cups))
+
+    if not matches:
+        await status.edit_text(get_text("no_matches", lang))
+        return
+
+    recs = await get_recommendations_enhanced(matches, "", user, lang=lang, min_confidence=75)
+
+    if recs:
+        header = "🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**\n\n"
+        keyboard = [
+            [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+            [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend")]
+        ]
+        increment_daily_usage(user_id)
+        await status.edit_text(header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await status.edit_text("❌ Нет уверенных ставок 75%+ на ближайшие дни.")
+
+
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command"""
     user = get_user(update.effective_user.id)
@@ -3250,12 +3581,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Основные команды:**
 • /start - Главное меню
 • /recommend - Лучшие ставки
+• /sure - 🎯 Только 75%+ уверенность
 • /today - Матчи сегодня
 • /tomorrow - Матчи завтра
 • /live - 🔔 Включить алерты
 • /settings - Настройки
 • /favorites - Избранное
 • /stats - Статистика
+• /history - 📜 История прогнозов
 
 **Как пользоваться:**
 1. Напиши название команды (напр. "Ливерпуль")
@@ -3282,6 +3615,102 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show prediction history with filters"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    # Parse filter from arguments: /history [all|wins|losses|pending] [count]
+    args = context.args if context.args else []
+    filter_type = "all"
+    limit = 10
+
+    for arg in args:
+        if arg in ["all", "wins", "losses", "pending"]:
+            filter_type = arg
+        elif arg.isdigit():
+            limit = min(int(arg), 50)  # Max 50
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # Build query based on filter
+    if filter_type == "wins":
+        c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct = 1
+                     ORDER BY predicted_at DESC LIMIT ?""", (user_id, limit))
+    elif filter_type == "losses":
+        c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct = 0
+                     ORDER BY predicted_at DESC LIMIT ?""", (user_id, limit))
+    elif filter_type == "pending":
+        c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct IS NULL
+                     ORDER BY predicted_at DESC LIMIT ?""", (user_id, limit))
+    else:
+        c.execute("""SELECT * FROM predictions WHERE user_id = ?
+                     ORDER BY predicted_at DESC LIMIT ?""", (user_id, limit))
+
+    predictions = c.fetchall()
+    conn.close()
+
+    if not predictions:
+        no_history = {
+            "ru": "📜 История пуста. Сделайте прогноз!",
+            "en": "📜 No history yet. Make a prediction!",
+            "pt": "📜 Histórico vazio. Faça uma previsão!",
+            "es": "📜 Sin historial. ¡Haz una predicción!"
+        }
+        await update.message.reply_text(no_history.get(lang, no_history["ru"]))
+        return
+
+    # Build history text
+    filter_labels = {
+        "all": {"ru": "ВСЕ", "en": "ALL"},
+        "wins": {"ru": "ПОБЕДЫ", "en": "WINS"},
+        "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES"},
+        "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING"}
+    }
+    filter_label = filter_labels[filter_type].get(lang, filter_labels[filter_type]["en"])
+
+    text = f"📜 **ИСТОРИЯ ПРОГНОЗОВ** ({filter_label})\n\n"
+
+    for p in predictions:
+        date_str = p["predicted_at"][:10] if p["predicted_at"] else "?"
+        home = p["home_team"] or "?"
+        away = p["away_team"] or "?"
+        bet = p["bet_type"] or "?"
+        conf = p["confidence"] or 0
+        odds = p["odds"] or 0
+
+        # Result emoji
+        if p["is_correct"] is None:
+            result_emoji = "⏳"
+            result_text = "Ожидает"
+        elif p["is_correct"] == 1:
+            result_emoji = "✅"
+            result_text = "WIN"
+        else:
+            result_emoji = "❌"
+            result_text = "LOSE"
+
+        text += f"{result_emoji} **{home}** vs **{away}**\n"
+        text += f"   📅 {date_str} | {bet} @ {odds:.2f} ({conf}%)\n"
+        if p["result"]:
+            text += f"   📊 Счёт: {p['result']}\n"
+        text += "\n"
+
+    # Add filter buttons
+    keyboard = [
+        [InlineKeyboardButton("🔄 Все", callback_data="history_all"),
+         InlineKeyboardButton("✅ Победы", callback_data="history_wins")],
+        [InlineKeyboardButton("❌ Поражения", callback_data="history_losses"),
+         InlineKeyboardButton("⏳ Ожидают", callback_data="history_pending")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+    ]
+
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3791,7 +4220,73 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "cmd_stats":
         await stats_cmd(update, context)
-    
+
+    elif data.startswith("history_"):
+        # History filter callbacks
+        filter_type = data.replace("history_", "")
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        if filter_type == "wins":
+            c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct = 1
+                         ORDER BY predicted_at DESC LIMIT 10""", (user_id,))
+        elif filter_type == "losses":
+            c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct = 0
+                         ORDER BY predicted_at DESC LIMIT 10""", (user_id,))
+        elif filter_type == "pending":
+            c.execute("""SELECT * FROM predictions WHERE user_id = ? AND is_correct IS NULL
+                         ORDER BY predicted_at DESC LIMIT 10""", (user_id,))
+        else:
+            c.execute("""SELECT * FROM predictions WHERE user_id = ?
+                         ORDER BY predicted_at DESC LIMIT 10""", (user_id,))
+
+        predictions = c.fetchall()
+        conn.close()
+
+        filter_labels = {
+            "all": {"ru": "ВСЕ", "en": "ALL"},
+            "wins": {"ru": "ПОБЕДЫ", "en": "WINS"},
+            "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES"},
+            "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING"}
+        }
+        filter_label = filter_labels.get(filter_type, filter_labels["all"]).get(lang, "ALL")
+
+        if not predictions:
+            text = f"📜 **ИСТОРИЯ** ({filter_label})\n\nНет прогнозов."
+        else:
+            text = f"📜 **ИСТОРИЯ ПРОГНОЗОВ** ({filter_label})\n\n"
+            for p in predictions:
+                date_str = p["predicted_at"][:10] if p["predicted_at"] else "?"
+                home = p["home_team"] or "?"
+                away = p["away_team"] or "?"
+                bet = p["bet_type"] or "?"
+                conf = p["confidence"] or 0
+                odds = p["odds"] or 0
+
+                if p["is_correct"] is None:
+                    result_emoji = "⏳"
+                elif p["is_correct"] == 1:
+                    result_emoji = "✅"
+                else:
+                    result_emoji = "❌"
+
+                text += f"{result_emoji} **{home}** vs **{away}**\n"
+                text += f"   📅 {date_str} | {bet} @ {odds:.2f} ({conf}%)\n"
+                if p["result"]:
+                    text += f"   📊 Счёт: {p['result']}\n"
+                text += "\n"
+
+        keyboard = [
+            [InlineKeyboardButton("🔄 Все", callback_data="history_all"),
+             InlineKeyboardButton("✅ Победы", callback_data="history_wins")],
+            [InlineKeyboardButton("❌ Поражения", callback_data="history_losses"),
+             InlineKeyboardButton("⏳ Ожидают", callback_data="history_pending")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+        ]
+
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
     elif data == "cmd_help":
         await help_cmd(update, context)
     
@@ -3999,6 +4494,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         value = data.replace("risk_", "")
         update_user_settings(user_id, risk_level=value)
         await query.answer(get_text("risk_set", lang).format(value=value))
+        await settings_cmd(update, context)
+
+    elif data == "toggle_exclude_cups":
+        current = user.get('exclude_cups', 0)
+        new_value = 0 if current else 1
+        update_user_settings(user_id, exclude_cups=new_value)
+        confirm = {
+            "ru": "✅ Кубки исключены" if new_value else "✅ Кубки включены",
+            "en": "✅ Cups excluded" if new_value else "✅ Cups included",
+            "pt": "✅ Copas excluídas" if new_value else "✅ Copas incluídas",
+            "es": "✅ Copas excluidas" if new_value else "✅ Copas incluidas"
+        }
+        await query.answer(confirm.get(lang, confirm["ru"]))
         await settings_cmd(update, context)
 
     elif data == "set_language":
@@ -4356,14 +4864,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
             if odds_match:
                 odds_value = float(odds_match.group(1))
-        
+
+        # COUNTER-CHECK: Validate totals predictions against expected goals
+        totals_warning = None
+        if "тб" in bet_type.lower() or "тм" in bet_type.lower():
+            home_id = match.get("homeTeam", {}).get("id")
+            away_id = match.get("awayTeam", {}).get("id")
+            if home_id and away_id:
+                home_form = await get_team_form(home_id)
+                away_form = await get_team_form(away_id)
+                bet_type, confidence, totals_warning = validate_totals_prediction(
+                    bet_type, confidence, home_form, away_form
+                )
+                if totals_warning:
+                    logger.warning(f"Totals counter-check triggered: {totals_warning}")
+                    # Add warning to analysis
+                    analysis = analysis + f"\n\n{totals_warning}"
+
+        # Add Kelly Criterion recommendation
+        if confidence > 0 and odds_value > 1:
+            kelly_stake = calculate_kelly(confidence / 100, odds_value)
+            if kelly_stake > 0:
+                kelly_percent = kelly_stake * 100
+                if kelly_percent >= 5:
+                    stake_emoji = "🔥"
+                    stake_text = "АГРЕССИВНО"
+                elif kelly_percent >= 2:
+                    stake_emoji = "✅"
+                    stake_text = "УМЕРЕННО"
+                else:
+                    stake_emoji = "⚠️"
+                    stake_text = "ОСТОРОЖНО"
+                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% банкролла ({stake_text})"
+            else:
+                analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
+
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
         increment_daily_usage(user_id)
         logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
-        
+
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
-    
+
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
     
     keyboard = [
@@ -4842,6 +5384,8 @@ def main():
     app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("recommend", recommend_cmd))
+    app.add_handler(CommandHandler("sure", sure_cmd))
+    app.add_handler(CommandHandler("history", history_cmd))
     app.add_handler(CommandHandler("today", today_cmd))
     app.add_handler(CommandHandler("tomorrow", tomorrow_cmd))
     app.add_handler(CommandHandler("settings", settings_cmd))
