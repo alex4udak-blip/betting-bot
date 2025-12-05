@@ -984,6 +984,10 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN source TEXT DEFAULT 'organic'")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE ml_training_data ADD COLUMN bet_rank INTEGER DEFAULT 1")
+    except:
+        pass
 
     # 1win deposits tracking
     c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
@@ -1986,9 +1990,9 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     conn.commit()
     conn.close()
 
-    # Save ML training data if features provided
+    # Save ML training data if features provided (with bet_rank for MAIN vs ALT analysis)
     if ml_features and category:
-        save_ml_training_data(prediction_id, category, ml_features, target=None)
+        save_ml_training_data(prediction_id, category, ml_features, target=None, bet_rank=bet_rank)
 
     rank_label = "MAIN" if bet_rank == 1 else f"ALT{bet_rank-1}"
     logger.info(f"Saved prediction [{rank_label}]: {home} vs {away}, {bet_type} ({confidence}%)")
@@ -2539,13 +2543,13 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
     return features
 
 
-def save_ml_training_data(prediction_id: int, bet_category: str, features: dict, target: int = None):
-    """Save features for ML training"""
+def save_ml_training_data(prediction_id: int, bet_category: str, features: dict, target: int = None, bet_rank: int = 1):
+    """Save features for ML training with bet rank (1=MAIN, 2+=ALT)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target)
-                 VALUES (?, ?, ?, ?)""",
-              (prediction_id, bet_category, json.dumps(features), target))
+    c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target, bet_rank)
+                 VALUES (?, ?, ?, ?, ?)""",
+              (prediction_id, bet_category, json.dumps(features), target, bet_rank))
     conn.commit()
     conn.close()
 
@@ -5107,6 +5111,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
         [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats"),
          InlineKeyboardButton("📈 Источники", callback_data="admin_sources")],
+        [InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats")],
         [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
         [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
@@ -6035,6 +6040,84 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_ml_stats":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # Total ML training samples
+            c.execute("SELECT COUNT(*) FROM ml_training_data")
+            total_samples = c.fetchone()[0]
+
+            # Samples with known results (target is not NULL)
+            c.execute("SELECT COUNT(*) FROM ml_training_data WHERE target IS NOT NULL")
+            labeled_samples = c.fetchone()[0]
+
+            # MAIN vs ALT stats
+            c.execute("""
+                SELECT
+                    bet_rank,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN target = 1 THEN 1 ELSE 0 END) as correct
+                FROM ml_training_data
+                WHERE target IS NOT NULL
+                GROUP BY bet_rank
+                ORDER BY bet_rank
+            """)
+            rank_stats = c.fetchall()
+
+            # Stats by bet category
+            c.execute("""
+                SELECT
+                    bet_category,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN target = 1 THEN 1 ELSE 0 END) as correct
+                FROM ml_training_data
+                WHERE target IS NOT NULL
+                GROUP BY bet_category
+                ORDER BY total DESC
+            """)
+            category_stats = c.fetchall()
+
+            conn.close()
+
+            text = f"🤖 **ML СТАТИСТИКА**\n\n"
+            text += f"📊 **Данные для обучения:**\n"
+            text += f"├ Всего записей: {total_samples}\n"
+            text += f"└ С результатами: {labeled_samples}\n\n"
+
+            if rank_stats:
+                text += f"⚡ **MAIN vs ALT точность:**\n"
+                for rank, total, correct in rank_stats:
+                    acc = round(correct / total * 100, 1) if total > 0 else 0
+                    rank_name = "ОСНОВНАЯ" if rank == 1 else f"АЛЬТЕРНАТИВНАЯ"
+                    emoji = "⚡" if rank == 1 else "📌"
+                    text += f"{emoji} {rank_name}: {acc}% ({correct}/{total})\n"
+                text += "\n"
+
+            if category_stats:
+                text += f"📈 **По типам ставок:**\n"
+                for cat, total, correct in category_stats:
+                    acc = round(correct / total * 100, 1) if total > 0 else 0
+                    text += f"• {cat}: {acc}% ({correct}/{total})\n"
+
+            if total_samples == 0:
+                text += "\n⚠️ Данных пока нет. ML начнёт собирать после новых прогнозов."
+            elif labeled_samples < 50:
+                text += f"\n⚠️ Мало данных ({labeled_samples}/50 мин). Модели ещё не обучаются."
+            else:
+                text += f"\n✅ Достаточно данных для обучения ML моделей!"
+
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin ML stats error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
 
     elif data == "admin_clean_dups":
         if not is_admin(user_id):
