@@ -152,7 +152,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 Для безлимита сделай депозит:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум доступ:**\n• R$200+ → 7 дней\n• R$500+ → 30 дней\n• R$1000+ → Навсегда\n\n👇 Сделай депозит по ссылке:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -227,7 +227,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 For unlimited access, make a deposit:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium access:**\n• R$200+ → 7 days\n• R$500+ → 30 days\n• R$1000+ → Lifetime\n\n👇 Make a deposit via link:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -302,7 +302,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 Para acesso ilimitado, faça um depósito:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso premium:**\n• R$200+ → 7 dias\n• R$500+ → 30 dias\n• R$1000+ → Vitalício\n\n👇 Faça um depósito pelo link:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -377,7 +377,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 Para acceso ilimitado, haz un depósito:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **Acceso premium:**\n• R$200+ → 7 días\n• R$500+ → 30 días\n• R$1000+ → De por vida\n\n👇 Haz un depósito por el enlace:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -705,6 +705,25 @@ def init_db():
         c.execute("ALTER TABLE predictions ADD COLUMN bet_rank INTEGER DEFAULT 1")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN premium_expires TEXT")
+    except:
+        pass
+
+    # 1win deposits tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        onewin_user_id TEXT,
+        amount REAL,
+        currency TEXT DEFAULT 'BRL',
+        event TEXT,
+        transaction_id TEXT UNIQUE,
+        country TEXT,
+        premium_days INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
 
     conn.commit()
     conn.close()
@@ -869,6 +888,169 @@ def get_favorite_leagues(user_id):
     leagues = [row[0] for row in c.fetchall()]
     conn.close()
     return leagues
+
+
+# ===== 1WIN POSTBACK & PREMIUM SYSTEM =====
+
+# Deposit thresholds for premium (in BRL)
+PREMIUM_TIERS = {
+    200: 7,      # R$200+ = 7 days
+    500: 30,     # R$500+ = 30 days
+    1000: 36500  # R$1000+ = Lifetime (100 years)
+}
+
+def calculate_premium_days(amount: float, currency: str = "BRL") -> int:
+    """Calculate premium days based on deposit amount."""
+    # Convert to BRL if needed (rough estimates)
+    if currency == "USD":
+        amount = amount * 5
+    elif currency == "EUR":
+        amount = amount * 5.5
+
+    for threshold, days in sorted(PREMIUM_TIERS.items(), reverse=True):
+        if amount >= threshold:
+            return days
+    return 0
+
+
+def grant_premium(user_id: int, days: int) -> bool:
+    """Grant premium to user for specified days."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get current premium expiry
+        c.execute("SELECT premium_expires FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+
+        now = datetime.now()
+        if row and row[0]:
+            # Extend existing premium
+            try:
+                current_expiry = datetime.fromisoformat(row[0])
+                if current_expiry > now:
+                    new_expiry = current_expiry + timedelta(days=days)
+                else:
+                    new_expiry = now + timedelta(days=days)
+            except:
+                new_expiry = now + timedelta(days=days)
+        else:
+            new_expiry = now + timedelta(days=days)
+
+        # Update premium status
+        c.execute("""UPDATE users SET is_premium = 1, premium_expires = ?
+                     WHERE user_id = ?""", (new_expiry.isoformat(), user_id))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Granted {days} days premium to user {user_id}, expires {new_expiry}")
+        return True
+    except Exception as e:
+        logger.error(f"Error granting premium: {e}")
+        return False
+
+
+def check_premium_expired(user_id: int) -> bool:
+    """Check if user's premium has expired and update status if needed."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT is_premium, premium_expires FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row or not row[0]:
+            return True  # Not premium
+
+        if not row[1]:
+            return False  # Premium without expiry (legacy)
+
+        expiry = datetime.fromisoformat(row[1])
+        if expiry < datetime.now():
+            # Premium expired - update status
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            logger.info(f"Premium expired for user {user_id}")
+            return True
+
+        return False  # Still premium
+    except Exception as e:
+        logger.error(f"Error checking premium: {e}")
+        return True
+
+
+def process_1win_postback(data: dict) -> dict:
+    """Process postback from 1win affiliate system."""
+    try:
+        event = data.get("event", "")
+        amount = float(data.get("amount", 0))
+        sub1 = data.get("sub1", "")  # Telegram user_id
+        transaction_id = data.get("transaction_id", "")
+        country = data.get("country", "")
+        onewin_user_id = data.get("user_id", "")
+        currency = data.get("currency", "BRL")
+
+        logger.info(f"1win postback: event={event}, amount={amount}, sub1={sub1}, tx={transaction_id}")
+
+        # Only process deposit events
+        if event != "deposit" or not sub1:
+            return {"status": "ignored", "reason": "not a deposit or no sub1"}
+
+        # Parse telegram user_id from sub1
+        try:
+            telegram_user_id = int(sub1)
+        except:
+            return {"status": "error", "reason": "invalid sub1 (telegram user_id)"}
+
+        # Check for duplicate transaction
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM deposits_1win WHERE transaction_id = ?", (transaction_id,))
+        if c.fetchone():
+            conn.close()
+            return {"status": "duplicate", "reason": "transaction already processed"}
+
+        # Calculate premium days
+        premium_days = calculate_premium_days(amount, currency)
+
+        if premium_days == 0:
+            conn.close()
+            return {"status": "ignored", "reason": f"deposit {amount} {currency} below minimum threshold"}
+
+        # Save deposit record
+        c.execute("""INSERT INTO deposits_1win
+                     (user_id, onewin_user_id, amount, currency, event, transaction_id, country, premium_days)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (telegram_user_id, onewin_user_id, amount, currency, event, transaction_id, country, premium_days))
+        conn.commit()
+        conn.close()
+
+        # Grant premium
+        grant_premium(telegram_user_id, premium_days)
+
+        return {
+            "status": "success",
+            "user_id": telegram_user_id,
+            "amount": amount,
+            "premium_days": premium_days
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing 1win postback: {e}")
+        return {"status": "error", "reason": str(e)}
+
+
+def get_affiliate_link(user_id: int) -> str:
+    """Generate affiliate link with user tracking."""
+    # Base 1win affiliate link with sub1 parameter for tracking
+    base_link = AFFILIATE_LINK.rstrip("/")
+    if "?" in base_link:
+        return f"{base_link}&sub1={user_id}"
+    else:
+        return f"{base_link}?sub1={user_id}"
 
 
 # ===== LIVE SUBSCRIBERS PERSISTENCE =====
@@ -3653,7 +3835,7 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -3672,7 +3854,7 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if recs:
         # Add affiliate button
         keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
             [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
         ]
         increment_daily_usage(user_id)
@@ -3692,7 +3874,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -3710,7 +3892,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if recs:
         header = "🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**\n\n"
         keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
             [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend")]
         ]
         increment_daily_usage(user_id)
@@ -4212,16 +4394,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         await query.edit_message_text(get_text("analyzing", lang))
         matches = await get_matches(days=7)
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
@@ -4567,24 +4749,24 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         context_type = data.replace("rec_", "")
         await query.edit_message_text(get_text("analyzing", lang))
-        
+
         if context_type == "today":
             matches = await get_matches(date_filter="today")
         elif context_type == "tomorrow":
             matches = await get_matches(date_filter="tomorrow")
         else:
             matches = await get_matches(context_type, days=14)
-        
+
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
@@ -4842,10 +5024,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         await status.edit_text(get_text("analyzing_bets", lang))
         matches = await get_matches(days=7)
         if not matches:
@@ -4854,7 +5036,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
         if recs:
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
             ]
             increment_daily_usage(user_id)
@@ -4894,7 +5076,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, _ = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -5063,14 +5245,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error saving prediction: {e}")
 
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
-    
+
     keyboard = [
-        [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+        [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
         [InlineKeyboardButton(f"⭐ {home}", callback_data=f"fav_team_{home}"),
          InlineKeyboardButton(f"⭐ {away}", callback_data=f"fav_team_{away}")],
         [InlineKeyboardButton("📊 Ещё рекомендации", callback_data="cmd_recommend")]
     ]
-    
+
     await status.edit_text(header + analysis, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
@@ -5378,7 +5560,7 @@ If no good bet exists, respond: {{"alert": false}}"""
 {get_text("odds", lang)} ~{odds_val}
 {get_text("reason", lang)} {reason}"""
 
-                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)]]
+                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))]]
 
                         await context.bot.send_message(
                             chat_id=user_id,
@@ -5491,22 +5673,69 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
         return
     
     text = f"☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**\n\n{recs}"
-    
-    keyboard = [
-        [InlineKeyboardButton("🎰 Ставить", url=AFFILIATE_LINK)],
-        [InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]
-    ]
-    
+
     for user_id in live_subscribers:
         try:
+            keyboard = [
+                [InlineKeyboardButton("🎰 Ставить", url=get_affiliate_link(user_id))],
+                [InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]
+            ]
             await context.bot.send_message(
-                chat_id=user_id, 
+                chat_id=user_id,
                 text=text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
         except Exception as e:
             logger.error(f"Failed to send digest to {user_id}: {e}")
+
+
+# ===== WEB SERVER FOR POSTBACK =====
+
+from aiohttp import web
+
+async def handle_postback(request):
+    """Handle 1win postback webhook."""
+    try:
+        # Get data from query params or POST body
+        if request.method == "POST":
+            try:
+                data = await request.json()
+            except:
+                data = dict(await request.post())
+        else:
+            data = dict(request.query)
+
+        logger.info(f"Received postback: {data}")
+
+        result = process_1win_postback(data)
+
+        return web.json_response(result)
+    except Exception as e:
+        logger.error(f"Postback error: {e}")
+        return web.json_response({"status": "error", "reason": str(e)}, status=500)
+
+
+async def handle_health(request):
+    """Health check endpoint."""
+    return web.json_response({"status": "ok", "bot": "running"})
+
+
+async def start_web_server():
+    """Start aiohttp web server for postbacks."""
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/1win/postback", handle_postback)
+    app.router.add_post("/api/1win/postback", handle_postback)
+
+    port = int(os.getenv("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Web server started on port {port}")
+    print(f"   🌐 Postback endpoint: http://0.0.0.0:{port}/api/1win/postback")
 
 
 # ===== MAIN =====
@@ -5582,7 +5811,7 @@ def main():
     print("   • Multi-language (RU/EN/PT/ES)")
     print("   • Daily limit (3 free predictions)")
     print("   • Stats by bet category")
-    print("   • 1win affiliate integration")
+    print("   • 1win affiliate integration + postback")
     print("   • Cup/Top club warnings")
     print(f"   • {len(COMPETITIONS)} leagues (Standard plan)")
     print("   • Live alerts system (persistent)")
@@ -5590,8 +5819,28 @@ def main():
     print("   • Daily digest")
     print("   • Admin-only debug commands")
     print("   • Async API calls (aiohttp)")
-    
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Run both telegram bot and web server
+    async def run_all():
+        # Start web server
+        await start_web_server()
+        # Start telegram bot
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+        # Keep running until stopped
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
+
+    asyncio.run(run_all())
 
 
 if __name__ == "__main__":
