@@ -40,6 +40,19 @@ ODDS_API_URL = "https://api.the-odds-api.com/v4"
 # 1WIN Affiliate Link (Universal Router - auto GEO redirect)
 AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
 
+# Crypto wallets for direct payment
+CRYPTO_WALLETS = {
+    "USDT_TRC20": "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC",
+    "TON": "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL"
+}
+
+# Crypto prices (in USD)
+CRYPTO_PRICES = {
+    7: 15,      # 7 days = $15
+    30: 40,     # 30 days = $40
+    365: 100    # 1 year = $100
+}
+
 # Daily free limit for predictions
 FREE_DAILY_LIMIT = 3
 
@@ -3915,10 +3928,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /today - Матчи сегодня
 • /tomorrow - Матчи завтра
 • /live - 🔔 Включить алерты
+• /premium - 💎 Получить премиум
 • /settings - Настройки
-• /favorites - Избранное
 • /stats - Статистика
-• /history - 📜 История прогнозов
 
 **Как пользоваться:**
 1. Напиши название команды (напр. "Ливерпуль")
@@ -3927,7 +3939,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Лимиты:**
 • Бесплатно: {FREE_DAILY_LIMIT} прогноза/день
-• Безлимит: сделай депозит по ссылке
+• Премиум: безлимит (/premium)
 
 **Live-алерты:**
 Каждые 10 минут бот проверяет матчи.
@@ -3940,6 +3952,64 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 1X/X2 - Двойной шанс"""
 
     keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show premium options - 1win deposit or crypto payment"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    # Check if already premium
+    is_prem = user.get("is_premium", 0) if user else 0
+    expires = user.get("premium_expires") if user else None
+
+    if is_prem and expires:
+        status_text = f"✅ У тебя премиум до: {expires[:10]}\n\n"
+    else:
+        status_text = ""
+
+    text = f"""💎 **ПРЕМИУМ ДОСТУП**
+
+{status_text}🎯 Безлимитные прогнозы с точностью 70%+
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Вариант 1: Депозит в 1win** 🎰
+Сделай депозит — получи премиум автоматически!
+
+• R$200+ (~$40) → 7 дней
+• R$500+ (~$100) → 30 дней
+• R$1000+ (~$200) → Навсегда
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Вариант 2: Крипта** 💰
+Оплати напрямую — напиши @alex4udak
+
+• $15 USDT → 7 дней
+• $40 USDT → 30 дней
+• $100 USDT → 1 год
+
+**USDT (TRC20):**
+`{CRYPTO_WALLETS['USDT_TRC20']}`
+
+**TON:**
+`{CRYPTO_WALLETS['TON']}`
+
+━━━━━━━━━━━━━━━━━━━━
+После оплаты криптой — скинь скрин @alex4udak"""
+
+    keyboard = [
+        [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
+        [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+    ]
 
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4384,10 +4454,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
             [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
              InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
-            [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
+            [InlineKeyboardButton("💎 Премиум", callback_data="cmd_premium"),
+             InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
         ]
         await query.edit_message_text(f"⚽ **AI Betting Bot v14** - {get_text('choose_action', lang)}",
                                        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_premium":
+        await premium_cmd(update, context)
     
     elif data == "cmd_recommend":
         # Check limit
@@ -5780,6 +5854,7 @@ def main():
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
     app.add_handler(CommandHandler("debug", debug_cmd))
+    app.add_handler(CommandHandler("premium", premium_cmd))
 
     # Admin commands
     app.add_handler(CommandHandler("admin", admin_cmd))
