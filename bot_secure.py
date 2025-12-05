@@ -2386,13 +2386,18 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += f"  {away}: ~{expected_away:.1f} голов\n"
         analysis_data += f"  Ожидаемый тотал: ~{expected_total:.1f}\n\n"
 
-    # H2H analysis
+    # H2H analysis with reliability warning
     if h2h:
-        analysis_data += f"⚔️ H2H (последние {len(h2h.get('matches', []))} матчей):\n"
+        h2h_matches_count = len(h2h.get('matches', []))
+        analysis_data += f"⚔️ H2H (последние {h2h_matches_count} матчей):\n"
         analysis_data += f"  {home}: {h2h['home_wins']} побед | Ничьи: {h2h['draws']} | {away}: {h2h['away_wins']} побед\n"
         analysis_data += f"  Средние голы: {h2h['avg_goals']:.1f} за матч\n"
         analysis_data += f"  Обе забьют: {h2h['btts_percent']:.0f}%\n"
-        analysis_data += f"  Тотал >2.5: {h2h['over25_percent']:.0f}%\n\n"
+        analysis_data += f"  Тотал >2.5: {h2h['over25_percent']:.0f}%\n"
+        # Warning for small sample size
+        if h2h_matches_count < 5:
+            analysis_data += f"  ⚠️ ВНИМАНИЕ: Малая выборка ({h2h_matches_count} матчей) - H2H ненадёжен! Приоритет → текущая форма.\n"
+        analysis_data += "\n"
 
     # TOP SCORERS in this match
     if top_scorers:
@@ -2523,23 +2528,29 @@ CRITICAL ANALYSIS RULES:
    - If expected total > 2.8 → favor Over 2.5
    - If expected total < 2.2 → favor Under 2.5
 
-3. VALUE BETTING (MANDATORY):
+3. H2H RELIABILITY CHECK (CRITICAL!):
+   - If H2H has < 5 matches → IGNORE H2H for totals prediction!
+   - Small H2H sample is UNRELIABLE - prioritize current form instead
+   - Only trust H2H data when 5+ matches available
+   - Current form (10 matches) > H2H (2-3 matches)
+
+4. VALUE BETTING (MANDATORY):
    - Calculate: your_confidence - implied_probability
    - Only recommend bets with VALUE > 5%
    - Show value calculation in analysis
 
-4. TOP SCORERS MATTER:
+5. TOP SCORERS MATTER:
    - If team has top-3 league scorer → +10% goal probability
    - Factor this into BTTS and totals
 
-5. CONFIDENCE CALCULATION:
+6. CONFIDENCE CALCULATION:
    - Base on statistical data, not feelings
    - 80%+: Strong statistical edge + good value
    - 70-79%: Clear favorite + decent value
    - 60-69%: Slight edge, moderate risk
    - <60%: High risk, only if excellent value
 
-6. DIVERSIFY BET TYPES based on data:
+7. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
@@ -4455,10 +4466,14 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
             expected_total = expected_home + expected_away
             expected_text = f"Expected goals: {home} ~{expected_home:.1f}, {away} ~{expected_away:.1f}, Total ~{expected_total:.1f}"
 
-        # H2H info
+        # H2H info with reliability check
         h2h_text = ""
+        h2h_warning = ""
         if h2h:
-            h2h_text = f"H2H ({h2h['home_wins']}-{h2h['draws']}-{h2h['away_wins']}): avg {h2h['avg_goals']:.1f} goals, BTTS {h2h['btts_percent']:.0f}%, Over2.5 {h2h['over25_percent']:.0f}%"
+            h2h_matches_count = len(h2h.get('matches', []))
+            h2h_text = f"H2H ({h2h['home_wins']}-{h2h['draws']}-{h2h['away_wins']}): avg {h2h['avg_goals']:.1f} goals, BTTS {h2h['btts_percent']:.0f}%, Over2.5 {h2h['over25_percent']:.0f}% ({h2h_matches_count} matches)"
+            if h2h_matches_count < 5:
+                h2h_warning = f"⚠️ WARNING: H2H only {h2h_matches_count} matches - UNRELIABLE! Prioritize current form over H2H."
 
         odds_text = ""
         if odds:
@@ -4474,12 +4489,14 @@ Competition: {comp}
 Form: {form_text if form_text else "Limited data"}
 {expected_text}
 {h2h_text if h2h_text else "No H2H data"}
+{h2h_warning}
 Odds: {odds_text if odds_text else "Not available"}
 
-IMPORTANT: Use H2H data and expected goals for totals prediction!
-- If H2H avg goals > 2.8 or Over2.5 > 60% → favor Over 2.5
-- If H2H avg goals < 2.2 or Over2.5 < 40% → favor Under 2.5
-- Expected goals is key for totals prediction
+IMPORTANT RULES:
+- If H2H has < 5 matches, IGNORE H2H for totals! Use current form instead.
+- If H2H avg goals > 2.8 AND H2H has 5+ matches → favor Over 2.5
+- If H2H avg goals < 2.2 AND H2H has 5+ matches → favor Under 2.5
+- Expected goals from current form is MORE RELIABLE than small H2H sample
 
 If you find a good bet (70%+ confidence), respond with JSON:
 {{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
