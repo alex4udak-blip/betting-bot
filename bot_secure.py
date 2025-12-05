@@ -5113,18 +5113,17 @@ _{get_text('change_in_settings', selected_lang)}_"""
             premium = c.fetchone()[0]
             conn.close()
 
-            text = f"""👥 **Пользователи** ({total} всего, {premium} premium)
-
-**Последние 20:**
-"""
+            text = f"👥 Пользователи ({total} всего, {premium} premium)\n\nПоследние 20:\n"
             for uid, uname, is_prem, created in users:
-                prem_icon = "💎" if is_prem else ""
-                name = f"@{uname}" if uname else f"ID:{uid}"
+                prem_icon = "💎 " if is_prem else ""
+                # Escape underscores in usernames for safety
+                safe_name = uname.replace("_", "\\_") if uname else ""
+                name = f"@{safe_name}" if uname else f"ID:{uid}"
                 date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
                 text += f"• {prem_icon}{name} ({date})\n"
 
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin users error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
