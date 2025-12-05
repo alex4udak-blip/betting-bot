@@ -2782,9 +2782,7 @@ def get_user_stats(user_id, page: int = 0, per_page: int = 7):
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ?", (user_id,))
     total = c.fetchone()[0]
 
-    # Count main predictions only (for pagination)
-    c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)", (user_id,))
-    total_main = c.fetchone()[0]
+    # Total predictions count is already in 'total' variable
     
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct = 1", (user_id,))
     correct = c.fetchone()[0]
@@ -2823,11 +2821,11 @@ def get_user_stats(user_id, page: int = 0, per_page: int = 7):
                 "rate": round(cat_correct / cat_decided * 100, 1)
             }
     
-    # Recent predictions (main bets only for display, no alternatives) with pagination
+    # Recent predictions with pagination (all bets shown, no ALT marker in display)
     offset = page * per_page
     c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at, bet_rank
                  FROM predictions
-                 WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)
+                 WHERE user_id = ?
                  ORDER BY predicted_at DESC
                  LIMIT ? OFFSET ?""", (user_id, per_page, offset))
     recent = c.fetchall()
@@ -2878,7 +2876,7 @@ def get_user_stats(user_id, page: int = 0, per_page: int = 7):
     alt_rate = (alt_stats["correct"] / alt_stats["decided"] * 100) if alt_stats["decided"] > 0 else 0
 
     import math
-    total_pages = math.ceil(total_main / per_page) if total_main > 0 else 1
+    total_pages = math.ceil(total / per_page) if total > 0 else 1
 
     return {
         "total": total,
@@ -2895,8 +2893,7 @@ def get_user_stats(user_id, page: int = 0, per_page: int = 7):
         "alt_stats": {"total": alt_stats["total"], "correct": alt_stats["correct"],
                       "decided": alt_stats["decided"], "rate": alt_rate},
         "page": page,
-        "total_pages": total_pages,
-        "total_main": total_main
+        "total_pages": total_pages
     }
 
 
