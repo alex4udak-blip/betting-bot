@@ -481,7 +481,8 @@ def get_main_keyboard(lang="ru"):
     keyboard = [
         [KeyboardButton(get_text("top_bets", lang)), KeyboardButton(get_text("matches", lang))],
         [KeyboardButton(get_text("stats", lang)), KeyboardButton(get_text("favorites", lang))],
-        [KeyboardButton(get_text("settings", lang)), KeyboardButton(get_text("help_btn", lang))]
+        [KeyboardButton(get_text("premium_btn", lang)), KeyboardButton(get_text("settings", lang))],
+        [KeyboardButton(get_text("help_btn", lang))]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -4024,7 +4025,10 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+        keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -4063,7 +4067,10 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+        keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -4762,7 +4769,10 @@ _{get_text('change_in_settings', selected_lang)}_"""
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+            keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
@@ -5264,7 +5274,10 @@ _{get_text('change_in_settings', selected_lang)}_"""
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+            keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
@@ -5470,6 +5483,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_text("favorites", "en"): favorites_cmd,
         get_text("favorites", "pt"): favorites_cmd,
         get_text("favorites", "es"): favorites_cmd,
+        get_text("premium_btn", "ru"): premium_cmd,
+        get_text("premium_btn", "en"): premium_cmd,
+        get_text("premium_btn", "pt"): premium_cmd,
+        get_text("premium_btn", "es"): premium_cmd,
         get_text("settings", "ru"): settings_cmd,
         get_text("settings", "en"): settings_cmd,
         get_text("settings", "pt"): settings_cmd,
@@ -5479,9 +5496,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_text("help_btn", "pt"): help_cmd,
         get_text("help_btn", "es"): help_cmd,
     }
-    
+
     if user_text in button_map:
         await button_map[user_text](update, context)
+        return
+
+    # Check for premium-related keywords
+    premium_keywords = [
+        "купить премиум", "премиум", "premium", "buy premium",
+        "comprar premium", "подписка", "subscription", "оплата", "payment"
+    ]
+    if any(kw in user_text.lower() for kw in premium_keywords):
+        await premium_cmd(update, context)
         return
     
     status = await update.message.reply_text(get_text("analyzing", lang))
@@ -5539,7 +5565,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+            keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
@@ -5591,7 +5620,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, _ = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
+        keyboard = [
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
+        ]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
