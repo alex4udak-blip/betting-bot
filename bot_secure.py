@@ -803,16 +803,21 @@ def update_user_settings(user_id: int, **kwargs) -> None:
 def check_daily_limit(user_id):
     """Check if user has reached daily limit. Returns (can_use, remaining)"""
     logger.info(f"check_daily_limit called for user {user_id}")
-    
+
     user = get_user(user_id)
     if not user:
         logger.info(f"User {user_id} not found in DB, allowing request")
         return True, FREE_DAILY_LIMIT
-    
-    # Premium users have no limit
+
+    # Check premium status (including expiry)
     if user.get("is_premium", 0):
-        logger.info(f"User {user_id} is PREMIUM, no limit")
-        return True, 999
+        # Verify premium hasn't expired
+        expired = check_premium_expired(user_id)
+        if not expired:
+            logger.info(f"User {user_id} is PREMIUM (valid), no limit")
+            return True, 999
+        else:
+            logger.info(f"User {user_id} premium EXPIRED, applying limit")
     
     today = datetime.now().strftime("%Y-%m-%d")
     last_date = user.get("last_request_date") or ""  # Handle None
@@ -4242,7 +4247,14 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def addpremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add premium to user - admin only"""
+    """Add premium to user - admin only
+    Usage: /addpremium <user_id> [days]
+    Examples:
+        /addpremium 123456789 30  - 30 days
+        /addpremium 123456789 7   - 7 days
+        /addpremium 123456789 365 - 1 year
+        /addpremium 123456789     - 30 days (default)
+    """
     user_id = update.effective_user.id
 
     if not is_admin(user_id):
@@ -4250,26 +4262,32 @@ async def addpremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /addpremium <user_id>")
+        await update.message.reply_text(
+            "❌ Использование: /addpremium <user_id> [дней]\n\n"
+            "Примеры:\n"
+            "• /addpremium 123456 7 — 7 дней\n"
+            "• /addpremium 123456 30 — 30 дней\n"
+            "• /addpremium 123456 365 — 1 год\n"
+            "• /addpremium 123456 — 30 дней (по умолчанию)"
+        )
         return
 
     target_id = int(context.args[0])
+    days = int(context.args[1]) if len(context.args) > 1 and context.args[1].isdigit() else 30
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE users SET is_premium = 1 WHERE user_id = ?", (target_id,))
-    affected = c.rowcount
-    conn.commit()
-    conn.close()
+    # Use grant_premium function for proper expiry handling
+    success = grant_premium(target_id, days)
 
-    if affected > 0:
-        await update.message.reply_text(f"✅ Премиум выдан юзеру {target_id}")
+    if success:
+        expires_text = "навсегда" if days >= 36500 else f"на {days} дней"
+        await update.message.reply_text(f"✅ Премиум выдан юзеру {target_id} {expires_text}")
         try:
-            await context.bot.send_message(target_id, "🎉 Вам выдан Premium-статус! Безлимитные прогнозы активированы.")
+            user_msg = f"🎉 Вам выдан Premium-статус {expires_text}!\n\nБезлимитные прогнозы активированы."
+            await context.bot.send_message(target_id, user_msg)
         except Exception:
             pass
     else:
-        await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+        await update.message.reply_text(f"❌ Юзер {target_id} не найден. Попросите его сначала запустить бота (/start)")
 
 
 async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
