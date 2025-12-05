@@ -6568,16 +6568,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await status.edit_text(get_text("searching_match", lang))
-    
-    matches = await get_matches(days=14)
+
+    # Optimization: if Claude detected a league, search there first
     match = None
-    
-    if teams:
-        match = find_match(teams, matches)
-    
+    matches = []
+
+    if league:
+        # Search in specific league first (fast - single API call)
+        league_matches = await get_matches(competition=league, days=14)
+        if league_matches:
+            if teams:
+                match = find_match(teams, league_matches)
+            if not match:
+                match = find_match([user_text], league_matches)
+            matches = league_matches
+
+    # If not found in specific league, try cached global matches
     if not match:
-        match = find_match([user_text], matches)
-    
+        # Use days=7 to leverage cache
+        all_matches = await get_matches(days=7)
+        if teams:
+            match = find_match(teams, all_matches)
+        if not match:
+            match = find_match([user_text], all_matches)
+        if not matches:
+            matches = all_matches
+
     if not match:
         query = ', '.join(teams) if teams else user_text
         text = get_text("match_not_found", lang).format(query=query) + "\n\n"
