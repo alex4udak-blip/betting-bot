@@ -3634,7 +3634,7 @@ async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
         params = {
             "apiKey": ODDS_API_KEY,
             "regions": "eu",
-            "markets": "h2h,totals",
+            "markets": "h2h,spreads,totals",
             "oddsFormat": "decimal"
         }
         async with session.get(url, params=params) as r:
@@ -3661,6 +3661,13 @@ async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
                                         name = outcome.get("name")
                                         point = outcome.get("point", 2.5)
                                         odds[f"{name}_{point}"] = outcome.get("price")
+                                elif market.get("key") == "spreads":
+                                    for outcome in market.get("outcomes", []):
+                                        name = outcome.get("name")
+                                        point = outcome.get("point", 0)
+                                        # Format: "Team (+1.5)" or "Team (-0.5)"
+                                        sign = "+" if point > 0 else ""
+                                        odds[f"{name} ({sign}{point})"] = outcome.get("price")
                         return odds
     except Exception as e:
         logger.error(f"Odds error: {e}")
@@ -6862,11 +6869,10 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         odds_text = ""
         if odds:
             for k, v in odds.items():
-                if not k.startswith("Over") and not k.startswith("Under"):
-                    odds_text += f"{k}: {v}, "
+                odds_text += f"{k}: {v}, "
 
         # Analyze match and send alerts in user's language
-        analysis_prompt = f"""Analyze this match for betting:
+        analysis_prompt = f"""Analyze this match for betting. Check ALL bet types systematically:
 
 Match: {home} vs {away}
 Competition: {comp}
@@ -6876,16 +6882,26 @@ Form: {form_text if form_text else "Limited data"}
 {h2h_warning}
 Odds: {odds_text if odds_text else "Not available"}
 
+CHECK ALL THESE BET TYPES (pick the BEST one):
+1. Match Winner (1X2): Home win, Draw, Away win
+2. Double Chance: 1X, X2, 12
+3. Handicap/Spread: Team with +/- goals advantage
+4. Over/Under 2.5 goals
+5. Over/Under 1.5/3.5 if available
+6. Both Teams To Score (BTTS)
+
 IMPORTANT RULES:
+- MINIMUM ODDS: Only suggest bets with odds >= 1.60 (avoid very low odds!)
 - If H2H has < 5 matches, IGNORE H2H for totals! Use current form instead.
 - If H2H avg goals > 2.8 AND H2H has 5+ matches → favor Over 2.5
 - If H2H avg goals < 2.2 AND H2H has 5+ matches → favor Under 2.5
 - Expected goals from current form is MORE RELIABLE than small H2H sample
+- Double Chance is good for safer bets with decent odds
 
-If you find a good bet (70%+ confidence), respond with JSON:
+If you find a good bet (70%+ confidence AND odds >= 1.60), respond with JSON:
 {{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
 
-If no good bet exists, respond: {{"alert": false}}"""
+If no good bet exists (low confidence OR odds too low), respond: {{"alert": false}}"""
 
         try:
             message = claude_client.messages.create(
