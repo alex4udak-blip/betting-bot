@@ -236,6 +236,19 @@ TRANSLATIONS = {
         "match_found": "✅ Нашёл: {home} vs {away}\n🏆 {comp}\n\n⏳ Собираю статистику...",
         "premium_btn": "💎 Премиум",
         "no_sure_bets": "❌ Нет уверенных ставок 75%+ на ближайшие дни.",
+        # Referral system
+        "referral_btn": "👥 Друзья",
+        "referral_title": "👥 **Реферальная программа**",
+        "referral_desc": "Приглашай друзей и получай бонусные дни премиума!",
+        "referral_link": "🔗 **Твоя ссылка:**",
+        "referral_stats": "📊 **Твоя статистика:**",
+        "referral_invited": "Приглашено",
+        "referral_premium": "Купили премиум",
+        "referral_earned": "Заработано дней",
+        "referral_bonus": "**+{days} дней** премиума за приглашённого друга!",
+        "referral_copy": "👆 Нажми на ссылку, чтобы скопировать",
+        "referral_rules": "📋 **Правила:**\n• За каждого друга, который купит премиум — **+3 дня** тебе\n• Бонус начисляется автоматически",
+        "referral_welcome": "🎁 Тебя пригласил друг! Получи бонус при покупке премиума.",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -313,6 +326,19 @@ TRANSLATIONS = {
         "match_found": "✅ Found: {home} vs {away}\n🏆 {comp}\n\n⏳ Gathering stats...",
         "premium_btn": "💎 Premium",
         "no_sure_bets": "❌ No confident bets 75%+ found for upcoming days.",
+        # Referral system
+        "referral_btn": "👥 Friends",
+        "referral_title": "👥 **Referral Program**",
+        "referral_desc": "Invite friends and earn bonus premium days!",
+        "referral_link": "🔗 **Your link:**",
+        "referral_stats": "📊 **Your stats:**",
+        "referral_invited": "Invited",
+        "referral_premium": "Bought premium",
+        "referral_earned": "Days earned",
+        "referral_bonus": "**+{days} days** premium for referred friend!",
+        "referral_copy": "👆 Tap the link to copy",
+        "referral_rules": "📋 **Rules:**\n• For each friend who buys premium — **+3 days** for you\n• Bonus is granted automatically",
+        "referral_welcome": "🎁 You were invited by a friend! Get a bonus when buying premium.",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -390,6 +416,19 @@ TRANSLATIONS = {
         "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Coletando estatísticas...",
         "premium_btn": "💎 Premium",
         "no_sure_bets": "❌ Nenhuma aposta confiável 75%+ encontrada para os próximos dias.",
+        # Referral system
+        "referral_btn": "👥 Amigos",
+        "referral_title": "👥 **Programa de Indicação**",
+        "referral_desc": "Convide amigos e ganhe dias de premium!",
+        "referral_link": "🔗 **Seu link:**",
+        "referral_stats": "📊 **Suas estatísticas:**",
+        "referral_invited": "Convidados",
+        "referral_premium": "Compraram premium",
+        "referral_earned": "Dias ganhos",
+        "referral_bonus": "**+{days} dias** de premium pelo amigo indicado!",
+        "referral_copy": "👆 Toque no link para copiar",
+        "referral_rules": "📋 **Regras:**\n• Para cada amigo que comprar premium — **+3 dias** para você\n• Bônus é concedido automaticamente",
+        "referral_welcome": "🎁 Você foi convidado por um amigo! Ganhe bônus ao comprar premium.",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -467,6 +506,19 @@ TRANSLATIONS = {
         "match_found": "✅ Encontrado: {home} vs {away}\n🏆 {comp}\n\n⏳ Recopilando estadísticas...",
         "premium_btn": "💎 Premium",
         "no_sure_bets": "❌ No se encontraron apuestas seguras 75%+ para los próximos días.",
+        # Referral system
+        "referral_btn": "👥 Amigos",
+        "referral_title": "👥 **Programa de Referidos**",
+        "referral_desc": "¡Invita amigos y gana días de premium!",
+        "referral_link": "🔗 **Tu enlace:**",
+        "referral_stats": "📊 **Tus estadísticas:**",
+        "referral_invited": "Invitados",
+        "referral_premium": "Compraron premium",
+        "referral_earned": "Días ganados",
+        "referral_bonus": "**+{days} días** de premium por amigo referido!",
+        "referral_copy": "👆 Toca el enlace para copiar",
+        "referral_rules": "📋 **Reglas:**\n• Por cada amigo que compre premium — **+3 días** para ti\n• El bono se otorga automáticamente",
+        "referral_welcome": "🎁 ¡Fuiste invitado por un amigo! Obtén un bono al comprar premium.",
     }
 }
 
@@ -764,6 +816,23 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(user_id)
     )''')
 
+    # Referrals tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS referrals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        referrer_id INTEGER,
+        referred_id INTEGER UNIQUE,
+        bonus_granted INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (referrer_id) REFERENCES users(user_id),
+        FOREIGN KEY (referred_id) REFERENCES users(user_id)
+    )''')
+
+    # Add referred_by column to users table
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+    except:
+        pass
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -1026,6 +1095,106 @@ def check_premium_expired(user_id: int) -> bool:
         return True
 
 
+# ===== REFERRAL SYSTEM =====
+REFERRAL_BONUS_DAYS = 3  # Days given to referrer when referred user buys premium
+
+def get_bot_username() -> str:
+    """Get bot username from environment or default"""
+    return os.getenv("BOT_USERNAME", "AIBettingProBot")
+
+def get_referral_link(user_id: int) -> str:
+    """Generate referral link for user"""
+    bot_username = get_bot_username()
+    return f"https://t.me/{bot_username}?start=ref_{user_id}"
+
+def save_referral(referrer_id: int, referred_id: int) -> bool:
+    """Save referral relationship"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        # Check if already exists
+        c.execute("SELECT id FROM referrals WHERE referred_id = ?", (referred_id,))
+        if c.fetchone():
+            conn.close()
+            return False  # Already referred by someone
+
+        c.execute("""INSERT INTO referrals (referrer_id, referred_id)
+                     VALUES (?, ?)""", (referrer_id, referred_id))
+        c.execute("UPDATE users SET referred_by = ? WHERE user_id = ?",
+                  (referrer_id, referred_id))
+        conn.commit()
+        conn.close()
+        logger.info(f"Saved referral: {referrer_id} -> {referred_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving referral: {e}")
+        return False
+
+def get_referral_stats(user_id: int) -> dict:
+    """Get referral statistics for user"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Count total referrals
+        c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ?", (user_id,))
+        total_invited = c.fetchone()[0]
+
+        # Count referrals who bought premium (bonus_granted = 1)
+        c.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND bonus_granted = 1",
+                  (user_id,))
+        premium_count = c.fetchone()[0]
+
+        # Calculate earned days
+        earned_days = premium_count * REFERRAL_BONUS_DAYS
+
+        conn.close()
+        return {
+            "invited": total_invited,
+            "premium": premium_count,
+            "earned_days": earned_days
+        }
+    except Exception as e:
+        logger.error(f"Error getting referral stats: {e}")
+        return {"invited": 0, "premium": 0, "earned_days": 0}
+
+def grant_referral_bonus(referred_user_id: int) -> Optional[int]:
+    """Grant bonus to referrer when referred user buys premium. Returns referrer_id if bonus granted."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Find referrer and check if bonus already granted
+        c.execute("""SELECT referrer_id, bonus_granted FROM referrals
+                     WHERE referred_id = ?""", (referred_user_id,))
+        row = c.fetchone()
+
+        if not row:
+            conn.close()
+            return None  # No referrer
+
+        referrer_id, bonus_granted = row
+
+        if bonus_granted:
+            conn.close()
+            return None  # Bonus already granted
+
+        # Grant bonus to referrer
+        grant_premium(referrer_id, REFERRAL_BONUS_DAYS)
+
+        # Mark bonus as granted
+        c.execute("UPDATE referrals SET bonus_granted = 1 WHERE referred_id = ?",
+                  (referred_user_id,))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Granted {REFERRAL_BONUS_DAYS} days referral bonus to {referrer_id} for {referred_user_id}")
+        return referrer_id
+    except Exception as e:
+        logger.error(f"Error granting referral bonus: {e}")
+        return None
+
+
 def process_1win_postback(data: dict) -> dict:
     """Process postback from 1win affiliate system."""
     try:
@@ -1075,11 +1244,17 @@ def process_1win_postback(data: dict) -> dict:
         # Grant premium
         grant_premium(telegram_user_id, premium_days)
 
+        # Grant referral bonus if user was referred
+        referrer_id = grant_referral_bonus(telegram_user_id)
+        if referrer_id:
+            logger.info(f"Referral bonus granted to {referrer_id} for {telegram_user_id} 1win deposit")
+
         return {
             "status": "success",
             "user_id": telegram_user_id,
             "amount": amount,
-            "premium_days": premium_days
+            "premium_days": premium_days,
+            "referrer_bonus": referrer_id
         }
 
     except Exception as e:
@@ -1224,11 +1399,17 @@ def process_crypto_webhook(data: dict) -> dict:
             conn.commit()
             conn.close()
 
+            # Grant referral bonus if user was referred
+            referrer_id = grant_referral_bonus(user_id)
+            if referrer_id:
+                logger.info(f"Referral bonus granted to {referrer_id} for {user_id} crypto payment")
+
             logger.info(f"Crypto payment processed: user={user_id}, days={days}, invoice={invoice_id}")
             return {
                 "status": "success",
                 "user_id": user_id,
-                "days": days
+                "days": days,
+                "referrer_bonus": referrer_id
             }
         else:
             conn.close()
@@ -3578,6 +3759,22 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     existing_user = get_user(user.id)
 
+    # Check for referral link (t.me/bot?start=ref_12345)
+    referrer_id = None
+    if context.args and len(context.args) > 0:
+        arg = context.args[0]
+        if arg.startswith("ref_"):
+            try:
+                referrer_id = int(arg.replace("ref_", ""))
+                # Don't allow self-referral
+                if referrer_id == user.id:
+                    referrer_id = None
+                # Store in context for later use
+                context.user_data["referrer_id"] = referrer_id
+                logger.info(f"Referral detected: {referrer_id} -> {user.id}")
+            except ValueError:
+                pass
+
     if not existing_user:
         # NEW USER - show language selection first
         detected_lang = detect_language(user)
@@ -3634,6 +3831,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lan
          InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
         [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
          InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
+        [InlineKeyboardButton(get_text("premium_btn", lang), callback_data="cmd_premium"),
+         InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")],
         [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
     ]
 
@@ -4213,6 +4412,42 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+async def referral_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show referral program info and stats"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    # Get referral stats
+    stats = get_referral_stats(user_id)
+    ref_link = get_referral_link(user_id)
+
+    text = f"""{get_text('referral_title', lang)}
+
+{get_text('referral_desc', lang)}
+
+{get_text('referral_link', lang)}
+`{ref_link}`
+
+{get_text('referral_copy', lang)}
+
+{get_text('referral_stats', lang)}
+• {get_text('referral_invited', lang)}: **{stats['invited']}**
+• {get_text('referral_premium', lang)}: **{stats['premium']}**
+• {get_text('referral_earned', lang)}: **{stats['earned_days']}**
+
+{get_text('referral_rules', lang)}"""
+
+    keyboard = [
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+    ]
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
 async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show prediction history with filters"""
     user_id = update.effective_user.id
@@ -4662,6 +4897,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         create_user(user_id, tg_user.username, selected_lang)
         update_user_settings(user_id, timezone=detected_tz)
 
+        # Save referral if exists
+        referrer_id = context.user_data.get("referrer_id")
+        referral_msg = ""
+        if referrer_id:
+            if save_referral(referrer_id, user_id):
+                referral_msg = f"\n\n{get_text('referral_welcome', selected_lang)}"
+                logger.info(f"Saved referral from context: {referrer_id} -> {user_id}")
+
         # Show welcome message
         tz_display = get_tz_offset_str(detected_tz)
         welcome_text = f"""{get_text('first_start_title', selected_lang)}
@@ -4671,7 +4914,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {get_text('detected_settings', selected_lang)}
 • {get_text('timezone_label', selected_lang)}: {tz_display}
 
-_{get_text('change_in_settings', selected_lang)}_"""
+_{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         # Build main menu keyboard
         keyboard = [
@@ -4684,7 +4927,8 @@ _{get_text('change_in_settings', selected_lang)}_"""
             [InlineKeyboardButton(get_text("favorites", selected_lang), callback_data="cmd_favorites"),
              InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats")],
             [InlineKeyboardButton(get_text("premium_btn", selected_lang), callback_data="cmd_premium"),
-             InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
+             InlineKeyboardButton(get_text("referral_btn", selected_lang), callback_data="cmd_referral")],
+            [InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
         ]
 
         await query.edit_message_text(
@@ -4706,10 +4950,14 @@ _{get_text('change_in_settings', selected_lang)}_"""
             [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
              InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
             [InlineKeyboardButton(get_text("premium_btn", lang), callback_data="cmd_premium"),
-             InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
+             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")],
+            [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
         ]
         await query.edit_message_text(f"⚽ **AI Betting Bot v14** - {get_text('choose_action', lang)}",
                                        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_referral":
+        await referral_cmd(update, context)
 
     elif data == "cmd_premium":
         await premium_cmd(update, context)
@@ -6351,6 +6599,8 @@ def main():
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
     app.add_handler(CommandHandler("debug", debug_cmd))
     app.add_handler(CommandHandler("premium", premium_cmd))
+    app.add_handler(CommandHandler("ref", referral_cmd))
+    app.add_handler(CommandHandler("referral", referral_cmd))
 
     # Admin commands
     app.add_handler(CommandHandler("admin", admin_cmd))
