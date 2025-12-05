@@ -1991,15 +1991,16 @@ def get_pending_predictions():
     """Get predictions that haven't been checked yet"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds 
-                 FROM predictions 
-                 WHERE is_correct IS NULL 
+    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank
+                 FROM predictions
+                 WHERE is_correct IS NULL
                  AND predicted_at > datetime('now', '-7 days')""")
     rows = c.fetchall()
     conn.close()
-    
-    return [{"id": r[0], "user_id": r[1], "match_id": r[2], "home": r[3], 
-             "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7]} for r in rows]
+
+    return [{"id": r[0], "user_id": r[1], "match_id": r[2], "home": r[3],
+             "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7],
+             "bet_rank": r[8] if len(r) > 8 else 1} for r in rows]
 
 def update_prediction_result(pred_id, result, is_correct):
     """Update prediction with result and ML training data"""
@@ -5842,9 +5843,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             text = f"👥 Пользователи ({total} всего, {premium} premium)\n\nПоследние 20:\n"
             for uid, uname, is_prem, created in users:
                 prem_icon = "💎 " if is_prem else ""
-                # Escape underscores in usernames for safety
-                safe_name = uname.replace("_", "\\_") if uname else ""
-                name = f"@{safe_name}" if uname else f"ID:{uid}"
+                name = f"@{uname}" if uname else f"ID:{uid}"
                 date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
                 text += f"• {prem_icon}{name} ({date})\n"
 
@@ -5925,16 +5924,15 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             premium = c.fetchone()[0]
             conn.close()
 
-            text = f"👥 **Источник: {source_filter}**\n({total} всего, {premium} premium)\n\nПоследние 20:\n"
+            text = f"👥 Источник: {source_filter}\n({total} всего, {premium} premium)\n\nПоследние 20:\n"
             for uid, uname, is_prem, created in users:
                 prem_icon = "💎 " if is_prem else ""
-                safe_name = uname.replace("_", "\\_") if uname else ""
-                name = f"@{safe_name}" if uname else f"ID:{uid}"
+                name = f"@{uname}" if uname else f"ID:{uid}"
                 date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
                 text += f"• {prem_icon}{name} ({date})\n"
 
             keyboard = [[InlineKeyboardButton("🔙 К источникам", callback_data="admin_sources")]]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin users by source error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
@@ -7037,11 +7035,18 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                         user_data = get_user(pred["user_id"])
                         lang = user_data.get("language", "ru") if user_data else "ru"
 
+                        # Show bet rank (MAIN vs ALT)
+                        bet_rank = pred.get("bet_rank", 1)
+                        if bet_rank == 1:
+                            rank_label = "⚡ ОСНОВНАЯ" if lang == "ru" else "⚡ MAIN"
+                        else:
+                            rank_label = f"📌 ALT{bet_rank - 1}"
+
                         await context.bot.send_message(
                             chat_id=pred["user_id"],
                             text=f"{get_text('pred_result_title', lang)}\n\n"
                                  f"⚽ {pred['home']} vs {pred['away']}\n"
-                                 f"🎯 {get_text('bet', lang)} {pred['bet_type']}\n"
+                                 f"🎯 {rank_label}: {pred['bet_type']}\n"
                                  f"📈 {result}\n"
                                  f"{emoji} {get_text(status_key, lang)}",
                             parse_mode="Markdown"
