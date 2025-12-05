@@ -296,6 +296,8 @@ TRANSLATIONS = {
         "pred_correct": "Прогноз верный!",
         "pred_incorrect": "Прогноз не сработал",
         "pred_push": "Возврат (push)",
+        "bet_main": "⚡ ОСНОВНАЯ",
+        "bet_alt": "📌 АЛЬТЕРНАТИВНАЯ",
         # Daily digest
         "daily_digest_title": "☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**",
         "place_bet_btn": "🎰 Ставить",
@@ -431,6 +433,8 @@ TRANSLATIONS = {
         "pred_correct": "Prediction correct!",
         "pred_incorrect": "Prediction failed",
         "pred_push": "Push (void)",
+        "bet_main": "⚡ MAIN",
+        "bet_alt": "📌 ALTERNATIVE",
         # Daily digest
         "daily_digest_title": "☀️ **TODAY'S DIGEST**",
         "place_bet_btn": "🎰 Place bet",
@@ -566,6 +570,8 @@ TRANSLATIONS = {
         "pred_correct": "Previsão correta!",
         "pred_incorrect": "Previsão falhou",
         "pred_push": "Push (void)",
+        "bet_main": "⚡ PRINCIPAL",
+        "bet_alt": "📌 ALTERNATIVA",
         # Daily digest
         "daily_digest_title": "☀️ **RESUMO DO DIA**",
         "place_bet_btn": "🎰 Apostar",
@@ -701,6 +707,8 @@ TRANSLATIONS = {
         "pred_correct": "¡Pronóstico correcto!",
         "pred_incorrect": "Pronóstico fallido",
         "pred_push": "Push (void)",
+        "bet_main": "⚡ PRINCIPAL",
+        "bet_alt": "📌 ALTERNATIVA",
         # Daily digest
         "daily_digest_title": "☀️ **RESUMEN DEL DÍA**",
         "place_bet_btn": "🎰 Apostar",
@@ -7035,12 +7043,12 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                         user_data = get_user(pred["user_id"])
                         lang = user_data.get("language", "ru") if user_data else "ru"
 
-                        # Show bet rank (MAIN vs ALT)
+                        # Show bet rank (MAIN vs ALT) - localized
                         bet_rank = pred.get("bet_rank", 1)
                         if bet_rank == 1:
-                            rank_label = "⚡ ОСНОВНАЯ" if lang == "ru" else "⚡ MAIN"
+                            rank_label = get_text("bet_main", lang)
                         else:
-                            rank_label = f"📌 ALT{bet_rank - 1}"
+                            rank_label = get_text("bet_alt", lang)
 
                         await context.bot.send_message(
                             chat_id=pred["user_id"],
