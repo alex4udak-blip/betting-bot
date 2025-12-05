@@ -2774,13 +2774,17 @@ def get_ml_status() -> dict:
     }
 
 
-def get_user_stats(user_id):
-    """Get user's prediction statistics with categories"""
+def get_user_stats(user_id, page: int = 0, per_page: int = 7):
+    """Get user's prediction statistics with categories and pagination"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    
+
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ?", (user_id,))
     total = c.fetchone()[0]
+
+    # Count main predictions only (for pagination)
+    c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)", (user_id,))
+    total_main = c.fetchone()[0]
     
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ? AND is_correct = 1", (user_id,))
     correct = c.fetchone()[0]
@@ -2819,12 +2823,13 @@ def get_user_stats(user_id):
                 "rate": round(cat_correct / cat_decided * 100, 1)
             }
     
-    # Recent predictions (main bets only for display)
+    # Recent predictions (main bets only for display, no alternatives) with pagination
+    offset = page * per_page
     c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at, bet_rank
                  FROM predictions
-                 WHERE user_id = ?
+                 WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)
                  ORDER BY predicted_at DESC
-                 LIMIT 10""", (user_id,))
+                 LIMIT ? OFFSET ?""", (user_id, per_page, offset))
     recent = c.fetchall()
 
     # Stats by bet_rank (main vs alternatives)
@@ -2872,6 +2877,9 @@ def get_user_stats(user_id):
     main_rate = (main_stats["correct"] / main_stats["decided"] * 100) if main_stats["decided"] > 0 else 0
     alt_rate = (alt_stats["correct"] / alt_stats["decided"] * 100) if alt_stats["decided"] > 0 else 0
 
+    import math
+    total_pages = math.ceil(total_main / per_page) if total_main > 0 else 1
+
     return {
         "total": total,
         "correct": correct,
@@ -2885,7 +2893,10 @@ def get_user_stats(user_id):
         "main_stats": {"total": main_stats["total"], "correct": main_stats["correct"],
                        "decided": main_stats["decided"], "rate": main_rate},
         "alt_stats": {"total": alt_stats["total"], "correct": alt_stats["correct"],
-                      "decided": alt_stats["decided"], "rate": alt_rate}
+                      "decided": alt_stats["decided"], "rate": alt_rate},
+        "page": page,
+        "total_pages": total_pages,
+        "total_main": total_main
     }
 
 
@@ -4378,13 +4389,13 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user statistics with categories"""
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
+    """Show user statistics with categories and pagination"""
     user_id = update.effective_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
 
-    stats = get_user_stats(user_id)
+    stats = get_user_stats(user_id, page=page)
 
     if stats["total"] == 0:
         text = "📈 **СТАТИСТИКА**\n\nПока нет данных. Напиши название команды!" if lang == "ru" else "📈 **STATS**\n\nNo data yet. Type a team name!"
@@ -4410,11 +4421,11 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Format ROI
     roi_emoji = "💰" if roi["roi"] > 0 else "📉" if roi["roi"] < 0 else "➖"
-    roi_text = f"{roi_emoji} **ROI:** {roi['roi']:+.1f}% (профит: {roi['profit']:+.1f} ед.)"
+    roi_text = f"{roi_emoji} ROI: {roi['roi']:+.1f}% (профит: {roi['profit']:+.1f} ед.)"
 
     # Build stats string with push
     decided = stats['correct'] + stats.get('incorrect', 0)
-    push_str = f"\n🔄 **Возвраты:** {stats['push']}" if stats.get('push', 0) > 0 else ""
+    push_str = f"\n🔄 Возвраты: {stats['push']}" if stats.get('push', 0) > 0 else ""
 
     # Main vs Alt stats display
     main_s = stats.get("main_stats", {})
@@ -4424,31 +4435,31 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     alt_display = ""
     if main_s.get("decided", 0) > 0:
         main_emoji = "🎯" if main_s["rate"] >= 50 else "📊"
-        main_display = f"{main_emoji} **Основные:** {main_s['correct']}/{main_s['decided']} ({main_s['rate']:.1f}%)"
+        main_display = f"{main_emoji} Основные: {main_s['correct']}/{main_s['decided']} ({main_s['rate']:.1f}%)"
     if alt_s.get("decided", 0) > 0:
         alt_emoji = "📈" if alt_s["rate"] >= 50 else "📉"
-        alt_display = f"{alt_emoji} **Альтернативы:** {alt_s['correct']}/{alt_s['decided']} ({alt_s['rate']:.1f}%)"
+        alt_display = f"{alt_emoji} Альтернативы: {alt_s['correct']}/{alt_s['decided']} ({alt_s['rate']:.1f}%)"
 
     stats_by_rank = ""
     if main_display or alt_display:
         stats_by_rank = f"\n{main_display}\n{alt_display}" if alt_display else f"\n{main_display}"
 
-    text = f"""📈 **СТАТИСТИКА**
+    text = f"""📈 СТАТИСТИКА
 
-{win_emoji} **Точность:** {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
+{win_emoji} Точность: {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
 {roi_text}
 {streak_text}
 {stats_by_rank}
 
-📊 **Всего прогнозов:** {stats['total']}
-✅ **Верных:** {stats['correct']}
-❌ **Неверных:** {stats.get('incorrect', 0)}{push_str}
-⏳ **Ожидают:** {stats['pending']}
+📊 Всего прогнозов: {stats['total']}
+✅ Верных: {stats['correct']}
+❌ Неверных: {stats.get('incorrect', 0)}{push_str}
+⏳ Ожидают: {stats['pending']}
 
-🏆 **Рекорды:** лучшая серия {streak['best_win_streak']}W | худшая {streak['worst_lose_streak']}L
+🏆 Рекорды: лучшая серия {streak['best_win_streak']}W | худшая {streak['worst_lose_streak']}L
 
 """
-    
+
     # Stats by category
     if stats["categories"]:
         cat_names = {
@@ -4462,17 +4473,21 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "handicap": "Форы",
             "other": "Другое"
         }
-        
-        text += "📋 **По типам ставок:**\n"
+
+        text += "📋 По типам ставок:\n"
         for cat, data in stats["categories"].items():
             cat_name = cat_names.get(cat, cat)
             push_info = f" (+{data['push']}🔄)" if data.get('push', 0) > 0 else ""
             text += f"  • {cat_name}: {data['correct']}/{data['total'] - data.get('push', 0)} ({data['rate']}%){push_info}\n"
         text += "\n"
-    
-    # Recent predictions
-    text += f"{'─'*25}\n📝 **Последние прогнозы:**\n"
-    for p in stats.get("predictions", [])[:7]:
+
+    # Recent predictions with pagination info
+    current_page = stats.get("page", 0)
+    total_pages = stats.get("total_pages", 1)
+    page_info = f" (стр. {current_page + 1}/{total_pages})" if total_pages > 1 else ""
+
+    text += f"{'─'*25}\n📝 Последние прогнозы{page_info}:\n"
+    for p in stats.get("predictions", []):
         if p["is_correct"] is None:
             emoji = "⏳"
             result_text = "ожидаем"
@@ -4485,23 +4500,29 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             emoji = "❌"
             result_text = p["result"] or "проиграл"
-        
+
         home_short = p["home"][:10] + ".." if len(p["home"]) > 12 else p["home"]
         away_short = p["away"][:10] + ".." if len(p["away"]) > 12 else p["away"]
 
-        # Show bet rank marker
-        rank = p.get("bet_rank", 1)
-        rank_marker = "" if rank == 1 or rank is None else f" [ALT{rank-1}]"
-
         text += f"{emoji} {home_short} - {away_short}\n"
-        text += f"    📊 {p['bet_type']}{rank_marker} ({p['confidence']}%) → {result_text}\n"
-    
+        text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
+
+    # Build keyboard with pagination
     refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar"}
-    keyboard = [
-        [InlineKeyboardButton(refresh_label.get(lang, refresh_label["en"]), callback_data="cmd_stats")],
-        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
-    ]
-    
+
+    # Pagination buttons
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️", callback_data=f"stats_page_{current_page - 1}"))
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("▶️", callback_data=f"stats_page_{current_page + 1}"))
+
+    keyboard = []
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    keyboard.append([InlineKeyboardButton(refresh_label.get(lang, refresh_label["en"]), callback_data="cmd_stats")])
+    keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")])
+
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
@@ -5564,6 +5585,11 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
     
     elif data == "cmd_stats":
         await stats_cmd(update, context)
+
+    elif data.startswith("stats_page_"):
+        # Stats pagination
+        page = int(data.replace("stats_page_", ""))
+        await stats_cmd(update, context, page=page)
 
     elif data.startswith("history_"):
         # History filter callbacks
