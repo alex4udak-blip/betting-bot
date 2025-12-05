@@ -4787,6 +4787,149 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
+    elif data == "admin_broadcast":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        text = """📢 **Рассылка**
+
+Чтобы отправить сообщение всем пользователям, используй команду:
+
+`/broadcast Ваш текст сообщения`
+
+Пример:
+`/broadcast 🎉 Новая функция! Теперь доступны live-алерты!`"""
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_users":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get recent users
+        c.execute("""
+            SELECT user_id, username, is_premium, created_at
+            FROM users
+            ORDER BY created_at DESC
+            LIMIT 20
+        """)
+        users = c.fetchall()
+
+        # Stats
+        c.execute("SELECT COUNT(*) FROM users")
+        total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
+        premium = c.fetchone()[0]
+        conn.close()
+
+        text = f"""👥 **Пользователи** ({total} всего, {premium} premium)
+
+**Последние 20:**
+"""
+        for uid, uname, is_prem, created in users:
+            prem_icon = "💎" if is_prem else ""
+            name = f"@{uname}" if uname else f"ID:{uid}"
+            date = created[:10] if created else "?"
+            text += f"• {prem_icon}{name} ({date})\n"
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_stats":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Stats by bet type
+        c.execute("""
+            SELECT bet_type,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+                   SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            GROUP BY bet_type
+            ORDER BY total DESC
+        """)
+        by_type = c.fetchall()
+
+        # Stats by confidence range
+        c.execute("""
+            SELECT
+                CASE
+                    WHEN confidence >= 75 THEN '75%+'
+                    WHEN confidence >= 70 THEN '70-74%'
+                    WHEN confidence >= 65 THEN '65-69%'
+                    ELSE '<65%'
+                END as conf_range,
+                COUNT(*) as total,
+                SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            GROUP BY conf_range
+            ORDER BY conf_range DESC
+        """)
+        by_conf = c.fetchall()
+
+        # ROI calculation
+        c.execute("""
+            SELECT
+                SUM(CASE WHEN is_correct = 1 THEN (odds - 1) ELSE -1 END) as profit,
+                COUNT(*) as bets
+            FROM predictions
+            WHERE is_correct IS NOT NULL AND odds > 0
+        """)
+        roi_row = c.fetchone()
+        profit = roi_row[0] or 0
+        total_bets = roi_row[1] or 1
+        roi = round(profit / total_bets * 100, 1)
+
+        conn.close()
+
+        text = f"""📊 **Детальная статистика**
+
+**По типу ставки:**
+"""
+        for bet_type, total, correct, wrong in by_type:
+            acc = round(correct / total * 100, 1) if total > 0 else 0
+            text += f"• {bet_type}: {correct}/{total} ({acc}%)\n"
+
+        text += f"""
+**По уверенности:**
+"""
+        for conf_range, total, correct in by_conf:
+            acc = round(correct / total * 100, 1) if total > 0 else 0
+            text += f"• {conf_range}: {correct}/{total} ({acc}%)\n"
+
+        text += f"""
+**ROI:** {roi}% (profit: {profit:.1f} units)
+"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_admin":
+        # Return to admin panel (simplified)
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        text = "👑 **АДМИН-ПАНЕЛЬ**\n\nИспользуй /admin для полной статистики"
+        keyboard = [
+            [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+             InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
+            [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats")],
+            [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
+            [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
     elif data == "admin_clean_dups":
         if not is_admin(user_id):
             await query.edit_message_text("⛔ Только для администраторов")
