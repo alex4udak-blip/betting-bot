@@ -291,6 +291,15 @@ TRANSLATIONS = {
         "premium_friends_btn": "👥 Бесплатно (друзья)",
         "premium_status": "✅ У тебя премиум до: {date}",
         "friend_fallback": "Друг",
+        # Prediction results
+        "pred_result_title": "📊 **Результат прогноза**",
+        "pred_correct": "Прогноз верный!",
+        "pred_incorrect": "Прогноз не сработал",
+        "pred_push": "Возврат (push)",
+        # Daily digest
+        "daily_digest_title": "☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**",
+        "place_bet_btn": "🎰 Ставить",
+        "all_matches_btn": "📅 Все матчи",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -417,6 +426,15 @@ TRANSLATIONS = {
         "premium_friends_btn": "👥 Free (invite friends)",
         "premium_status": "✅ You have premium until: {date}",
         "friend_fallback": "Friend",
+        # Prediction results
+        "pred_result_title": "📊 **Prediction Result**",
+        "pred_correct": "Prediction correct!",
+        "pred_incorrect": "Prediction failed",
+        "pred_push": "Push (void)",
+        # Daily digest
+        "daily_digest_title": "☀️ **TODAY'S DIGEST**",
+        "place_bet_btn": "🎰 Place bet",
+        "all_matches_btn": "📅 All matches",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -543,6 +561,15 @@ TRANSLATIONS = {
         "premium_friends_btn": "👥 Grátis (convide amigos)",
         "premium_status": "✅ Você tem premium até: {date}",
         "friend_fallback": "Amigo",
+        # Prediction results
+        "pred_result_title": "📊 **Resultado da Previsão**",
+        "pred_correct": "Previsão correta!",
+        "pred_incorrect": "Previsão falhou",
+        "pred_push": "Push (void)",
+        # Daily digest
+        "daily_digest_title": "☀️ **RESUMO DO DIA**",
+        "place_bet_btn": "🎰 Apostar",
+        "all_matches_btn": "📅 Todos os jogos",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -669,6 +696,15 @@ TRANSLATIONS = {
         "premium_friends_btn": "👥 Gratis (invita amigos)",
         "premium_status": "✅ Tienes premium hasta: {date}",
         "friend_fallback": "Amigo",
+        # Prediction results
+        "pred_result_title": "📊 **Resultado del Pronóstico**",
+        "pred_correct": "¡Pronóstico correcto!",
+        "pred_incorrect": "Pronóstico fallido",
+        "pred_push": "Push (void)",
+        # Daily digest
+        "daily_digest_title": "☀️ **RESUMEN DEL DÍA**",
+        "place_bet_btn": "🎰 Apostar",
+        "all_matches_btn": "📅 Todos los partidos",
     }
 }
 
@@ -6859,28 +6895,31 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                     if is_correct is True:
                         db_value = 1
                         emoji = "✅"
-                        status_text = "Прогноз верный!"
+                        status_key = "pred_correct"
                     elif is_correct is False:
                         db_value = 0
                         emoji = "❌"
-                        status_text = "Прогноз не сработал"
+                        status_key = "pred_incorrect"
                     else:  # is_correct is None = push/void
                         db_value = 2
                         emoji = "🔄"
-                        status_text = "Возврат (push)"
-                    
+                        status_key = "pred_push"
+
                     update_prediction_result(pred["id"], result, db_value)
                     logger.info(f"Updated prediction {pred['id']}: {result} -> {emoji}")
-                    
-                    # Notify user
+
+                    # Notify user in their language
                     try:
+                        user_data = get_user(pred["user_id"])
+                        lang = user_data.get("language", "ru") if user_data else "ru"
+
                         await context.bot.send_message(
                             chat_id=pred["user_id"],
-                            text=f"📊 **Результат прогноза**\n\n"
+                            text=f"{get_text('pred_result_title', lang)}\n\n"
                                  f"⚽ {pred['home']} vs {pred['away']}\n"
-                                 f"🎯 Ставка: {pred['bet_type']}\n"
-                                 f"📈 Счёт: {result}\n"
-                                 f"{emoji} {status_text}",
+                                 f"🎯 {get_text('bet', lang)} {pred['bet_type']}\n"
+                                 f"📈 {result}\n"
+                                 f"{emoji} {get_text(status_key, lang)}",
                             parse_mode="Markdown"
                         )
                     except:
@@ -6894,33 +6933,35 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
 
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
     """Send daily digest at 10:00"""
-    
+
     if not live_subscribers:
         return
-    
+
     current_hour = datetime.now().hour
     if current_hour != 10:
         return
-    
+
     logger.info("Sending daily digest...")
-    
+
     matches = await get_matches(date_filter="today")
-    
+
     if not matches:
         return
-    
+
     recs = await get_recommendations_enhanced(matches, "daily digest")
-    
+
     if not recs:
         return
-    
-    text = f"☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**\n\n{recs}"
 
     for user_id in live_subscribers:
         try:
+            user_data = get_user(user_id)
+            lang = user_data.get("language", "ru") if user_data else "ru"
+
+            text = f"{get_text('daily_digest_title', lang)}\n\n{recs}"
             keyboard = [
-                [InlineKeyboardButton("🎰 Ставить", url=get_affiliate_link(user_id))],
-                [InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]
+                [InlineKeyboardButton(get_text("place_bet_btn", lang), url=get_affiliate_link(user_id))],
+                [InlineKeyboardButton(get_text("all_matches_btn", lang), callback_data="cmd_today")]
             ]
             await context.bot.send_message(
                 chat_id=user_id,
