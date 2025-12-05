@@ -40,6 +40,19 @@ ODDS_API_URL = "https://api.the-odds-api.com/v4"
 # 1WIN Affiliate Link (Universal Router - auto GEO redirect)
 AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
 
+# Crypto wallets for direct payment
+CRYPTO_WALLETS = {
+    "USDT_TRC20": "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC",
+    "TON": "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL"
+}
+
+# Crypto prices (in USD)
+CRYPTO_PRICES = {
+    7: 15,      # 7 days = $15
+    30: 40,     # 30 days = $40
+    365: 100    # 1 year = $100
+}
+
 # Daily free limit for predictions
 FREE_DAILY_LIMIT = 3
 
@@ -152,7 +165,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 Для безлимита сделай депозит:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум доступ:**\n• R$200+ → 7 дней\n• R$500+ → 30 дней\n• R$1000+ → Навсегда\n\n👇 Сделай депозит по ссылке:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -227,7 +240,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 For unlimited access, make a deposit:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium access:**\n• R$200+ → 7 days\n• R$500+ → 30 days\n• R$1000+ → Lifetime\n\n👇 Make a deposit via link:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -302,7 +315,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 Para acesso ilimitado, faça um depósito:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso premium:**\n• R$200+ → 7 dias\n• R$500+ → 30 dias\n• R$1000+ → Vitalício\n\n👇 Faça um depósito pelo link:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -377,7 +390,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 Para acceso ilimitado, haz un depósito:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **Acceso premium:**\n• R$200+ → 7 días\n• R$500+ → 30 días\n• R$1000+ → De por vida\n\n👇 Haz un depósito por el enlace:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -701,6 +714,29 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN exclude_cups INTEGER DEFAULT 0")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN bet_rank INTEGER DEFAULT 1")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN premium_expires TEXT")
+    except:
+        pass
+
+    # 1win deposits tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        onewin_user_id TEXT,
+        amount REAL,
+        currency TEXT DEFAULT 'BRL',
+        event TEXT,
+        transaction_id TEXT UNIQUE,
+        country TEXT,
+        premium_days INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
 
     conn.commit()
     conn.close()
@@ -867,6 +903,169 @@ def get_favorite_leagues(user_id):
     return leagues
 
 
+# ===== 1WIN POSTBACK & PREMIUM SYSTEM =====
+
+# Deposit thresholds for premium (in BRL)
+PREMIUM_TIERS = {
+    200: 7,      # R$200+ = 7 days
+    500: 30,     # R$500+ = 30 days
+    1000: 36500  # R$1000+ = Lifetime (100 years)
+}
+
+def calculate_premium_days(amount: float, currency: str = "BRL") -> int:
+    """Calculate premium days based on deposit amount."""
+    # Convert to BRL if needed (rough estimates)
+    if currency == "USD":
+        amount = amount * 5
+    elif currency == "EUR":
+        amount = amount * 5.5
+
+    for threshold, days in sorted(PREMIUM_TIERS.items(), reverse=True):
+        if amount >= threshold:
+            return days
+    return 0
+
+
+def grant_premium(user_id: int, days: int) -> bool:
+    """Grant premium to user for specified days."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get current premium expiry
+        c.execute("SELECT premium_expires FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+
+        now = datetime.now()
+        if row and row[0]:
+            # Extend existing premium
+            try:
+                current_expiry = datetime.fromisoformat(row[0])
+                if current_expiry > now:
+                    new_expiry = current_expiry + timedelta(days=days)
+                else:
+                    new_expiry = now + timedelta(days=days)
+            except:
+                new_expiry = now + timedelta(days=days)
+        else:
+            new_expiry = now + timedelta(days=days)
+
+        # Update premium status
+        c.execute("""UPDATE users SET is_premium = 1, premium_expires = ?
+                     WHERE user_id = ?""", (new_expiry.isoformat(), user_id))
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Granted {days} days premium to user {user_id}, expires {new_expiry}")
+        return True
+    except Exception as e:
+        logger.error(f"Error granting premium: {e}")
+        return False
+
+
+def check_premium_expired(user_id: int) -> bool:
+    """Check if user's premium has expired and update status if needed."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT is_premium, premium_expires FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row or not row[0]:
+            return True  # Not premium
+
+        if not row[1]:
+            return False  # Premium without expiry (legacy)
+
+        expiry = datetime.fromisoformat(row[1])
+        if expiry < datetime.now():
+            # Premium expired - update status
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            logger.info(f"Premium expired for user {user_id}")
+            return True
+
+        return False  # Still premium
+    except Exception as e:
+        logger.error(f"Error checking premium: {e}")
+        return True
+
+
+def process_1win_postback(data: dict) -> dict:
+    """Process postback from 1win affiliate system."""
+    try:
+        event = data.get("event", "")
+        amount = float(data.get("amount", 0))
+        sub1 = data.get("sub1", "")  # Telegram user_id
+        transaction_id = data.get("transaction_id", "")
+        country = data.get("country", "")
+        onewin_user_id = data.get("user_id", "")
+        currency = data.get("currency", "BRL")
+
+        logger.info(f"1win postback: event={event}, amount={amount}, sub1={sub1}, tx={transaction_id}")
+
+        # Only process deposit events
+        if event != "deposit" or not sub1:
+            return {"status": "ignored", "reason": "not a deposit or no sub1"}
+
+        # Parse telegram user_id from sub1
+        try:
+            telegram_user_id = int(sub1)
+        except:
+            return {"status": "error", "reason": "invalid sub1 (telegram user_id)"}
+
+        # Check for duplicate transaction
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id FROM deposits_1win WHERE transaction_id = ?", (transaction_id,))
+        if c.fetchone():
+            conn.close()
+            return {"status": "duplicate", "reason": "transaction already processed"}
+
+        # Calculate premium days
+        premium_days = calculate_premium_days(amount, currency)
+
+        if premium_days == 0:
+            conn.close()
+            return {"status": "ignored", "reason": f"deposit {amount} {currency} below minimum threshold"}
+
+        # Save deposit record
+        c.execute("""INSERT INTO deposits_1win
+                     (user_id, onewin_user_id, amount, currency, event, transaction_id, country, premium_days)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (telegram_user_id, onewin_user_id, amount, currency, event, transaction_id, country, premium_days))
+        conn.commit()
+        conn.close()
+
+        # Grant premium
+        grant_premium(telegram_user_id, premium_days)
+
+        return {
+            "status": "success",
+            "user_id": telegram_user_id,
+            "amount": amount,
+            "premium_days": premium_days
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing 1win postback: {e}")
+        return {"status": "error", "reason": str(e)}
+
+
+def get_affiliate_link(user_id: int) -> str:
+    """Generate affiliate link with user tracking."""
+    # Base 1win affiliate link with sub1 parameter for tracking
+    base_link = AFFILIATE_LINK.rstrip("/")
+    if "?" in base_link:
+        return f"{base_link}&sub1={user_id}"
+    else:
+        return f"{base_link}?sub1={user_id}"
+
+
 # ===== LIVE SUBSCRIBERS PERSISTENCE =====
 
 def load_live_subscribers() -> set[int]:
@@ -922,30 +1121,118 @@ def categorize_bet(bet_type):
         return "handicap"
     return "other"
 
-def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None):
+
+def parse_bet_from_text(text: str) -> tuple:
+    """Parse bet type, confidence and odds from text.
+
+    Returns: (bet_type, confidence, odds) or (None, None, None) if parsing fails
+    """
+    text_lower = text.lower()
+
+    # Default values
+    bet_type = None
+    confidence = 70
+    odds = 1.5
+
+    # Parse confidence
+    conf_match = re.search(r'(\d+)\s*%', text)
+    if conf_match:
+        confidence = int(conf_match.group(1))
+
+    # Parse odds
+    odds_match = re.search(r'@\s*~?(\d+\.?\d*)', text)
+    if odds_match:
+        odds = float(odds_match.group(1))
+
+    # Detect bet type - check double chances FIRST
+    if "п1 или х" in text_lower or "1x" in text_lower or "п1/х" in text_lower:
+        bet_type = "1X"
+    elif "х или п2" in text_lower or "x2" in text_lower or "2x" in text_lower or "х/п2" in text_lower:
+        bet_type = "X2"
+    elif "п1 или п2" in text_lower or " 12 " in text_lower or "не ничья" in text_lower:
+        bet_type = "12"
+    elif "фора" in text_lower or "handicap" in text_lower:
+        if "-1.5" in text_lower:
+            bet_type = "Фора1(-1.5)"
+        elif "-1" in text_lower:
+            bet_type = "Фора1(-1)"
+        elif "+1" in text_lower:
+            bet_type = "Фора2(+1)"
+        else:
+            bet_type = "Фора"
+    elif "тб 2.5" in text_lower or "тотал больше 2.5" in text_lower or "over 2.5" in text_lower:
+        bet_type = "ТБ 2.5"
+    elif "тм 2.5" in text_lower or "тотал меньше 2.5" in text_lower or "under 2.5" in text_lower:
+        bet_type = "ТМ 2.5"
+    elif "обе забьют" in text_lower or "btts" in text_lower:
+        bet_type = "BTTS"
+    elif "п2" in text_lower or "победа гостей" in text_lower:
+        bet_type = "П2"
+    elif "п1" in text_lower or "победа хозя" in text_lower:
+        bet_type = "П1"
+    elif "ничья" in text_lower or " х " in text_lower:
+        bet_type = "Х"
+
+    return (bet_type, confidence, odds)
+
+
+def parse_alternative_bets(analysis: str) -> list:
+    """Parse alternative bets from analysis text.
+
+    Returns: list of (bet_type, confidence, odds) tuples
+    """
+    alternatives = []
+
+    # Look for [ALT1], [ALT2], [ALT3] format
+    for i in range(1, 4):
+        alt_match = re.search(rf'\[ALT{i}\]\s*(.+?)(?=\[ALT|\n⚠️|\n✅|$)', analysis, re.IGNORECASE | re.DOTALL)
+        if alt_match:
+            alt_text = alt_match.group(1).strip()
+            bet_type, confidence, odds = parse_bet_from_text(alt_text)
+            if bet_type:
+                alternatives.append((bet_type, confidence, odds))
+                logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
+
+    # Fallback: try numbered list format (1. 2. 3.)
+    if not alternatives:
+        for line in analysis.split('\n'):
+            if re.match(r'^\s*[123]\.\s', line):
+                bet_type, confidence, odds = parse_bet_from_text(line)
+                if bet_type:
+                    alternatives.append((bet_type, confidence, odds))
+
+    return alternatives[:3]  # Max 3 alternatives
+
+
+def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1):
     """Save prediction to database with category and ML features.
-    Prevents duplicates - only saves first prediction per match per user."""
+
+    Args:
+        bet_rank: 1 = main bet, 2+ = alternatives
+
+    Prevents duplicates - checks for same match + bet_type + bet_rank combination.
+    """
     category = categorize_bet(bet_type)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Check for existing prediction on this match for this user
+    # Check for existing prediction with same match, bet_type and rank
     c.execute("""SELECT id, bet_type FROM predictions
-                 WHERE user_id = ? AND match_id = ?
-                 ORDER BY predicted_at DESC LIMIT 1""", (user_id, match_id))
+                 WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank = ?
+                 LIMIT 1""", (user_id, match_id, bet_type, bet_rank))
     existing = c.fetchone()
 
     if existing:
-        # Already have a prediction for this match - skip duplicate
+        # Already have this exact prediction - skip duplicate
         conn.close()
-        logger.info(f"Skipping duplicate prediction for match {match_id}, existing: {existing[1]}")
+        logger.info(f"Skipping duplicate: match {match_id}, {bet_type}, rank {bet_rank}")
         return existing[0]  # Return existing prediction ID
 
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -953,6 +1240,9 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     # Save ML training data if features provided
     if ml_features and category:
         save_ml_training_data(prediction_id, category, ml_features, target=None)
+
+    rank_label = "MAIN" if bet_rank == 1 else f"ALT{bet_rank-1}"
+    logger.info(f"Saved prediction [{rank_label}]: {home} vs {away}, {bet_type} ({confidence}%)")
 
     return prediction_id
 
@@ -1831,16 +2121,38 @@ def get_user_stats(user_id):
                 "rate": round(cat_correct / cat_decided * 100, 1)
             }
     
-    # Recent predictions
-    c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at 
-                 FROM predictions 
-                 WHERE user_id = ? 
-                 ORDER BY predicted_at DESC 
+    # Recent predictions (main bets only for display)
+    c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at, bet_rank
+                 FROM predictions
+                 WHERE user_id = ?
+                 ORDER BY predicted_at DESC
                  LIMIT 10""", (user_id,))
     recent = c.fetchall()
-    
+
+    # Stats by bet_rank (main vs alternatives)
+    main_stats = {"total": 0, "correct": 0, "decided": 0}
+    alt_stats = {"total": 0, "correct": 0, "decided": 0}
+
+    c.execute("""SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN is_correct IS NOT NULL AND is_correct != 2 THEN 1 ELSE 0 END)
+                 FROM predictions
+                 WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)""", (user_id,))
+    row = c.fetchone()
+    main_stats = {"total": row[0] or 0, "correct": row[1] or 0, "decided": row[2] or 0}
+
+    c.execute("""SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN is_correct IS NOT NULL AND is_correct != 2 THEN 1 ELSE 0 END)
+                 FROM predictions
+                 WHERE user_id = ? AND bet_rank > 1""", (user_id,))
+    row = c.fetchone()
+    alt_stats = {"total": row[0] or 0, "correct": row[1] or 0, "decided": row[2] or 0}
+
     conn.close()
-    
+
     predictions = []
     for r in recent:
         predictions.append({
@@ -1850,13 +2162,18 @@ def get_user_stats(user_id):
             "confidence": r[3],
             "result": r[4],
             "is_correct": r[5],
-            "date": r[6]
+            "date": r[6],
+            "bet_rank": r[7] if len(r) > 7 else 1
         })
-    
+
     # Win rate excluding pushes
     decided = correct + incorrect
     win_rate = (correct / decided * 100) if decided > 0 else 0
-    
+
+    # Calculate rates for main/alt
+    main_rate = (main_stats["correct"] / main_stats["decided"] * 100) if main_stats["decided"] > 0 else 0
+    alt_rate = (alt_stats["correct"] / alt_stats["decided"] * 100) if alt_stats["decided"] > 0 else 0
+
     return {
         "total": total,
         "correct": correct,
@@ -1866,7 +2183,11 @@ def get_user_stats(user_id):
         "pending": total - checked,
         "win_rate": win_rate,
         "categories": categories,
-        "predictions": predictions
+        "predictions": predictions,
+        "main_stats": {"total": main_stats["total"], "correct": main_stats["correct"],
+                       "decided": main_stats["decided"], "rate": main_rate},
+        "alt_stats": {"total": alt_stats["total"], "correct": alt_stats["correct"],
+                      "decided": alt_stats["decided"], "rate": alt_rate}
     }
 
 
@@ -2927,9 +3248,9 @@ RESPONSE FORMAT:
 📝 Почему: [основано на конкретных данных выше]
 
 📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
-1. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
-2. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
-3. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
+[ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
+[ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
+[ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
 
 ⚠️ **РИСКИ:**
 [Конкретные риски на основе данных]
@@ -3375,11 +3696,29 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     decided = stats['correct'] + stats.get('incorrect', 0)
     push_str = f"\n🔄 **Возвраты:** {stats['push']}" if stats.get('push', 0) > 0 else ""
 
+    # Main vs Alt stats display
+    main_s = stats.get("main_stats", {})
+    alt_s = stats.get("alt_stats", {})
+
+    main_display = ""
+    alt_display = ""
+    if main_s.get("decided", 0) > 0:
+        main_emoji = "🎯" if main_s["rate"] >= 50 else "📊"
+        main_display = f"{main_emoji} **Основные:** {main_s['correct']}/{main_s['decided']} ({main_s['rate']:.1f}%)"
+    if alt_s.get("decided", 0) > 0:
+        alt_emoji = "📈" if alt_s["rate"] >= 50 else "📉"
+        alt_display = f"{alt_emoji} **Альтернативы:** {alt_s['correct']}/{alt_s['decided']} ({alt_s['rate']:.1f}%)"
+
+    stats_by_rank = ""
+    if main_display or alt_display:
+        stats_by_rank = f"\n{main_display}\n{alt_display}" if alt_display else f"\n{main_display}"
+
     text = f"""📈 **СТАТИСТИКА**
 
 {win_emoji} **Точность:** {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
 {roi_text}
 {streak_text}
+{stats_by_rank}
 
 📊 **Всего прогнозов:** {stats['total']}
 ✅ **Верных:** {stats['correct']}
@@ -3429,9 +3768,13 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         home_short = p["home"][:10] + ".." if len(p["home"]) > 12 else p["home"]
         away_short = p["away"][:10] + ".." if len(p["away"]) > 12 else p["away"]
-        
+
+        # Show bet rank marker
+        rank = p.get("bet_rank", 1)
+        rank_marker = "" if rank == 1 or rank is None else f" [ALT{rank-1}]"
+
         text += f"{emoji} {home_short} - {away_short}\n"
-        text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
+        text += f"    📊 {p['bet_type']}{rank_marker} ({p['confidence']}%) → {result_text}\n"
     
     refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar"}
     keyboard = [
@@ -3505,7 +3848,7 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -3524,7 +3867,7 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if recs:
         # Add affiliate button
         keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
             [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
         ]
         increment_daily_usage(user_id)
@@ -3544,7 +3887,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, remaining = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -3562,7 +3905,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if recs:
         header = "🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**\n\n"
         keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
             [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend")]
         ]
         increment_daily_usage(user_id)
@@ -3585,10 +3928,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /today - Матчи сегодня
 • /tomorrow - Матчи завтра
 • /live - 🔔 Включить алерты
+• /premium - 💎 Получить премиум
 • /settings - Настройки
-• /favorites - Избранное
 • /stats - Статистика
-• /history - 📜 История прогнозов
 
 **Как пользоваться:**
 1. Напиши название команды (напр. "Ливерпуль")
@@ -3597,7 +3939,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 **Лимиты:**
 • Бесплатно: {FREE_DAILY_LIMIT} прогноза/день
-• Безлимит: сделай депозит по ссылке
+• Премиум: безлимит (/premium)
 
 **Live-алерты:**
 Каждые 10 минут бот проверяет матчи.
@@ -3610,6 +3952,64 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 1X/X2 - Двойной шанс"""
 
     keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show premium options - 1win deposit or crypto payment"""
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    lang = user.get("language", "ru") if user else "ru"
+
+    # Check if already premium
+    is_prem = user.get("is_premium", 0) if user else 0
+    expires = user.get("premium_expires") if user else None
+
+    if is_prem and expires:
+        status_text = f"✅ У тебя премиум до: {expires[:10]}\n\n"
+    else:
+        status_text = ""
+
+    text = f"""💎 **ПРЕМИУМ ДОСТУП**
+
+{status_text}🎯 Безлимитные прогнозы с точностью 70%+
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Вариант 1: Депозит в 1win** 🎰
+Сделай депозит — получи премиум автоматически!
+
+• R$200+ (~$40) → 7 дней
+• R$500+ (~$100) → 30 дней
+• R$1000+ (~$200) → Навсегда
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Вариант 2: Крипта** 💰
+Оплати напрямую — напиши @alex4udak
+
+• $15 USDT → 7 дней
+• $40 USDT → 30 дней
+• $100 USDT → 1 год
+
+**USDT (TRC20):**
+`{CRYPTO_WALLETS['USDT_TRC20']}`
+
+**TON:**
+`{CRYPTO_WALLETS['TON']}`
+
+━━━━━━━━━━━━━━━━━━━━
+После оплаты криптой — скинь скрин @alex4udak"""
+
+    keyboard = [
+        [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
+        [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
+        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+    ]
 
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4054,26 +4454,30 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton(get_text("settings", lang), callback_data="cmd_settings")],
             [InlineKeyboardButton(get_text("favorites", lang), callback_data="cmd_favorites"),
              InlineKeyboardButton(get_text("stats", lang), callback_data="cmd_stats")],
-            [InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
+            [InlineKeyboardButton("💎 Премиум", callback_data="cmd_premium"),
+             InlineKeyboardButton(get_text("help", lang), callback_data="cmd_help")]
         ]
         await query.edit_message_text(f"⚽ **AI Betting Bot v14** - {get_text('choose_action', lang)}",
                                        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_premium":
+        await premium_cmd(update, context)
     
     elif data == "cmd_recommend":
         # Check limit
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         await query.edit_message_text(get_text("analyzing", lang))
         matches = await get_matches(days=7)
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
@@ -4419,24 +4823,24 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         context_type = data.replace("rec_", "")
         await query.edit_message_text(get_text("analyzing", lang))
-        
+
         if context_type == "today":
             matches = await get_matches(date_filter="today")
         elif context_type == "tomorrow":
             matches = await get_matches(date_filter="tomorrow")
         else:
             matches = await get_matches(context_type, days=14)
-        
+
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
             ]
             increment_daily_usage(user_id)
@@ -4694,10 +5098,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         can_use, _ = check_daily_limit(user_id)
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+            keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
-        
+
         await status.edit_text(get_text("analyzing_bets", lang))
         matches = await get_matches(days=7)
         if not matches:
@@ -4706,7 +5110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
         if recs:
             keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
                 [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
             ]
             increment_daily_usage(user_id)
@@ -4746,7 +5150,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     can_use, _ = check_daily_limit(user_id)
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=AFFILIATE_LINK)]]
+        keyboard = [[InlineKeyboardButton(get_text("unlimited", lang), url=get_affiliate_link(user_id))]]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -4899,22 +5303,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
 
-        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
+        # Save MAIN prediction (bet_rank=1)
+        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value, bet_rank=1)
         increment_daily_usage(user_id)
-        logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
+        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
+
+        # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4)
+        alternatives = parse_alternative_bets(analysis)
+        for idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives, start=2):
+            if alt_type and alt_type != bet_type:  # Don't duplicate main bet
+                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds, bet_rank=idx)
+                logger.info(f"Saved ALT{idx-1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
 
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
-    
+
     keyboard = [
-        [InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)],
+        [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
         [InlineKeyboardButton(f"⭐ {home}", callback_data=f"fav_team_{home}"),
          InlineKeyboardButton(f"⭐ {away}", callback_data=f"fav_team_{away}")],
         [InlineKeyboardButton("📊 Ещё рекомендации", callback_data="cmd_recommend")]
     ]
-    
+
     await status.edit_text(header + analysis, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
@@ -5222,7 +5634,7 @@ If no good bet exists, respond: {{"alert": false}}"""
 {get_text("odds", lang)} ~{odds_val}
 {get_text("reason", lang)} {reason}"""
 
-                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=AFFILIATE_LINK)]]
+                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))]]
 
                         await context.bot.send_message(
                             chat_id=user_id,
@@ -5335,22 +5747,69 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
         return
     
     text = f"☀️ **ДАЙДЖЕСТ НА СЕГОДНЯ**\n\n{recs}"
-    
-    keyboard = [
-        [InlineKeyboardButton("🎰 Ставить", url=AFFILIATE_LINK)],
-        [InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]
-    ]
-    
+
     for user_id in live_subscribers:
         try:
+            keyboard = [
+                [InlineKeyboardButton("🎰 Ставить", url=get_affiliate_link(user_id))],
+                [InlineKeyboardButton("📅 Все матчи", callback_data="cmd_today")]
+            ]
             await context.bot.send_message(
-                chat_id=user_id, 
+                chat_id=user_id,
                 text=text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
         except Exception as e:
             logger.error(f"Failed to send digest to {user_id}: {e}")
+
+
+# ===== WEB SERVER FOR POSTBACK =====
+
+from aiohttp import web
+
+async def handle_postback(request):
+    """Handle 1win postback webhook."""
+    try:
+        # Get data from query params or POST body
+        if request.method == "POST":
+            try:
+                data = await request.json()
+            except:
+                data = dict(await request.post())
+        else:
+            data = dict(request.query)
+
+        logger.info(f"Received postback: {data}")
+
+        result = process_1win_postback(data)
+
+        return web.json_response(result)
+    except Exception as e:
+        logger.error(f"Postback error: {e}")
+        return web.json_response({"status": "error", "reason": str(e)}, status=500)
+
+
+async def handle_health(request):
+    """Health check endpoint."""
+    return web.json_response({"status": "ok", "bot": "running"})
+
+
+async def start_web_server():
+    """Start aiohttp web server for postbacks."""
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    app.router.add_get("/health", handle_health)
+    app.router.add_get("/api/1win/postback", handle_postback)
+    app.router.add_post("/api/1win/postback", handle_postback)
+
+    port = int(os.getenv("PORT", 8080))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Web server started on port {port}")
+    print(f"   🌐 Postback endpoint: http://0.0.0.0:{port}/api/1win/postback")
 
 
 # ===== MAIN =====
@@ -5395,6 +5854,7 @@ def main():
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
     app.add_handler(CommandHandler("debug", debug_cmd))
+    app.add_handler(CommandHandler("premium", premium_cmd))
 
     # Admin commands
     app.add_handler(CommandHandler("admin", admin_cmd))
@@ -5426,7 +5886,7 @@ def main():
     print("   • Multi-language (RU/EN/PT/ES)")
     print("   • Daily limit (3 free predictions)")
     print("   • Stats by bet category")
-    print("   • 1win affiliate integration")
+    print("   • 1win affiliate integration + postback")
     print("   • Cup/Top club warnings")
     print(f"   • {len(COMPETITIONS)} leagues (Standard plan)")
     print("   • Live alerts system (persistent)")
@@ -5434,8 +5894,28 @@ def main():
     print("   • Daily digest")
     print("   • Admin-only debug commands")
     print("   • Async API calls (aiohttp)")
-    
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Run both telegram bot and web server
+    async def run_all():
+        # Start web server
+        await start_web_server()
+        # Start telegram bot
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
+        # Keep running until stopped
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await app.updater.stop()
+            await app.stop()
+            await app.shutdown()
+
+    asyncio.run(run_all())
 
 
 if __name__ == "__main__":
