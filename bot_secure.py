@@ -5842,9 +5842,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             text = f"👥 Пользователи ({total} всего, {premium} premium)\n\nПоследние 20:\n"
             for uid, uname, is_prem, created in users:
                 prem_icon = "💎 " if is_prem else ""
-                # Escape underscores in usernames for safety
-                safe_name = uname.replace("_", "\\_") if uname else ""
-                name = f"@{safe_name}" if uname else f"ID:{uid}"
+                name = f"@{uname}" if uname else f"ID:{uid}"
                 date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
                 text += f"• {prem_icon}{name} ({date})\n"
 
@@ -5925,16 +5923,15 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             premium = c.fetchone()[0]
             conn.close()
 
-            text = f"👥 **Источник: {source_filter}**\n({total} всего, {premium} premium)\n\nПоследние 20:\n"
+            text = f"👥 Источник: {source_filter}\n({total} всего, {premium} premium)\n\nПоследние 20:\n"
             for uid, uname, is_prem, created in users:
                 prem_icon = "💎 " if is_prem else ""
-                safe_name = uname.replace("_", "\\_") if uname else ""
-                name = f"@{safe_name}" if uname else f"ID:{uid}"
+                name = f"@{uname}" if uname else f"ID:{uid}"
                 date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
                 text += f"• {prem_icon}{name} ({date})\n"
 
             keyboard = [[InlineKeyboardButton("🔙 К источникам", callback_data="admin_sources")]]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin users by source error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
