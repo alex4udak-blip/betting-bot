@@ -40,11 +40,14 @@ ODDS_API_URL = "https://api.the-odds-api.com/v4"
 # 1WIN Affiliate Link (Universal Router - auto GEO redirect)
 AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
 
-# Crypto wallets for direct payment
+# Crypto wallets for manual payment
 CRYPTO_WALLETS = {
     "USDT_TRC20": "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC",
     "TON": "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL"
 }
+
+# CryptoBot API token (get from @CryptoBot -> Crypto Pay -> My Apps)
+CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
 
 # Crypto prices (in USD)
 CRYPTO_PRICES = {
@@ -738,6 +741,20 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(user_id)
     )''')
 
+    # CryptoBot payments tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS crypto_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        invoice_id TEXT UNIQUE,
+        amount REAL,
+        currency TEXT,
+        days INTEGER,
+        status TEXT DEFAULT 'pending',
+        paid_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -1069,6 +1086,148 @@ def get_affiliate_link(user_id: int) -> str:
         return f"{base_link}&sub1={user_id}"
     else:
         return f"{base_link}?sub1={user_id}"
+
+
+# ===== CRYPTOBOT INTEGRATION =====
+
+CRYPTOBOT_API_URL = "https://pay.crypt.bot/api"
+
+async def create_crypto_invoice(user_id: int, days: int, currency: str = "USDT") -> dict:
+    """Create invoice via CryptoBot API.
+
+    Args:
+        user_id: Telegram user ID
+        days: Premium days (7, 30, 365)
+        currency: USDT or TON
+
+    Returns:
+        dict with invoice_id and pay_url, or error
+    """
+    if not CRYPTOBOT_TOKEN:
+        return {"error": "CryptoBot not configured"}
+
+    amount = CRYPTO_PRICES.get(days, 15)
+
+    # Payload for CryptoBot
+    payload = {
+        "currency_type": "crypto",
+        "asset": currency,
+        "amount": str(amount),
+        "description": f"Premium {days} days - AI Betting Bot",
+        "payload": f"{user_id}:{days}",  # Will be returned in webhook
+        "expires_in": 3600,  # 1 hour to pay
+        "allow_comments": False,
+        "allow_anonymous": False
+    }
+
+    headers = {
+        "Crypto-Pay-API-Token": CRYPTOBOT_TOKEN,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{CRYPTOBOT_API_URL}/createInvoice",
+                json=payload,
+                headers=headers
+            ) as resp:
+                data = await resp.json()
+
+                if data.get("ok"):
+                    invoice = data["result"]
+                    invoice_id = str(invoice["invoice_id"])
+
+                    # Save to database
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute("""
+                        INSERT INTO crypto_payments (user_id, invoice_id, amount, currency, days, status)
+                        VALUES (?, ?, ?, ?, ?, 'pending')
+                    """, (user_id, invoice_id, amount, currency, days))
+                    conn.commit()
+                    conn.close()
+
+                    return {
+                        "invoice_id": invoice_id,
+                        "pay_url": invoice["pay_url"],
+                        "amount": amount,
+                        "currency": currency
+                    }
+                else:
+                    logger.error(f"CryptoBot error: {data}")
+                    return {"error": data.get("error", {}).get("name", "Unknown error")}
+
+    except Exception as e:
+        logger.error(f"CryptoBot API error: {e}")
+        return {"error": str(e)}
+
+
+def process_crypto_webhook(data: dict) -> dict:
+    """Process CryptoBot webhook when payment is completed.
+
+    Args:
+        data: Webhook payload from CryptoBot
+
+    Returns:
+        dict with status
+    """
+    try:
+        update_type = data.get("update_type")
+        if update_type != "invoice_paid":
+            return {"status": "ignored", "reason": "not a payment"}
+
+        payload = data.get("payload", {})
+        invoice_id = str(payload.get("invoice_id", ""))
+        custom_payload = payload.get("payload", "")  # Our "user_id:days" string
+
+        if not invoice_id or not custom_payload:
+            return {"status": "error", "reason": "missing data"}
+
+        # Parse our payload
+        parts = custom_payload.split(":")
+        if len(parts) != 2:
+            return {"status": "error", "reason": "invalid payload format"}
+
+        user_id = int(parts[0])
+        days = int(parts[1])
+
+        # Check if already processed
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT status FROM crypto_payments WHERE invoice_id = ?", (invoice_id,))
+        row = c.fetchone()
+
+        if row and row[0] == "paid":
+            conn.close()
+            return {"status": "already_processed"}
+
+        # Grant premium
+        success = grant_premium(user_id, days)
+
+        if success:
+            # Update payment status
+            c.execute("""
+                UPDATE crypto_payments
+                SET status = 'paid', paid_at = datetime('now')
+                WHERE invoice_id = ?
+            """, (invoice_id,))
+            conn.commit()
+            conn.close()
+
+            logger.info(f"Crypto payment processed: user={user_id}, days={days}, invoice={invoice_id}")
+            return {
+                "status": "success",
+                "user_id": user_id,
+                "days": days
+            }
+        else:
+            conn.close()
+            return {"status": "error", "reason": "failed to grant premium"}
+
+    except Exception as e:
+        logger.error(f"Crypto webhook error: {e}")
+        return {"status": "error", "reason": str(e)}
 
 
 # ===== LIVE SUBSCRIBERS PERSISTENCE =====
@@ -3979,6 +4138,9 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         status_text = ""
 
+    # Check if CryptoBot is configured
+    crypto_enabled = bool(CRYPTOBOT_TOKEN)
+
     text = f"""💎 **ПРЕМИУМ ДОСТУП**
 
 {status_text}🎯 Безлимитные прогнозы с точностью 70%+
@@ -3994,12 +4156,24 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ━━━━━━━━━━━━━━━━━━━━
 
-**Вариант 2: Крипта** 💰
-Оплати напрямую — напиши @alex4udak
+**Вариант 2: Крипта (USDT/TON)** 💰
+{"Выбери тариф ниже — оплата через @CryptoBot" if crypto_enabled else "Напиши @alex4udak для оплаты"}
 
-• $15 USDT → 7 дней
-• $40 USDT → 30 дней
-• $100 USDT → 1 год
+• $15 → 7 дней
+• $40 → 30 дней
+• $100 → 1 год"""
+
+    if crypto_enabled:
+        keyboard = [
+            [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
+            [InlineKeyboardButton("💳 $15 / 7 дней", callback_data="pay_crypto_7"),
+             InlineKeyboardButton("💳 $40 / 30 дней", callback_data="pay_crypto_30")],
+            [InlineKeyboardButton("💳 $100 / 1 год", callback_data="pay_crypto_365")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+        ]
+    else:
+        # Fallback to manual payment
+        text += f"""
 
 **USDT (TRC20):**
 `{CRYPTO_WALLETS['USDT_TRC20']}`
@@ -4007,14 +4181,12 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **TON:**
 `{CRYPTO_WALLETS['TON']}`
 
-━━━━━━━━━━━━━━━━━━━━
-После оплаты криптой — скинь скрин @alex4udak"""
-
-    keyboard = [
-        [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
-        [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
-        [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
-    ]
+После оплаты — скинь скрин @alex4udak"""
+        keyboard = [
+            [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
+            [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
+            [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
+        ]
 
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4480,7 +4652,57 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cmd_premium":
         await premium_cmd(update, context)
-    
+
+    # Crypto payment handlers
+    elif data.startswith("pay_crypto_"):
+        days = int(data.replace("pay_crypto_", ""))
+        await query.edit_message_text("⏳ Создаю счёт на оплату...")
+
+        # Show currency selection
+        keyboard = [
+            [InlineKeyboardButton("💵 USDT", callback_data=f"crypto_pay_{days}_USDT"),
+             InlineKeyboardButton("💎 TON", callback_data=f"crypto_pay_{days}_TON")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="cmd_premium")]
+        ]
+        price = CRYPTO_PRICES.get(days, 15)
+        text = f"""💰 **Выбери валюту**
+
+Тариф: **{days} дней** за **${price}**
+
+Оплата через @CryptoBot — безопасно и мгновенно!"""
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data.startswith("crypto_pay_"):
+        # Format: crypto_pay_{days}_{currency}
+        parts = data.replace("crypto_pay_", "").split("_")
+        days = int(parts[0])
+        currency = parts[1]
+
+        await query.edit_message_text("⏳ Создаю инвойс...")
+
+        # Create invoice via CryptoBot
+        result = await create_crypto_invoice(user_id, days, currency)
+
+        if "error" in result:
+            text = f"❌ Ошибка: {result['error']}\n\nПопробуй позже или напиши @alex4udak"
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_premium")]]
+        else:
+            pay_url = result["pay_url"]
+            amount = result["amount"]
+            text = f"""✅ **Счёт создан!**
+
+💰 Сумма: **{amount} {currency}**
+📅 Тариф: **{days} дней**
+
+Нажми кнопку ниже для оплаты через @CryptoBot.
+После оплаты премиум активируется автоматически!"""
+            keyboard = [
+                [InlineKeyboardButton(f"💳 Оплатить {amount} {currency}", url=pay_url)],
+                [InlineKeyboardButton("🔙 Назад", callback_data="cmd_premium")]
+            ]
+
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
     elif data == "cmd_recommend":
         # Check limit
         can_use, _ = check_daily_limit(user_id)
@@ -4783,6 +5005,149 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "👑 **АДМИН-ПАНЕЛЬ**\n\nИспользуй /admin для полной статистики"
         keyboard = [
             [InlineKeyboardButton("🤖 ML система", callback_data="cmd_mlstatus")],
+            [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_broadcast":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        text = """📢 **Рассылка**
+
+Чтобы отправить сообщение всем пользователям, используй команду:
+
+`/broadcast Ваш текст сообщения`
+
+Пример:
+`/broadcast 🎉 Новая функция! Теперь доступны live-алерты!`"""
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_users":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get recent users
+        c.execute("""
+            SELECT user_id, username, is_premium, created_at
+            FROM users
+            ORDER BY created_at DESC
+            LIMIT 20
+        """)
+        users = c.fetchall()
+
+        # Stats
+        c.execute("SELECT COUNT(*) FROM users")
+        total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE is_premium = 1")
+        premium = c.fetchone()[0]
+        conn.close()
+
+        text = f"""👥 **Пользователи** ({total} всего, {premium} premium)
+
+**Последние 20:**
+"""
+        for uid, uname, is_prem, created in users:
+            prem_icon = "💎" if is_prem else ""
+            name = f"@{uname}" if uname else f"ID:{uid}"
+            date = created[:10] if created else "?"
+            text += f"• {prem_icon}{name} ({date})\n"
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_stats":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Stats by bet type
+        c.execute("""
+            SELECT bet_type,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+                   SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            GROUP BY bet_type
+            ORDER BY total DESC
+        """)
+        by_type = c.fetchall()
+
+        # Stats by confidence range
+        c.execute("""
+            SELECT
+                CASE
+                    WHEN confidence >= 75 THEN '75%+'
+                    WHEN confidence >= 70 THEN '70-74%'
+                    WHEN confidence >= 65 THEN '65-69%'
+                    ELSE '<65%'
+                END as conf_range,
+                COUNT(*) as total,
+                SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            GROUP BY conf_range
+            ORDER BY conf_range DESC
+        """)
+        by_conf = c.fetchall()
+
+        # ROI calculation
+        c.execute("""
+            SELECT
+                SUM(CASE WHEN is_correct = 1 THEN (odds - 1) ELSE -1 END) as profit,
+                COUNT(*) as bets
+            FROM predictions
+            WHERE is_correct IS NOT NULL AND odds > 0
+        """)
+        roi_row = c.fetchone()
+        profit = roi_row[0] or 0
+        total_bets = roi_row[1] or 1
+        roi = round(profit / total_bets * 100, 1)
+
+        conn.close()
+
+        text = f"""📊 **Детальная статистика**
+
+**По типу ставки:**
+"""
+        for bet_type, total, correct, wrong in by_type:
+            acc = round(correct / total * 100, 1) if total > 0 else 0
+            text += f"• {bet_type}: {correct}/{total} ({acc}%)\n"
+
+        text += f"""
+**По уверенности:**
+"""
+        for conf_range, total, correct in by_conf:
+            acc = round(correct / total * 100, 1) if total > 0 else 0
+            text += f"• {conf_range}: {correct}/{total} ({acc}%)\n"
+
+        text += f"""
+**ROI:** {roi}% (profit: {profit:.1f} units)
+"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "cmd_admin":
+        # Return to admin panel (simplified)
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        text = "👑 **АДМИН-ПАНЕЛЬ**\n\nИспользуй /admin для полной статистики"
+        keyboard = [
+            [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+             InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
+            [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats")],
+            [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
             [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -5813,6 +6178,28 @@ async def handle_health(request):
     return web.json_response({"status": "ok", "bot": "running"})
 
 
+async def handle_crypto_webhook(request):
+    """Handle CryptoBot payment webhook."""
+    try:
+        data = await request.json()
+        logger.info(f"Received crypto webhook: {data}")
+
+        result = process_crypto_webhook(data)
+
+        # If payment successful, notify user via bot
+        if result.get("status") == "success":
+            user_id = result.get("user_id")
+            days = result.get("days")
+            if user_id:
+                # We'll need to send notification via bot - store for later
+                logger.info(f"Premium granted via crypto: user={user_id}, days={days}")
+
+        return web.json_response(result)
+    except Exception as e:
+        logger.error(f"Crypto webhook error: {e}")
+        return web.json_response({"status": "error", "reason": str(e)}, status=500)
+
+
 async def start_web_server():
     """Start aiohttp web server for postbacks."""
     app = web.Application()
@@ -5820,6 +6207,7 @@ async def start_web_server():
     app.router.add_get("/health", handle_health)
     app.router.add_get("/api/1win/postback", handle_postback)
     app.router.add_post("/api/1win/postback", handle_postback)
+    app.router.add_post("/api/crypto/webhook", handle_crypto_webhook)
 
     port = int(os.getenv("PORT", 8080))
     runner = web.AppRunner(app)
@@ -5827,7 +6215,8 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logger.info(f"Web server started on port {port}")
-    print(f"   🌐 Postback endpoint: http://0.0.0.0:{port}/api/1win/postback")
+    print(f"   🌐 1win postback: http://0.0.0.0:{port}/api/1win/postback")
+    print(f"   🌐 Crypto webhook: http://0.0.0.0:{port}/api/crypto/webhook")
 
 
 # ===== MAIN =====
