@@ -972,6 +972,10 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN premium_expires TEXT")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN source TEXT DEFAULT 'organic'")
+    except:
+        pass
 
     # 1win deposits tracking
     c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
@@ -1064,12 +1068,12 @@ def get_user(user_id):
         }
     return None
 
-def create_user(user_id, username=None, language="ru"):
+def create_user(user_id, username=None, language="ru", source="organic"):
     """Create new user"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, username, language) VALUES (?, ?, ?)", 
-              (user_id, username, language))
+    c.execute("INSERT OR IGNORE INTO users (user_id, username, language, source) VALUES (?, ?, ?, ?)",
+              (user_id, username, language, source))
     conn.commit()
     conn.close()
 
@@ -4150,8 +4154,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     existing_user = get_user(user.id)
 
-    # Check for referral link (t.me/bot?start=ref_12345)
+    # Check for referral link (t.me/bot?start=ref_12345) or UTM source (t.me/bot?start=push_ai)
     referrer_id = None
+    utm_source = "organic"
     if context.args and len(context.args) > 0:
         arg = context.args[0]
         if arg.startswith("ref_"):
@@ -4165,6 +4170,13 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"Referral detected: {referrer_id} -> {user.id}")
             except ValueError:
                 pass
+        else:
+            # Non-referral start parameter is treated as UTM source
+            utm_source = arg[:50]  # Limit length for safety
+            logger.info(f"UTM source detected: {utm_source} for user {user.id}")
+
+    # Store UTM source for later use when creating user
+    context.user_data["utm_source"] = utm_source
 
     if not existing_user:
         # NEW USER - show language selection first
@@ -5073,7 +5085,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
          InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
-        [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats"),
+         InlineKeyboardButton("📈 Источники", callback_data="admin_sources")],
         [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
         [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
@@ -5338,9 +5351,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_user = query.from_user
         detected_tz = detect_timezone(tg_user)
 
-        # Create user with selected language
-        create_user(user_id, tg_user.username, selected_lang)
+        # Get UTM source from context (set during /start)
+        utm_source = context.user_data.get("utm_source", "organic")
+
+        # Create user with selected language and source
+        create_user(user_id, tg_user.username, selected_lang, source=utm_source)
         update_user_settings(user_id, timezone=detected_tz)
+        logger.info(f"New user created: {user_id}, lang={selected_lang}, source={utm_source}")
 
         # Save referral if exists
         referrer_id = context.user_data.get("referrer_id")
@@ -5824,6 +5841,91 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin users error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+
+    elif data == "admin_sources" or data.startswith("admin_sources_filter_"):
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # Get stats by source
+            c.execute("""
+                SELECT
+                    COALESCE(source, 'organic') as src,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_premium = 1 THEN 1 ELSE 0 END) as premium_count
+                FROM users
+                GROUP BY src
+                ORDER BY total DESC
+            """)
+            sources = c.fetchall()
+
+            # Total users
+            c.execute("SELECT COUNT(*) FROM users")
+            total_users = c.fetchone()[0]
+            conn.close()
+
+            text = f"📈 **Статистика по источникам**\n\nВсего юзеров: {total_users}\n\n"
+
+            keyboard_rows = []
+            for src, count, prem in sources:
+                pct = round(count / total_users * 100, 1) if total_users > 0 else 0
+                prem_str = f" ({prem}💎)" if prem > 0 else ""
+                text += f"• **{src}**: {count} ({pct}%){prem_str}\n"
+                # Add filter button for each source
+                keyboard_rows.append([InlineKeyboardButton(
+                    f"👥 {src} ({count})",
+                    callback_data=f"admin_users_src_{src[:20]}"
+                )])
+
+            keyboard_rows.append([InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_rows), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin sources error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+
+    elif data.startswith("admin_users_src_"):
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        try:
+            source_filter = data.replace("admin_users_src_", "")
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # Get users by source
+            c.execute("""
+                SELECT user_id, username, is_premium, created_at
+                FROM users
+                WHERE COALESCE(source, 'organic') = ?
+                ORDER BY COALESCE(created_at, '1970-01-01') DESC
+                LIMIT 20
+            """, (source_filter,))
+            users = c.fetchall()
+
+            c.execute("SELECT COUNT(*) FROM users WHERE COALESCE(source, 'organic') = ?", (source_filter,))
+            total = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM users WHERE COALESCE(source, 'organic') = ? AND is_premium = 1", (source_filter,))
+            premium = c.fetchone()[0]
+            conn.close()
+
+            text = f"👥 **Источник: {source_filter}**\n({total} всего, {premium} premium)\n\nПоследние 20:\n"
+            for uid, uname, is_prem, created in users:
+                prem_icon = "💎 " if is_prem else ""
+                safe_name = uname.replace("_", "\\_") if uname else ""
+                name = f"@{safe_name}" if uname else f"ID:{uid}"
+                date = (created[:10] if created and len(created) >= 10 else "?") if created else "?"
+                text += f"• {prem_icon}{name} ({date})\n"
+
+            keyboard = [[InlineKeyboardButton("🔙 К источникам", callback_data="admin_sources")]]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin users by source error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
     elif data == "admin_stats":
