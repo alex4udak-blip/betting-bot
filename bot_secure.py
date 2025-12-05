@@ -906,11 +906,25 @@ def categorize_bet(bet_type):
     return "other"
 
 def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None):
-    """Save prediction to database with category and ML features"""
+    """Save prediction to database with category and ML features.
+    Prevents duplicates - only saves first prediction per match per user."""
     category = categorize_bet(bet_type)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+
+    # Check for existing prediction on this match for this user
+    c.execute("""SELECT id, bet_type FROM predictions
+                 WHERE user_id = ? AND match_id = ?
+                 ORDER BY predicted_at DESC LIMIT 1""", (user_id, match_id))
+    existing = c.fetchone()
+
+    if existing:
+        # Already have a prediction for this match - skip duplicate
+        conn.close()
+        logger.info(f"Skipping duplicate prediction for match {match_id}, existing: {existing[1]}")
+        return existing[0]  # Return existing prediction ID
+
     c.execute("""INSERT INTO predictions
                  (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -956,6 +970,91 @@ def update_prediction_result(pred_id, result, is_correct):
 
         # Check if we should train models
         check_and_train_models()
+
+
+def clean_duplicate_predictions() -> dict:
+    """Remove duplicate predictions, keeping only the first one per match per user.
+    Returns stats about what was cleaned."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Find duplicates (same user_id + match_id, keep oldest)
+    c.execute("""
+        SELECT user_id, match_id, COUNT(*) as cnt, MIN(id) as keep_id
+        FROM predictions
+        GROUP BY user_id, match_id
+        HAVING cnt > 1
+    """)
+    duplicates = c.fetchall()
+
+    deleted_count = 0
+    affected_matches = 0
+
+    for user_id, match_id, count, keep_id in duplicates:
+        # Delete all except the first one
+        c.execute("""DELETE FROM predictions
+                     WHERE user_id = ? AND match_id = ? AND id != ?""",
+                  (user_id, match_id, keep_id))
+        deleted_count += c.rowcount
+        affected_matches += 1
+
+    # Also clean orphaned ml_training_data
+    c.execute("""DELETE FROM ml_training_data
+                 WHERE prediction_id NOT IN (SELECT id FROM predictions)""")
+    orphaned_ml = c.rowcount
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"Cleaned {deleted_count} duplicates from {affected_matches} matches, {orphaned_ml} orphaned ML records")
+
+    return {
+        "deleted": deleted_count,
+        "matches_affected": affected_matches,
+        "orphaned_ml_cleaned": orphaned_ml
+    }
+
+
+def get_clean_stats() -> dict:
+    """Get accuracy stats counting only FIRST prediction per match (no duplicates)."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get unique predictions (first per user+match)
+    c.execute("""
+        WITH unique_preds AS (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id, match_id ORDER BY predicted_at ASC) as rn
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+        )
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+        FROM unique_preds WHERE rn = 1
+    """)
+    row = c.fetchone()
+    total = row[0] or 0
+    correct = row[1] or 0
+
+    # Current stats (with duplicates)
+    c.execute("""SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+                 FROM predictions WHERE is_correct IS NOT NULL""")
+    row2 = c.fetchone()
+    total_with_dups = row2[0] or 0
+    correct_with_dups = row2[1] or 0
+
+    conn.close()
+
+    return {
+        "clean_total": total,
+        "clean_correct": correct,
+        "clean_accuracy": round(correct / total * 100, 1) if total > 0 else 0,
+        "with_dups_total": total_with_dups,
+        "with_dups_correct": correct_with_dups,
+        "with_dups_accuracy": round(correct_with_dups / total_with_dups * 100, 1) if total_with_dups > 0 else 0,
+        "duplicates_count": total_with_dups - total
+    }
+
 
 def check_bet_result(bet_type, home_score, away_score):
     """Check if bet was correct based on score"""
@@ -3232,6 +3331,12 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.close()
 
+    # Get clean stats (without duplicates)
+    clean = get_clean_stats()
+    duplicates_info = ""
+    if clean["duplicates_count"] > 0:
+        duplicates_info = f"\n⚠️ **Дубликаты:** {clean['duplicates_count']} (искажают статистику!)"
+
     text = f"""👑 **АДМИН-ПАНЕЛЬ**
 
 📊 **Статистика бота:**
@@ -3244,13 +3349,16 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ├ Всего: {total_predictions}
 ├ Проверенных: {verified}
 ├ Верных: {correct}
-└ Точность: {accuracy}%
+└ Точность (сырая): {accuracy}%
+
+📈 **Чистая статистика (без дубликатов):**
+├ Уникальных: {clean['clean_total']}
+├ Верных: {clean['clean_correct']}
+└ **Реальная точность: {clean['clean_accuracy']}%**{duplicates_info}
 
 ⚙️ **Админ-команды:**
 • /broadcast текст - Рассылка всем
 • /addpremium ID - Дать премиум
-• /removepremium ID - Убрать премиум
-• /userinfo ID - Инфо о юзере
 • /checkresults - Проверить результаты
 
 🔧 **Система:**
@@ -3261,6 +3369,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
          InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
         [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
         [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
 
@@ -3759,6 +3868,26 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🤖 ML система", callback_data="cmd_mlstatus")],
             [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
         ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_clean_dups":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+        # Clean duplicate predictions
+        result = clean_duplicate_predictions()
+        if result["deleted"] > 0:
+            text = f"""🧹 **Дубликаты очищены!**
+
+├ Удалено прогнозов: {result['deleted']}
+├ Затронуто матчей: {result['matches_affected']}
+└ ML записей очищено: {result['orphaned_ml_cleaned']}
+
+📊 Статистика теперь точная!"""
+        else:
+            text = "✅ Дубликатов не найдено!"
+
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     # League selection
