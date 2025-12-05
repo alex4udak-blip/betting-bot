@@ -1977,10 +1977,25 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     existing = c.fetchone()
 
     if existing:
-        # Already have this exact prediction - skip duplicate
+        # Already have this exact prediction - but check if ML data exists
+        existing_id = existing[0]
         conn.close()
         logger.info(f"Skipping duplicate: match {match_id}, {bet_type}, rank {bet_rank}")
-        return existing[0]  # Return existing prediction ID
+
+        # IMPORTANT: Still save ML data if features provided but not saved before
+        if ml_features and category:
+            # Check if ML data exists for this prediction
+            conn2 = sqlite3.connect(DB_PATH)
+            c2 = conn2.cursor()
+            c2.execute("SELECT id FROM ml_training_data WHERE prediction_id = ?", (existing_id,))
+            ml_exists = c2.fetchone()
+            conn2.close()
+
+            if not ml_exists:
+                save_ml_training_data(existing_id, category, ml_features, target=None, bet_rank=bet_rank)
+                logger.info(f"Added missing ML data for existing prediction {existing_id}")
+
+        return existing_id  # Return existing prediction ID
 
     c.execute("""INSERT INTO predictions
                  (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank)
@@ -2545,13 +2560,18 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
 
 def save_ml_training_data(prediction_id: int, bet_category: str, features: dict, target: int = None, bet_rank: int = 1):
     """Save features for ML training with bet rank (1=MAIN, 2+=ALT)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target, bet_rank)
-                 VALUES (?, ?, ?, ?, ?)""",
-              (prediction_id, bet_category, json.dumps(features), target, bet_rank))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target, bet_rank)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (prediction_id, bet_category, json.dumps(features), target, bet_rank))
+        conn.commit()
+        ml_id = c.lastrowid
+        conn.close()
+        logger.info(f"✅ ML data saved: id={ml_id}, pred={prediction_id}, cat={bet_category}, rank={bet_rank}, features={len(features)} keys")
+    except Exception as e:
+        logger.error(f"❌ Failed to save ML data: {e}")
 
 
 def update_ml_training_target(prediction_id: int, target: int):
@@ -3647,7 +3667,7 @@ async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
         params = {
             "apiKey": ODDS_API_KEY,
             "regions": "eu",
-            "markets": "h2h,spreads,totals",
+            "markets": "h2h,spreads,totals,btts",
             "oddsFormat": "decimal"
         }
         async with session.get(url, params=params) as r:
@@ -3681,6 +3701,10 @@ async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
                                         # Format: "Team (+1.5)" or "Team (-0.5)"
                                         sign = "+" if point > 0 else ""
                                         odds[f"{name} ({sign}{point})"] = outcome.get("price")
+                                elif market.get("key") == "btts":
+                                    for outcome in market.get("outcomes", []):
+                                        name = outcome.get("name")  # "Yes" or "No"
+                                        odds[f"BTTS_{name}"] = outcome.get("price")
                         return odds
     except Exception as e:
         logger.error(f"Odds error: {e}")
@@ -7063,7 +7087,7 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                 # Mark this match as alerted to prevent duplicates
                 if match_id:
                     sent_alerts[match_id] = datetime.now()
-                    logger.info(f"Alert triggered for match {match_id}: {home} vs {away}, {bet_type} ({confidence}%)")
+                    logger.info(f"✅ Alert triggered for match {match_id}: {home} vs {away}, {bet_type} ({confidence}%), ml_features={'yes' if ml_features else 'no'}")
 
                 # Send to each subscriber in their language
                 for user_id in live_subscribers:
@@ -7103,7 +7127,10 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                             logger.info(f"Live alert prediction saved: {home} vs {away}, {bet_type} for user {user_id}, features={'yes' if ml_features else 'no'}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
-                        
+            else:
+                # Log why no alert was sent
+                logger.info(f"⚠️ No alert for {home} vs {away}: Claude said no good bet")
+
         except Exception as e:
             logger.error(f"Claude error: {e}")
         
