@@ -249,6 +249,23 @@ TRANSLATIONS = {
         "referral_copy": "👆 Нажми на ссылку, чтобы скопировать",
         "referral_rules": "📋 **Правила:**\n• За каждого друга, который купит премиум — **+3 дня** тебе\n• Бонус начисляется автоматически",
         "referral_welcome": "🎁 Тебя пригласил друг! Получи бонус при покупке премиума.",
+        "referral_reminder": "👥 **Приглашай друзей!**\n\nЗа каждого друга с премиумом получишь **+3 дня** бесплатно!\n\n🔗 Твоя ссылка: `{link}`",
+        # Streak system
+        "streak_title": "🔥 **Твоя серия: {days} дней!**",
+        "streak_bonus": "🎁 Бонус за серию: **+{bonus}** к точности прогнозов!",
+        "streak_lost": "😢 Серия потеряна! Начинай заново.",
+        "streak_record": "🏆 Твой рекорд: {record} дней",
+        "streak_milestone": "🎉 **{days} дней подряд!** Ты в огне! 🔥",
+        # Social proof
+        "social_wins_today": "🏆 **Сегодня выиграли {count} юзеров!**",
+        "social_total_wins": "📊 Всего выигрышей за неделю: **{count}**",
+        "social_top_win": "💰 Лучший выигрыш дня: **{odds}x** на {match}!",
+        "social_accuracy": "🎯 Точность прогнозов за неделю: **{accuracy}%**",
+        "social_friend_won": "🎉 Твой друг **{name}** выиграл ставку!\n\n{match}\n⚡ {bet} @ {odds}\n\n👥 Приглашай ещё друзей: /ref",
+        # Notifications
+        "notif_welcome_back": "👋 С возвращением! Вот топ ставки на сегодня:",
+        "notif_hot_match": "🔥 **Горячий матч через {hours}ч!**\n\n{match}\n📊 Уверенность: {confidence}%",
+        "notif_daily_digest": "📊 **Твоя статистика за день:**\n• Прогнозов: {predictions}\n• Выигрышей: {wins}\n• Серия: {streak} дней 🔥",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -339,6 +356,23 @@ TRANSLATIONS = {
         "referral_copy": "👆 Tap the link to copy",
         "referral_rules": "📋 **Rules:**\n• For each friend who buys premium — **+3 days** for you\n• Bonus is granted automatically",
         "referral_welcome": "🎁 You were invited by a friend! Get a bonus when buying premium.",
+        "referral_reminder": "👥 **Invite friends!**\n\nGet **+3 days** free for each friend with premium!\n\n🔗 Your link: `{link}`",
+        # Streak system
+        "streak_title": "🔥 **Your streak: {days} days!**",
+        "streak_bonus": "🎁 Streak bonus: **+{bonus}** prediction accuracy!",
+        "streak_lost": "😢 Streak lost! Start again.",
+        "streak_record": "🏆 Your record: {record} days",
+        "streak_milestone": "🎉 **{days} days in a row!** You're on fire! 🔥",
+        # Social proof
+        "social_wins_today": "🏆 **{count} users won today!**",
+        "social_total_wins": "📊 Total wins this week: **{count}**",
+        "social_top_win": "💰 Best win today: **{odds}x** on {match}!",
+        "social_accuracy": "🎯 Weekly prediction accuracy: **{accuracy}%**",
+        "social_friend_won": "🎉 Your friend **{name}** won a bet!\n\n{match}\n⚡ {bet} @ {odds}\n\n👥 Invite more friends: /ref",
+        # Notifications
+        "notif_welcome_back": "👋 Welcome back! Here are today's top bets:",
+        "notif_hot_match": "🔥 **Hot match in {hours}h!**\n\n{match}\n📊 Confidence: {confidence}%",
+        "notif_daily_digest": "📊 **Your daily stats:**\n• Predictions: {predictions}\n• Wins: {wins}\n• Streak: {streak} days 🔥",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -429,6 +463,23 @@ TRANSLATIONS = {
         "referral_copy": "👆 Toque no link para copiar",
         "referral_rules": "📋 **Regras:**\n• Para cada amigo que comprar premium — **+3 dias** para você\n• Bônus é concedido automaticamente",
         "referral_welcome": "🎁 Você foi convidado por um amigo! Ganhe bônus ao comprar premium.",
+        "referral_reminder": "👥 **Convide amigos!**\n\nGanhe **+3 dias** grátis para cada amigo com premium!\n\n🔗 Seu link: `{link}`",
+        # Streak system
+        "streak_title": "🔥 **Sua sequência: {days} dias!**",
+        "streak_bonus": "🎁 Bônus de sequência: **+{bonus}** precisão!",
+        "streak_lost": "😢 Sequência perdida! Comece de novo.",
+        "streak_record": "🏆 Seu recorde: {record} dias",
+        "streak_milestone": "🎉 **{days} dias seguidos!** Você está on fire! 🔥",
+        # Social proof
+        "social_wins_today": "🏆 **{count} usuários ganharam hoje!**",
+        "social_total_wins": "📊 Total de vitórias esta semana: **{count}**",
+        "social_top_win": "💰 Melhor vitória de hoje: **{odds}x** em {match}!",
+        "social_accuracy": "🎯 Precisão semanal: **{accuracy}%**",
+        "social_friend_won": "🎉 Seu amigo **{name}** ganhou uma aposta!\n\n{match}\n⚡ {bet} @ {odds}\n\n👥 Convide mais amigos: /ref",
+        # Notifications
+        "notif_welcome_back": "👋 Bem-vindo de volta! Aqui estão as melhores apostas de hoje:",
+        "notif_hot_match": "🔥 **Jogo quente em {hours}h!**\n\n{match}\n📊 Confiança: {confidence}%",
+        "notif_daily_digest": "📊 **Suas estatísticas do dia:**\n• Previsões: {predictions}\n• Vitórias: {wins}\n• Sequência: {streak} dias 🔥",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -519,6 +570,23 @@ TRANSLATIONS = {
         "referral_copy": "👆 Toca el enlace para copiar",
         "referral_rules": "📋 **Reglas:**\n• Por cada amigo que compre premium — **+3 días** para ti\n• El bono se otorga automáticamente",
         "referral_welcome": "🎁 ¡Fuiste invitado por un amigo! Obtén un bono al comprar premium.",
+        "referral_reminder": "👥 **¡Invita amigos!**\n\n¡Obtén **+3 días** gratis por cada amigo con premium!\n\n🔗 Tu enlace: `{link}`",
+        # Streak system
+        "streak_title": "🔥 **Tu racha: {days} días!**",
+        "streak_bonus": "🎁 Bono de racha: **+{bonus}** precisión!",
+        "streak_lost": "😢 ¡Racha perdida! Empieza de nuevo.",
+        "streak_record": "🏆 Tu récord: {record} días",
+        "streak_milestone": "🎉 **¡{days} días seguidos!** ¡Estás en fuego! 🔥",
+        # Social proof
+        "social_wins_today": "🏆 **¡{count} usuarios ganaron hoy!**",
+        "social_total_wins": "📊 Total de victorias esta semana: **{count}**",
+        "social_top_win": "💰 Mejor victoria de hoy: **{odds}x** en {match}!",
+        "social_accuracy": "🎯 Precisión semanal: **{accuracy}%**",
+        "social_friend_won": "🎉 ¡Tu amigo **{name}** ganó una apuesta!\n\n{match}\n⚡ {bet} @ {odds}\n\n👥 Invita más amigos: /ref",
+        # Notifications
+        "notif_welcome_back": "👋 ¡Bienvenido de vuelta! Aquí están las mejores apuestas de hoy:",
+        "notif_hot_match": "🔥 **¡Partido caliente en {hours}h!**\n\n{match}\n📊 Confianza: {confidence}%",
+        "notif_daily_digest": "📊 **Tus estadísticas del día:**\n• Pronósticos: {predictions}\n• Victorias: {wins}\n• Racha: {streak} días 🔥",
     }
 }
 
@@ -830,6 +898,20 @@ def init_db():
     # Add referred_by column to users table
     try:
         c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
+    except:
+        pass
+
+    # Add streak columns
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN streak_days INTEGER DEFAULT 0")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN streak_record INTEGER DEFAULT 0")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN last_streak_date TEXT")
     except:
         pass
 
@@ -1193,6 +1275,189 @@ def grant_referral_bonus(referred_user_id: int) -> Optional[int]:
     except Exception as e:
         logger.error(f"Error granting referral bonus: {e}")
         return None
+
+
+# ===== STREAK SYSTEM =====
+
+def update_user_streak(user_id: int) -> dict:
+    """Update user's daily streak. Returns streak info."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        c.execute("""SELECT streak_days, streak_record, last_streak_date
+                     FROM users WHERE user_id = ?""", (user_id,))
+        row = c.fetchone()
+
+        if not row:
+            conn.close()
+            return {"streak": 0, "record": 0, "milestone": False}
+
+        current_streak = row[0] or 0
+        record = row[1] or 0
+        last_date = row[2] or ""
+
+        milestone = False
+
+        if last_date == today:
+            # Already updated today
+            conn.close()
+            return {"streak": current_streak, "record": record, "milestone": False}
+        elif last_date == yesterday:
+            # Continue streak
+            current_streak += 1
+            if current_streak > record:
+                record = current_streak
+            # Check for milestones (3, 7, 14, 30 days)
+            if current_streak in [3, 7, 14, 30]:
+                milestone = True
+        else:
+            # Streak broken
+            current_streak = 1
+
+        c.execute("""UPDATE users SET streak_days = ?, streak_record = ?, last_streak_date = ?
+                     WHERE user_id = ?""", (current_streak, record, today, user_id))
+        conn.commit()
+        conn.close()
+
+        return {"streak": current_streak, "record": record, "milestone": milestone}
+    except Exception as e:
+        logger.error(f"Error updating streak: {e}")
+        return {"streak": 0, "record": 0, "milestone": False}
+
+
+def get_user_streak(user_id: int) -> dict:
+    """Get user's current streak without updating."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""SELECT streak_days, streak_record FROM users WHERE user_id = ?""", (user_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if row:
+            return {"streak": row[0] or 0, "record": row[1] or 0}
+        return {"streak": 0, "record": 0}
+    except Exception as e:
+        logger.error(f"Error getting streak: {e}")
+        return {"streak": 0, "record": 0}
+
+
+# ===== SOCIAL PROOF =====
+
+def get_social_stats() -> dict:
+    """Get social proof statistics."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+        # Wins today
+        c.execute("""SELECT COUNT(DISTINCT user_id) FROM predictions
+                     WHERE is_correct = 1 AND date(checked_at) = ?""", (today,))
+        wins_today = c.fetchone()[0] or 0
+
+        # Total wins this week
+        c.execute("""SELECT COUNT(*) FROM predictions
+                     WHERE is_correct = 1 AND date(checked_at) >= ?""", (week_ago,))
+        wins_week = c.fetchone()[0] or 0
+
+        # Weekly accuracy
+        c.execute("""SELECT COUNT(*) FROM predictions
+                     WHERE is_correct IS NOT NULL AND date(checked_at) >= ?""", (week_ago,))
+        total_checked = c.fetchone()[0] or 0
+
+        c.execute("""SELECT COUNT(*) FROM predictions
+                     WHERE is_correct = 1 AND date(checked_at) >= ?""", (week_ago,))
+        correct = c.fetchone()[0] or 0
+
+        accuracy = (correct / total_checked * 100) if total_checked > 0 else 0
+
+        # Best win today (highest odds)
+        c.execute("""SELECT home_team, away_team, odds FROM predictions
+                     WHERE is_correct = 1 AND date(checked_at) = ?
+                     ORDER BY odds DESC LIMIT 1""", (today,))
+        best_win = c.fetchone()
+
+        conn.close()
+
+        return {
+            "wins_today": wins_today,
+            "wins_week": wins_week,
+            "accuracy": round(accuracy, 1),
+            "best_win": {
+                "match": f"{best_win[0]} vs {best_win[1]}" if best_win else None,
+                "odds": best_win[2] if best_win else None
+            } if best_win else None
+        }
+    except Exception as e:
+        logger.error(f"Error getting social stats: {e}")
+        return {"wins_today": 0, "wins_week": 0, "accuracy": 0, "best_win": None}
+
+
+def get_friend_wins(user_id: int) -> list:
+    """Get recent wins from user's referrals (friends)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get user's referrals who won recently
+        c.execute("""
+            SELECT u.username, u.first_name, p.home_team, p.away_team, p.bet_type, p.odds
+            FROM referrals r
+            JOIN users u ON r.referred_id = u.user_id
+            JOIN predictions p ON p.user_id = r.referred_id
+            WHERE r.referrer_id = ?
+            AND p.is_correct = 1
+            AND p.checked_at >= datetime('now', '-24 hours')
+            ORDER BY p.checked_at DESC
+            LIMIT 3
+        """, (user_id,))
+
+        wins = []
+        for row in c.fetchall():
+            username, first_name, home, away, bet, odds = row
+            name = username or first_name or "Друг"
+            wins.append({
+                "name": name,
+                "match": f"{home} vs {away}",
+                "bet": bet,
+                "odds": odds
+            })
+
+        conn.close()
+        return wins
+    except Exception as e:
+        logger.error(f"Error getting friend wins: {e}")
+        return []
+
+
+# ===== MARKETING NOTIFICATIONS =====
+
+# Track when last notification was sent per type
+notification_cooldowns = {}
+
+def should_send_notification(user_id: int, notif_type: str, cooldown_hours: int = 24) -> bool:
+    """Check if we should send this notification type to user."""
+    key = f"{user_id}_{notif_type}"
+    last_sent = notification_cooldowns.get(key)
+
+    if last_sent is None:
+        return True
+
+    hours_passed = (datetime.now() - last_sent).total_seconds() / 3600
+    return hours_passed >= cooldown_hours
+
+
+def mark_notification_sent(user_id: int, notif_type: str):
+    """Mark notification as sent."""
+    key = f"{user_id}_{notif_type}"
+    notification_cooldowns[key] = datetime.now()
 
 
 def process_1win_postback(data: dict) -> dict:
@@ -4244,13 +4509,26 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recs = await get_recommendations_enhanced(matches, user_query, user, lang=lang)
     
     if recs:
-        # Add affiliate button
+        # Add social proof header
+        social_stats = get_social_stats()
+        streak_info = get_user_streak(user_id)
+
+        social_header = ""
+        if social_stats["wins_today"] > 0:
+            social_header = f"🏆 {get_text('social_wins_today', lang).format(count=social_stats['wins_today'])}\n"
+        if streak_info["streak"] > 1:
+            social_header += f"{get_text('streak_title', lang).format(days=streak_info['streak'])}\n"
+        if social_header:
+            social_header += "\n"
+
+        # Add affiliate button with referral
         keyboard = [
             [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today")]
+            [InlineKeyboardButton("📅 Сегодня", callback_data="cmd_today"),
+             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
         ]
         increment_daily_usage(user_id)
-        await status.edit_text(recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
         await status.edit_text("❌ Ошибка анализа.")
 
@@ -4285,10 +4563,17 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recs = await get_recommendations_enhanced(matches, "", user, lang=lang, min_confidence=75)
 
     if recs:
-        header = "🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**\n\n"
+        # Add social proof
+        social_stats = get_social_stats()
+        accuracy_text = ""
+        if social_stats["accuracy"] > 0:
+            accuracy_text = f"\n{get_text('social_accuracy', lang).format(accuracy=social_stats['accuracy'])}\n"
+
+        header = f"🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**{accuracy_text}\n"
         keyboard = [
             [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend")]
+            [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend"),
+             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
         ]
         increment_daily_usage(user_id)
         await status.edit_text(header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4311,6 +4596,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /tomorrow - Матчи завтра
 • /live - 🔔 Включить алерты
 • /premium - 💎 Получить премиум
+• /ref - 👥 Пригласи друзей (+3 дня бесплатно!)
 • /settings - Настройки
 • /stats - Статистика
 
@@ -4359,6 +4645,9 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if CryptoBot is configured
     crypto_enabled = bool(CRYPTOBOT_TOKEN)
 
+    # Get referral stats
+    ref_stats = get_referral_stats(user_id)
+
     text = f"""💎 **ПРЕМИУМ ДОСТУП**
 
 {status_text}🎯 Безлимитные прогнозы с точностью 70%+
@@ -4379,7 +4668,13 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 • $15 → 7 дней
 • $40 → 30 дней
-• $100 → 1 год"""
+• $100 → 1 год
+
+━━━━━━━━━━━━━━━━━━━━
+
+👥 **Бесплатный способ!**
+Приглашай друзей — получай **+3 дня** за каждого!
+{"Уже заработано: **" + str(ref_stats['earned_days']) + " дней**" if ref_stats['earned_days'] > 0 else "Нажми кнопку ниже 👇"}"""
 
     if crypto_enabled:
         keyboard = [
@@ -4387,6 +4682,7 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💳 $15 / 7 дней", callback_data="pay_crypto_7"),
              InlineKeyboardButton("💳 $40 / 30 дней", callback_data="pay_crypto_30")],
             [InlineKeyboardButton("💳 $100 / 1 год", callback_data="pay_crypto_365")],
+            [InlineKeyboardButton("👥 Бесплатно (друзья)", callback_data="cmd_referral")],
             [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
     else:
@@ -4403,6 +4699,7 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("🎰 Депозит в 1win", url=get_affiliate_link(user_id))],
             [InlineKeyboardButton("💬 Написать @alex4udak", url="https://t.me/alex4udak")],
+            [InlineKeyboardButton("👥 Бесплатно (друзья)", callback_data="cmd_referral")],
             [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
         ]
 
@@ -5708,10 +6005,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not get_user(user_id):
         lang = detect_language(update.effective_user)
         create_user(user_id, update.effective_user.username, lang)
-    
+
     user = get_user(user_id)
     lang = user.get("language", "ru")
-    
+
+    # Update user activity and streak
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE users SET last_active = datetime('now') WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        # Update streak (once per day)
+        streak_info = update_user_streak(user_id)
+    except:
+        pass
+
     # Handle keyboard buttons
     button_map = {
         get_text("top_bets", "ru"): recommend_cmd,
@@ -5742,6 +6051,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_text("help_btn", "en"): help_cmd,
         get_text("help_btn", "pt"): help_cmd,
         get_text("help_btn", "es"): help_cmd,
+        # Referral button
+        get_text("referral_btn", "ru"): referral_cmd,
+        get_text("referral_btn", "en"): referral_cmd,
+        get_text("referral_btn", "pt"): referral_cmd,
+        get_text("referral_btn", "es"): referral_cmd,
     }
 
     if user_text in button_map:
@@ -6484,6 +6798,130 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send digest to {user_id}: {e}")
 
 
+async def send_marketing_notifications(context: ContextTypes.DEFAULT_TYPE):
+    """Send periodic marketing notifications (referral reminders, social proof, friend wins)."""
+    import random
+
+    logger.info("Running marketing notifications job...")
+
+    # Get all active users
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""SELECT user_id, language FROM users
+                     WHERE last_active >= datetime('now', '-7 days')""")
+        active_users = c.fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error getting active users: {e}")
+        return
+
+    # Get social stats once
+    social_stats = get_social_stats()
+
+    for user_id, lang in active_users:
+        lang = lang or "ru"
+
+        try:
+            # Random chance to send each type of notification
+            notification_type = random.choice([
+                "referral_reminder",
+                "social_proof",
+                "friend_wins",
+                None, None, None  # 50% chance of no notification
+            ])
+
+            if notification_type is None:
+                continue
+
+            if not should_send_notification(user_id, notification_type, cooldown_hours=48):
+                continue
+
+            if notification_type == "referral_reminder":
+                # Send referral reminder
+                ref_link = get_referral_link(user_id)
+                text = get_text("referral_reminder", lang).format(link=ref_link)
+                keyboard = [[InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]]
+
+            elif notification_type == "social_proof":
+                # Send social proof
+                if social_stats["wins_today"] > 0:
+                    text = get_text("social_wins_today", lang).format(count=social_stats["wins_today"])
+                    if social_stats["best_win"]:
+                        text += f"\n\n{get_text('social_top_win', lang).format(odds=social_stats['best_win']['odds'], match=social_stats['best_win']['match'])}"
+                    text += f"\n\n{get_text('social_accuracy', lang).format(accuracy=social_stats['accuracy'])}"
+                    keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
+                else:
+                    continue
+
+            elif notification_type == "friend_wins":
+                # Notify about friend wins
+                friend_wins = get_friend_wins(user_id)
+                if friend_wins:
+                    win = friend_wins[0]
+                    text = get_text("social_friend_won", lang).format(
+                        name=win["name"],
+                        match=win["match"],
+                        bet=win["bet"],
+                        odds=win["odds"]
+                    )
+                    keyboard = [[InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]]
+                else:
+                    continue
+            else:
+                continue
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            mark_notification_sent(user_id, notification_type)
+            logger.info(f"Sent {notification_type} to user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error sending marketing notification to {user_id}: {e}")
+
+
+async def check_streak_milestones(context: ContextTypes.DEFAULT_TYPE):
+    """Check and notify users about streak milestones."""
+    logger.info("Checking streak milestones...")
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        # Users with notable streaks who haven't been notified today
+        c.execute("""SELECT user_id, language, streak_days FROM users
+                     WHERE streak_days IN (3, 7, 14, 30, 50, 100)
+                     AND last_streak_date = date('now')""")
+        users = c.fetchall()
+        conn.close()
+
+        for user_id, lang, streak in users:
+            lang = lang or "ru"
+
+            if not should_send_notification(user_id, f"streak_{streak}", cooldown_hours=24):
+                continue
+
+            text = get_text("streak_milestone", lang).format(days=streak)
+            keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
+
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, f"streak_{streak}")
+            except Exception as e:
+                logger.error(f"Error sending streak notification to {user_id}: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in check_streak_milestones: {e}")
+
+
 # ===== WEB SERVER FOR POSTBACK =====
 
 from aiohttp import web
@@ -6625,6 +7063,9 @@ def main():
     job_queue.run_repeating(check_live_matches, interval=600, first=120)
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
     job_queue.run_repeating(check_predictions_results, interval=3600, first=600)
+    # Marketing jobs
+    job_queue.run_repeating(send_marketing_notifications, interval=14400, first=1800)  # Every 4 hours
+    job_queue.run_repeating(check_streak_milestones, interval=3600, first=900)  # Every hour
     
     print("\n✅ Bot v14 (Refactored) running!")
     print("   🔥 Features:")
