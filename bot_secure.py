@@ -103,6 +103,9 @@ async def close_http_session() -> None:
 live_subscribers = set()
 inplay_subscribers = set()
 
+# Track already sent alerts to prevent duplicates (match_id -> timestamp)
+sent_alerts = {}  # {match_id: datetime} - cleared after match starts
+
 # Matches cache to reduce API calls
 matches_cache = {
     "data": [],
@@ -6632,43 +6635,55 @@ async def check_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     """Check upcoming matches and send alerts"""
-    
+    global sent_alerts
+
     if not live_subscribers:
         return
-    
+
     logger.info(f"Checking live for {len(live_subscribers)} subscribers...")
-    
+
     matches = await get_matches(days=1)
-    
+
     if not matches:
         return
-    
+
     now = datetime.now()
     upcoming = []
-    
+
+    # Clean up old sent_alerts (matches that started more than 4 hours ago)
+    expired_alerts = [mid for mid, sent_time in sent_alerts.items()
+                      if (now - sent_time).total_seconds() > 14400]  # 4 hours
+    for mid in expired_alerts:
+        del sent_alerts[mid]
+
     for m in matches:
         try:
             match_time = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00")).replace(tzinfo=None)
             hours_until = (match_time - now).total_seconds() / 3600
-            
+
             if 0.5 < hours_until < 3:
                 upcoming.append(m)
         except:
             continue
-    
+
     if not upcoming:
         return
-    
-    logger.info(f"Found {len(upcoming)} upcoming matches")
-    
-    for match in upcoming[:3]:
+
+    logger.info(f"Found {len(upcoming)} upcoming matches, already alerted: {len(sent_alerts)}")
+
+    for match in upcoming[:5]:  # Check up to 5 matches
         match_id = match.get("id")  # Get match ID for tracking
+
+        # Skip if already sent alert for this match
+        if match_id and match_id in sent_alerts:
+            continue
+
         home = match.get("homeTeam", {}).get("name", "?")
         away = match.get("awayTeam", {}).get("name", "?")
         comp = match.get("competition", {}).get("name", "?")
         home_id = match.get("homeTeam", {}).get("id")
         away_id = match.get("awayTeam", {}).get("id")
-        
+
         home_form = await get_team_form(home_id) if home_id else None
         away_form = await get_team_form(away_id) if away_id else None
         odds = await get_odds(home, away)
@@ -6759,6 +6774,11 @@ If no good bet exists, respond: {{"alert": false}}"""
                 bet_type = alert_data.get("bet_type", "?")
                 confidence = alert_data.get("confidence", 70)
                 odds_val = alert_data.get("odds", 1.5)
+
+                # Mark this match as alerted to prevent duplicates
+                if match_id:
+                    sent_alerts[match_id] = datetime.now()
+                    logger.info(f"Alert triggered for match {match_id}: {home} vs {away}, {bet_type} ({confidence}%)")
 
                 # Send to each subscriber in their language
                 for user_id in live_subscribers:
