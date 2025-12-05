@@ -701,6 +701,10 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN exclude_cups INTEGER DEFAULT 0")
     except:
         pass
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN bet_rank INTEGER DEFAULT 1")
+    except:
+        pass
 
     conn.commit()
     conn.close()
@@ -922,30 +926,118 @@ def categorize_bet(bet_type):
         return "handicap"
     return "other"
 
-def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None):
+
+def parse_bet_from_text(text: str) -> tuple:
+    """Parse bet type, confidence and odds from text.
+
+    Returns: (bet_type, confidence, odds) or (None, None, None) if parsing fails
+    """
+    text_lower = text.lower()
+
+    # Default values
+    bet_type = None
+    confidence = 70
+    odds = 1.5
+
+    # Parse confidence
+    conf_match = re.search(r'(\d+)\s*%', text)
+    if conf_match:
+        confidence = int(conf_match.group(1))
+
+    # Parse odds
+    odds_match = re.search(r'@\s*~?(\d+\.?\d*)', text)
+    if odds_match:
+        odds = float(odds_match.group(1))
+
+    # Detect bet type - check double chances FIRST
+    if "п1 или х" in text_lower or "1x" in text_lower or "п1/х" in text_lower:
+        bet_type = "1X"
+    elif "х или п2" in text_lower or "x2" in text_lower or "2x" in text_lower or "х/п2" in text_lower:
+        bet_type = "X2"
+    elif "п1 или п2" in text_lower or " 12 " in text_lower or "не ничья" in text_lower:
+        bet_type = "12"
+    elif "фора" in text_lower or "handicap" in text_lower:
+        if "-1.5" in text_lower:
+            bet_type = "Фора1(-1.5)"
+        elif "-1" in text_lower:
+            bet_type = "Фора1(-1)"
+        elif "+1" in text_lower:
+            bet_type = "Фора2(+1)"
+        else:
+            bet_type = "Фора"
+    elif "тб 2.5" in text_lower or "тотал больше 2.5" in text_lower or "over 2.5" in text_lower:
+        bet_type = "ТБ 2.5"
+    elif "тм 2.5" in text_lower or "тотал меньше 2.5" in text_lower or "under 2.5" in text_lower:
+        bet_type = "ТМ 2.5"
+    elif "обе забьют" in text_lower or "btts" in text_lower:
+        bet_type = "BTTS"
+    elif "п2" in text_lower or "победа гостей" in text_lower:
+        bet_type = "П2"
+    elif "п1" in text_lower or "победа хозя" in text_lower:
+        bet_type = "П1"
+    elif "ничья" in text_lower or " х " in text_lower:
+        bet_type = "Х"
+
+    return (bet_type, confidence, odds)
+
+
+def parse_alternative_bets(analysis: str) -> list:
+    """Parse alternative bets from analysis text.
+
+    Returns: list of (bet_type, confidence, odds) tuples
+    """
+    alternatives = []
+
+    # Look for [ALT1], [ALT2], [ALT3] format
+    for i in range(1, 4):
+        alt_match = re.search(rf'\[ALT{i}\]\s*(.+?)(?=\[ALT|\n⚠️|\n✅|$)', analysis, re.IGNORECASE | re.DOTALL)
+        if alt_match:
+            alt_text = alt_match.group(1).strip()
+            bet_type, confidence, odds = parse_bet_from_text(alt_text)
+            if bet_type:
+                alternatives.append((bet_type, confidence, odds))
+                logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
+
+    # Fallback: try numbered list format (1. 2. 3.)
+    if not alternatives:
+        for line in analysis.split('\n'):
+            if re.match(r'^\s*[123]\.\s', line):
+                bet_type, confidence, odds = parse_bet_from_text(line)
+                if bet_type:
+                    alternatives.append((bet_type, confidence, odds))
+
+    return alternatives[:3]  # Max 3 alternatives
+
+
+def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1):
     """Save prediction to database with category and ML features.
-    Prevents duplicates - only saves first prediction per match per user."""
+
+    Args:
+        bet_rank: 1 = main bet, 2+ = alternatives
+
+    Prevents duplicates - checks for same match + bet_type + bet_rank combination.
+    """
     category = categorize_bet(bet_type)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Check for existing prediction on this match for this user
+    # Check for existing prediction with same match, bet_type and rank
     c.execute("""SELECT id, bet_type FROM predictions
-                 WHERE user_id = ? AND match_id = ?
-                 ORDER BY predicted_at DESC LIMIT 1""", (user_id, match_id))
+                 WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank = ?
+                 LIMIT 1""", (user_id, match_id, bet_type, bet_rank))
     existing = c.fetchone()
 
     if existing:
-        # Already have a prediction for this match - skip duplicate
+        # Already have this exact prediction - skip duplicate
         conn.close()
-        logger.info(f"Skipping duplicate prediction for match {match_id}, existing: {existing[1]}")
+        logger.info(f"Skipping duplicate: match {match_id}, {bet_type}, rank {bet_rank}")
         return existing[0]  # Return existing prediction ID
 
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -953,6 +1045,9 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     # Save ML training data if features provided
     if ml_features and category:
         save_ml_training_data(prediction_id, category, ml_features, target=None)
+
+    rank_label = "MAIN" if bet_rank == 1 else f"ALT{bet_rank-1}"
+    logger.info(f"Saved prediction [{rank_label}]: {home} vs {away}, {bet_type} ({confidence}%)")
 
     return prediction_id
 
@@ -1831,16 +1926,38 @@ def get_user_stats(user_id):
                 "rate": round(cat_correct / cat_decided * 100, 1)
             }
     
-    # Recent predictions
-    c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at 
-                 FROM predictions 
-                 WHERE user_id = ? 
-                 ORDER BY predicted_at DESC 
+    # Recent predictions (main bets only for display)
+    c.execute("""SELECT home_team, away_team, bet_type, confidence, result, is_correct, predicted_at, bet_rank
+                 FROM predictions
+                 WHERE user_id = ?
+                 ORDER BY predicted_at DESC
                  LIMIT 10""", (user_id,))
     recent = c.fetchall()
-    
+
+    # Stats by bet_rank (main vs alternatives)
+    main_stats = {"total": 0, "correct": 0, "decided": 0}
+    alt_stats = {"total": 0, "correct": 0, "decided": 0}
+
+    c.execute("""SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN is_correct IS NOT NULL AND is_correct != 2 THEN 1 ELSE 0 END)
+                 FROM predictions
+                 WHERE user_id = ? AND (bet_rank = 1 OR bet_rank IS NULL)""", (user_id,))
+    row = c.fetchone()
+    main_stats = {"total": row[0] or 0, "correct": row[1] or 0, "decided": row[2] or 0}
+
+    c.execute("""SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN is_correct IS NOT NULL AND is_correct != 2 THEN 1 ELSE 0 END)
+                 FROM predictions
+                 WHERE user_id = ? AND bet_rank > 1""", (user_id,))
+    row = c.fetchone()
+    alt_stats = {"total": row[0] or 0, "correct": row[1] or 0, "decided": row[2] or 0}
+
     conn.close()
-    
+
     predictions = []
     for r in recent:
         predictions.append({
@@ -1850,13 +1967,18 @@ def get_user_stats(user_id):
             "confidence": r[3],
             "result": r[4],
             "is_correct": r[5],
-            "date": r[6]
+            "date": r[6],
+            "bet_rank": r[7] if len(r) > 7 else 1
         })
-    
+
     # Win rate excluding pushes
     decided = correct + incorrect
     win_rate = (correct / decided * 100) if decided > 0 else 0
-    
+
+    # Calculate rates for main/alt
+    main_rate = (main_stats["correct"] / main_stats["decided"] * 100) if main_stats["decided"] > 0 else 0
+    alt_rate = (alt_stats["correct"] / alt_stats["decided"] * 100) if alt_stats["decided"] > 0 else 0
+
     return {
         "total": total,
         "correct": correct,
@@ -1866,7 +1988,11 @@ def get_user_stats(user_id):
         "pending": total - checked,
         "win_rate": win_rate,
         "categories": categories,
-        "predictions": predictions
+        "predictions": predictions,
+        "main_stats": {"total": main_stats["total"], "correct": main_stats["correct"],
+                       "decided": main_stats["decided"], "rate": main_rate},
+        "alt_stats": {"total": alt_stats["total"], "correct": alt_stats["correct"],
+                      "decided": alt_stats["decided"], "rate": alt_rate}
     }
 
 
@@ -2927,9 +3053,9 @@ RESPONSE FORMAT:
 📝 Почему: [основано на конкретных данных выше]
 
 📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
-1. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
-2. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
-3. [Тип] - X% уверенность - коэфф ~X.XX - [VALUE: +X%]
+[ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
+[ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
+[ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
 
 ⚠️ **РИСКИ:**
 [Конкретные риски на основе данных]
@@ -3375,11 +3501,29 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     decided = stats['correct'] + stats.get('incorrect', 0)
     push_str = f"\n🔄 **Возвраты:** {stats['push']}" if stats.get('push', 0) > 0 else ""
 
+    # Main vs Alt stats display
+    main_s = stats.get("main_stats", {})
+    alt_s = stats.get("alt_stats", {})
+
+    main_display = ""
+    alt_display = ""
+    if main_s.get("decided", 0) > 0:
+        main_emoji = "🎯" if main_s["rate"] >= 50 else "📊"
+        main_display = f"{main_emoji} **Основные:** {main_s['correct']}/{main_s['decided']} ({main_s['rate']:.1f}%)"
+    if alt_s.get("decided", 0) > 0:
+        alt_emoji = "📈" if alt_s["rate"] >= 50 else "📉"
+        alt_display = f"{alt_emoji} **Альтернативы:** {alt_s['correct']}/{alt_s['decided']} ({alt_s['rate']:.1f}%)"
+
+    stats_by_rank = ""
+    if main_display or alt_display:
+        stats_by_rank = f"\n{main_display}\n{alt_display}" if alt_display else f"\n{main_display}"
+
     text = f"""📈 **СТАТИСТИКА**
 
 {win_emoji} **Точность:** {stats['correct']}/{decided} ({stats['win_rate']:.1f}%)
 {roi_text}
 {streak_text}
+{stats_by_rank}
 
 📊 **Всего прогнозов:** {stats['total']}
 ✅ **Верных:** {stats['correct']}
@@ -3429,9 +3573,13 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         home_short = p["home"][:10] + ".." if len(p["home"]) > 12 else p["home"]
         away_short = p["away"][:10] + ".." if len(p["away"]) > 12 else p["away"]
-        
+
+        # Show bet rank marker
+        rank = p.get("bet_rank", 1)
+        rank_marker = "" if rank == 1 or rank is None else f" [ALT{rank-1}]"
+
         text += f"{emoji} {home_short} - {away_short}\n"
-        text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
+        text += f"    📊 {p['bet_type']}{rank_marker} ({p['confidence']}%) → {result_text}\n"
     
     refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar"}
     keyboard = [
@@ -4899,9 +5047,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
 
-        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value)
+        # Save MAIN prediction (bet_rank=1)
+        save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value, bet_rank=1)
         increment_daily_usage(user_id)
-        logger.info(f"Saved prediction: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
+        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}")
+
+        # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4)
+        alternatives = parse_alternative_bets(analysis)
+        for idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives, start=2):
+            if alt_type and alt_type != bet_type:  # Don't duplicate main bet
+                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds, bet_rank=idx)
+                logger.info(f"Saved ALT{idx-1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
