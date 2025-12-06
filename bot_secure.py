@@ -3800,6 +3800,14 @@ ML_FEATURE_COLUMNS = {
     "class_diff": 0,               # Positive = home is higher class
     "elite_vs_underdog": 0,        # 1 if elite plays weak/relegation team
     "class_mismatch": 0,           # Absolute class difference (for upset detection)
+    # Line movement (sharp money indicators)
+    "home_odds_dropped": 0,        # 1 if home odds dropped significantly (sharp money)
+    "away_odds_dropped": 0,        # 1 if away odds dropped (sharp money on away)
+    "draw_odds_dropped": 0,        # 1 if draw odds dropped
+    "over_odds_dropped": 0,        # 1 if over odds dropped (sharps on goals)
+    "under_odds_dropped": 0,       # 1 if under odds dropped
+    "sharp_money_detected": 0,     # 1 if any significant sharp money movement
+    "line_movement_direction": 0,  # -1=away favored more, 0=stable, 1=home favored more
 }
 
 
@@ -3877,6 +3885,45 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["implied_home"] = 1 / features["odds_home"] if features["odds_home"] > 0 else 0.4
         features["implied_draw"] = 1 / features["odds_draw"] if features["odds_draw"] > 0 else 0.25
         features["implied_away"] = 1 / features["odds_away"] if features["odds_away"] > 0 else 0.35
+
+        # Line movement features (sharp money indicators)
+        movements = odds.get("_line_movements", {})
+        if movements:
+            # Check each outcome for sharp money (odds dropped)
+            for outcome_key in ["Home", "home", "1"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["home_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Away", "away", "2"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["away_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Draw", "draw", "X"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["draw_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Over_2.5", "over", "Over 2.5"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["over_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Under_2.5", "under", "Under 2.5"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["under_odds_dropped"] = 1
+                    break
+
+            # Overall sharp money detection
+            sharp_count = sum(1 for m in movements.values() if m.get("sharp"))
+            features["sharp_money_detected"] = 1 if sharp_count > 0 else 0
+
+            # Direction: positive if home favored more now, negative if away
+            home_change = movements.get("Home", movements.get("home", {})).get("change", 0)
+            away_change = movements.get("Away", movements.get("away", {})).get("change", 0)
+            if home_change < -0.1 and away_change > 0.05:
+                features["line_movement_direction"] = 1  # Sharp on home
+            elif away_change < -0.1 and home_change > 0.05:
+                features["line_movement_direction"] = -1  # Sharp on away
+            else:
+                features["line_movement_direction"] = 0  # Stable
     else:
         features["odds_home"] = 2.5
         features["odds_draw"] = 3.5
@@ -7679,50 +7726,105 @@ CRITICAL ANALYSIS RULES:
    - Exception: Elite in relegation zone or crisis → class drops to 3 (still strong)
    - YOUR BARÇA EXAMPLE: Elite team (class 4) beats weak team regardless of form!
 
-11. CONFIDENCE CALCULATION:
-   - Base on statistical data, not feelings
-   - 80%+: Strong statistical edge + good value
-   - 70-79%: Clear favorite + decent value
-   - 60-69%: Slight edge, moderate risk
-   - <60%: High risk, only if excellent value
+11. 🎯 EDGE STACKING (KEY TO 70%+ ACCURACY!):
+   - Single factor = 55% confidence MAX
+   - 2 aligned factors = 65% confidence
+   - 3+ aligned factors = 75%+ confidence
+   - EXAMPLE: Elite team (factor 1) + home (factor 2) + opponent tired (factor 3) = STRONG bet
+   - NEVER high confidence on single factor alone!
+   - Count your edges before setting confidence!
 
-12. DIVERSIFY BET TYPES based on data:
+12. 🧠 TRAP GAME DETECTION (AVOID THESE!):
+   - Big team before Champions League/Cup final → They might rest players
+   - Team that just won big game → Emotional letdown risk
+   - Team on long winning streak vs desperate team → Upset risk
+   - Season-ending matches with nothing to play for → Low motivation
+   - If trap detected → Lower confidence by 10-15% or SKIP!
+
+13. 📉 REGRESSION TO MEAN:
+   - Team on 5+ game winning streak → Regression risk!
+   - Team on 5+ game losing streak → Bounce-back likely
+   - Unusual high scoring run → Will normalize
+   - Apply this to recent form, not overall stats
+
+14. 🔮 PATTERN RECOGNITION (DATA-DRIVEN!):
+   - Check: Does this team always score first half? → 1st half bets
+   - Check: Do they concede late? → Consider live over
+   - Check: Clean sheet trend? → Consider BTTS No
+   - Look for REPEATING PATTERNS in form data!
+
+15. CONFIDENCE CALCULATION (STRICT!):
+   - Base ONLY on data alignment, not feelings
+   - 85%+: 4+ factors aligned + excellent value → RARE
+   - 75-84%: 3 factors aligned + good value → STRONG
+   - 65-74%: 2 factors aligned + value → GOOD
+   - 55-64%: Single factor + value → MODERATE
+   - <55%: Skip or very small stake
+
+16. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
    - Close match → X2 or 1X (double chance)
+
+17. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
+   - No clear statistical edge → SKIP
+   - Too many unknowns (injuries, rotation) → SKIP
+   - Odds don't offer value → SKIP
+   - Trap game detected → SKIP or very low stake
+   - Better NO BET than forced losing bet!
+
+18. 📉 LINE MOVEMENT / SHARP MONEY (FOLLOW THE SMART MONEY!):
+   - If odds DROPPED significantly (🔥 marked) → Sharp bettors are on this!
+   - Sharp money on Home (home odds dropped 10%+) → Consider П1, increase confidence +10%
+   - Sharp money on Away (away odds dropped) → Consider П2, sharps see value
+   - Sharp money on Over (over odds dropped) → Sharps expect goals, consider ТБ
+   - Sharp money on Under → Sharps expect defensive match, consider ТМ
+   - STEAM MOVE (multiple odds dropped fast) → STRONG signal, follow the move!
+   - If YOUR analysis + Sharp money align → Extra edge! +15% confidence
+   - If YOUR analysis conflicts with sharp money → Be cautious, reduce confidence
+   - Sharp money is an ADDITIONAL factor in edge stacking!
+   - No line movement = neutral (doesn't help or hurt)
 
 RESPONSE FORMAT:
 
 📊 **АНАЛИЗ ДАННЫХ:**
 • Форма {home} ДОМА: [конкретные цифры]
 • Форма {away} В ГОСТЯХ: [конкретные цифры]
-• Ожидаемые голы: [расчёт]
+• Ожидаемые голы: [расчёт по формуле]
 • H2H тренд: [если есть]
-• 🌐 Актуальные новости: [травмы/составы/другое - если есть]
-• 👨‍⚖️ Судья: [имя, стиль, влияние на ставки - если есть]
-• 📅 Загруженность: [дни отдыха, кто свежее - если есть]
-• 🔥 Мотивация: [дерби/борьба за титул/вылет - если есть]
-• 👑 Класс команд: [элита/сильная/середняк - если есть разница]
+• 🌐 Новости: [травмы/составы - если есть]
+• 👨‍⚖️ Судья: [стиль, влияние]
+• 📅 Усталость: [дни отдыха, преимущество]
+• 🔥 Мотивация: [дерби/титул/вылет]
+• 👑 Класс: [elite/strong/mid/weak]
+• 📉 Движение линий: [sharp money куда идёт - если есть]
+
+🎯 **EDGE STACKING (подсчёт факторов):**
+✓ Фактор 1: [описание] → в пользу [ставки]
+✓ Фактор 2: [описание] → в пользу [ставки]
+✓ Фактор 3: [описание] → в пользу [ставки]
+✗ Против: [что может помешать]
+**ИТОГО: X факторов ЗА, Y факторов ПРОТИВ**
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
-📊 Value: [ваша вероятность]% - [implied]% = [+X% VALUE или NO VALUE]
+📊 Value: [твоя вероятность]% - [implied]% = [+X% VALUE]
 💰 Банк: X%
-📝 Почему: [основано на конкретных данных выше]
+📝 Почему: [основано на edge stacking выше]
 
-📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ (ОБЯЗАТЕЛЬНО 3 шт!):**
-[ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
-[ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
-[ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
-(ВСЕГДА давай ровно 3 альтернативы - выбирай из: П1, П2, X, 1X, X2, 12, ТБ2.5, ТМ2.5, BTTS)
+📈 **АЛЬТЕРНАТИВЫ (3 шт):**
+[ALT1] [Ставка] @ [коэфф] | [X]%
+[ALT2] [Ставка] @ [коэфф] | [X]%
+[ALT3] [Ставка] @ [коэфф] | [X]%
 
-⚠️ **РИСКИ:**
-[Конкретные риски на основе данных]
+⚠️ **РИСКИ / TRAP GAMES:**
+[Конкретные риски + есть ли признаки trap game]
 
-✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК / ПРОПУСТИТЬ]
+✅ **ВЕРДИКТ:**
+[🔥 СИЛЬНАЯ (3+ факторов) / ⚡ ХОРОШАЯ (2 фактора) / ⚠️ РИСКОВАННАЯ (1 фактор) / 🚫 ПРОПУСТИТЬ]
 
-Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"""
+Bank: 85%+=5%, 75-84%=4%, 65-74%=3%, 55-64%=2%, <55%=skip"""
 
     try:
         message = claude_client.messages.create(
@@ -9038,12 +9140,14 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         short_league = league[:20] + "..." if len(league) > 20 else league
         text += f"├ {emoji} {short_league}: **{acc}%** ({cnt})\n"
 
-    # ROI calculation (simplified)
-    text += f"\n💰 **ROI (упрощённый):**\n"
+    # Advanced ROI analysis (TARGET: 50%+)
+    text += f"\n💰 **ROI АНАЛИЗ (ЦЕЛЬ: 50%+):**\n"
     c.execute("""
         SELECT
             SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END) as profit,
-            COUNT(*) as bets
+            COUNT(*) as bets,
+            AVG(odds) as avg_odds,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
         FROM predictions
         WHERE is_correct IS NOT NULL AND odds IS NOT NULL
     """)
@@ -9051,23 +9155,83 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row and row[1] and row[1] > 0:
         profit = row[0] or 0
         bets = row[1]
+        avg_odds = row[2] or 1.5
+        wins = row[3] or 0
         roi = round(profit / bets * 100, 1)
-        emoji = "✅" if roi > 0 else "❌"
-        text += f"├ {emoji} ROI: **{roi}%**\n"
-        text += f"└ (При ставке 1 на каждый прогноз)\n"
+        win_rate = round(wins / bets * 100, 1)
+
+        # ROI status
+        if roi >= 50:
+            roi_status = "🏆 ЦЕЛЬ ДОСТИГНУТА!"
+        elif roi >= 20:
+            roi_status = "🔥 Отличный результат"
+        elif roi >= 5:
+            roi_status = "✅ В плюсе"
+        elif roi >= 0:
+            roi_status = "⚠️ Около нуля"
+        else:
+            roi_status = "❌ В минусе"
+
+        text += f"├ **ROI: {roi}%** {roi_status}\n"
+        text += f"├ Средний коэфф: {round(avg_odds, 2)}\n"
+        text += f"├ Точность: {win_rate}%\n"
+
+        # Calculate what's needed for 50% ROI
+        # ROI = (avg_odds * win_rate - 1) * 100
+        # 50 = (avg_odds * win_rate - 1) * 100
+        # 0.5 = avg_odds * win_rate - 1
+        # win_rate_needed = 1.5 / avg_odds
+        win_rate_needed = round(1.5 / avg_odds * 100, 1)
+        odds_needed = round(1.5 / (wins / bets) if wins > 0 else 3.0, 2)
+
+        text += f"├ 📊 Для ROI 50%:\n"
+        text += f"│  • При коэфф {round(avg_odds, 2)} нужна точность: **{win_rate_needed}%**\n"
+        text += f"│  • При точности {win_rate}% нужен коэфф: **{odds_needed}**\n"
+
+        # Progress bar to 50% ROI
+        progress = min(100, max(0, (roi / 50) * 100))
+        bar_filled = int(progress / 10)
+        bar_empty = 10 - bar_filled
+        progress_bar = "█" * bar_filled + "░" * bar_empty
+        text += f"└ Прогресс к 50%: [{progress_bar}] {round(progress)}%\n"
     else:
         text += f"└ Недостаточно данных\n"
+
+    # ROI by confidence level
+    text += f"\n📈 **ROI ПО УВЕРЕННОСТИ:**\n"
+    c.execute("""
+        SELECT
+            CASE
+                WHEN confidence >= 80 THEN '80%+'
+                WHEN confidence >= 70 THEN '70-79%'
+                ELSE '<70%'
+            END as conf_range,
+            SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END) as profit,
+            COUNT(*) as bets,
+            AVG(odds) as avg_odds
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND odds IS NOT NULL AND confidence IS NOT NULL
+        GROUP BY conf_range
+        ORDER BY conf_range DESC
+    """)
+    roi_by_conf = c.fetchall()
+    for row in roi_by_conf:
+        conf_range, profit, bets, avg_o = row
+        if bets and bets > 0:
+            roi_val = round((profit or 0) / bets * 100, 1)
+            emoji = "🔥" if roi_val >= 50 else "✅" if roi_val > 0 else "❌"
+            text += f"├ {emoji} {conf_range}: ROI **{roi_val}%** (коэфф ~{round(avg_o or 1.5, 2)})\n"
 
     conn.close()
 
     # Add recommendations
-    text += f"\n💡 **РЕКОМЕНДАЦИИ:**\n"
+    text += f"\n💡 **РЕКОМЕНДАЦИИ ДЛЯ ROI 50%+:**\n"
     if total < 100:
         text += "• Мало данных — нужно минимум 100-200 прогнозов\n"
     if conf_rows:
         # Find best confidence range
         best_conf = max(conf_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
-        text += f"• Лучший диапазон уверенности: {best_conf[0]}\n"
+        text += f"• Лучший диапазон: {best_conf[0]}\n"
     if cat_rows:
         # Find worst category
         worst_cat = min(cat_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
@@ -9075,6 +9239,11 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         worst_acc = round((worst_cat[2] or 0) / worst_cat[1] * 100, 1) if worst_cat[1] > 0 else 0
         if worst_acc < 50:
             text += f"• ⚠️ Проблемный тип: {worst_name} ({worst_acc}%)\n"
+
+    # Tips for 50%+ ROI
+    text += "• 🎯 Фокус на ставках с VALUE >10%\n"
+    text += "• 📊 Ставить только при 3+ факторов (Edge Stacking)\n"
+    text += "• 🚫 Пропускать матчи без явного преимущества\n"
 
     # Split message if too long
     if len(text) > 4000:
