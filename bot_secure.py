@@ -4049,14 +4049,14 @@ def analyze_prediction_error(prediction: dict, actual_result: str, features: dic
         error_analysis["actual_value"] = total_goals
         diff = expected_goals - total_goals
         if diff > 1.5:
-            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Overestimated by {diff:.1f}"
-            error_analysis["lesson"] = "xG was significantly overestimated. Teams played more defensively than form suggested."
+            error_analysis["description"] = f"Form suggested {expected_goals:.1f} goals, actual {total_goals}. Overestimated by {diff:.1f}"
+            error_analysis["lesson"] = "Teams played more defensively than recent form suggested. This league may be lower-scoring than averages indicate."
         elif diff > 0.5:
-            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Close miss."
-            error_analysis["lesson"] = "Slight xG overestimate. Consider lowering threshold for this league."
+            error_analysis["description"] = f"Form suggested {expected_goals:.1f} goals, actual {total_goals}. Close miss."
+            error_analysis["lesson"] = "Slight overestimate. Be more conservative with Over bets in this league."
         else:
-            error_analysis["description"] = f"Unlucky - expected {expected_goals:.1f}, got {total_goals}"
-            error_analysis["lesson"] = "Variance - prediction was reasonable but result was on the edge."
+            error_analysis["description"] = f"Close call - form suggested {expected_goals:.1f}, got {total_goals}"
+            error_analysis["lesson"] = "Borderline result - prediction was reasonable but variance."
 
     elif "totals_under" in bet_category or "тм" in bet_type or "under" in bet_type:
         error_analysis["error_type"] = "totals_underestimate"
@@ -4064,11 +4064,11 @@ def analyze_prediction_error(prediction: dict, actual_result: str, features: dic
         error_analysis["actual_value"] = total_goals
         diff = total_goals - expected_goals
         if diff > 1.5:
-            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Underestimated by {diff:.1f}"
-            error_analysis["lesson"] = "xG was significantly underestimated. Teams were more attacking than expected."
+            error_analysis["description"] = f"Form suggested {expected_goals:.1f} goals, actual {total_goals}. Underestimated by {diff:.1f}"
+            error_analysis["lesson"] = "Teams were more attacking than form suggested. This matchup type may produce more goals."
         else:
-            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Close miss."
-            error_analysis["lesson"] = "Slight underestimate. Match was more open than form suggested."
+            error_analysis["description"] = f"Form suggested {expected_goals:.1f} goals, actual {total_goals}. Close miss."
+            error_analysis["lesson"] = "Match was more open than form suggested."
 
     elif "outcomes_home" in bet_category or "п1" in bet_type:
         error_analysis["error_type"] = "home_overestimate"
