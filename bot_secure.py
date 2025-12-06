@@ -3187,7 +3187,7 @@ def update_prediction_result(pred_id, result, is_correct):
 
             # Update user personalization stats
             if pred_info and pred_info[0] and pred_info[0] > 0:  # user_id > 0 (not bot alerts)
-                user_id, odds = pred_info
+                user_id, odds, _ = pred_info  # 3 values: user_id, odds, league_code
                 update_user_bet_stats(user_id, bet_category, is_correct == 1, odds or 1.5)
 
 
