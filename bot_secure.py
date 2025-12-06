@@ -6267,6 +6267,9 @@ def calculate_congestion_score(rest_days: int) -> int:
     """
     if rest_days is None:
         return 1  # Default to normal
+    # Sanity check: if rest_days > 14, data is likely wrong (no team rests 2+ weeks mid-season)
+    if rest_days > 14:
+        return 1  # Default to normal - data anomaly
     if rest_days >= 7:
         return 0  # Fresh
     elif rest_days >= 5:
@@ -6277,6 +6280,21 @@ def calculate_congestion_score(rest_days: int) -> int:
         return 3  # Exhausted
 
 
+def sanitize_rest_days(rest_days: int) -> int:
+    """Sanitize rest days value - cap unrealistic values.
+
+    If rest_days > 14, it's likely a data error (international break, new team, etc.)
+    Cap at reasonable maximum of 10 days.
+    """
+    if rest_days is None:
+        return 5  # Default
+    if rest_days > 14:
+        return 7  # Cap at "fresh" - likely data anomaly
+    if rest_days < 0:
+        return 3  # Shouldn't happen, but safe default
+    return rest_days
+
+
 def get_congestion_analysis(home_form: dict, away_form: dict) -> dict:
     """Analyze fixture congestion for both teams.
 
@@ -6285,17 +6303,19 @@ def get_congestion_analysis(home_form: dict, away_form: dict) -> dict:
     home_rest = home_form.get("rest_days") if home_form else None
     away_rest = away_form.get("rest_days") if away_form else None
 
+    # Sanitize unrealistic values (e.g., 48 days = data error)
+    home_rest = sanitize_rest_days(home_rest)
+    away_rest = sanitize_rest_days(away_rest)
+
     home_congestion = calculate_congestion_score(home_rest)
     away_congestion = calculate_congestion_score(away_rest)
 
     # Rest advantage (positive = home has more rest)
-    rest_advantage = 0
-    if home_rest is not None and away_rest is not None:
-        rest_advantage = home_rest - away_rest
+    rest_advantage = home_rest - away_rest
 
     return {
-        "home_rest_days": home_rest or 5,
-        "away_rest_days": away_rest or 5,
+        "home_rest_days": home_rest,
+        "away_rest_days": away_rest,
         "home_congestion": home_congestion,
         "away_congestion": away_congestion,
         "rest_advantage": rest_advantage,
