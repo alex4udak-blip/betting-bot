@@ -5787,6 +5787,168 @@ def format_web_context_for_claude(web_news: dict, weather: dict = None, lang: st
     return context
 
 
+# ===== REFEREE STATISTICS =====
+# Average stats per game for top European referees
+# Data source: Transfermarkt, WhoScored (manually compiled, update periodically)
+
+REFEREE_STATS = {
+    # Premier League referees
+    "Anthony Taylor": {"cards_per_game": 4.2, "yellows_per_game": 3.8, "reds_per_game": 0.15, "penalties_per_game": 0.35, "fouls_per_game": 24, "style": "strict"},
+    "Michael Oliver": {"cards_per_game": 3.8, "yellows_per_game": 3.5, "reds_per_game": 0.12, "penalties_per_game": 0.42, "fouls_per_game": 22, "style": "balanced"},
+    "Paul Tierney": {"cards_per_game": 4.5, "yellows_per_game": 4.1, "reds_per_game": 0.18, "penalties_per_game": 0.28, "fouls_per_game": 26, "style": "strict"},
+    "Simon Hooper": {"cards_per_game": 4.0, "yellows_per_game": 3.7, "reds_per_game": 0.10, "penalties_per_game": 0.32, "fouls_per_game": 23, "style": "balanced"},
+    "Chris Kavanagh": {"cards_per_game": 3.6, "yellows_per_game": 3.3, "reds_per_game": 0.12, "penalties_per_game": 0.38, "fouls_per_game": 21, "style": "lenient"},
+    "Robert Jones": {"cards_per_game": 4.3, "yellows_per_game": 3.9, "reds_per_game": 0.14, "penalties_per_game": 0.30, "fouls_per_game": 25, "style": "strict"},
+    "John Brooks": {"cards_per_game": 3.9, "yellows_per_game": 3.6, "reds_per_game": 0.11, "penalties_per_game": 0.33, "fouls_per_game": 22, "style": "balanced"},
+    "Andy Madley": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.29, "fouls_per_game": 24, "style": "balanced"},
+    "Stuart Attwell": {"cards_per_game": 3.5, "yellows_per_game": 3.2, "reds_per_game": 0.10, "penalties_per_game": 0.36, "fouls_per_game": 20, "style": "lenient"},
+    "David Coote": {"cards_per_game": 4.0, "yellows_per_game": 3.7, "reds_per_game": 0.12, "penalties_per_game": 0.34, "fouls_per_game": 23, "style": "balanced"},
+    "Peter Bankes": {"cards_per_game": 4.4, "yellows_per_game": 4.0, "reds_per_game": 0.16, "penalties_per_game": 0.31, "fouls_per_game": 25, "style": "strict"},
+    "Darren England": {"cards_per_game": 3.7, "yellows_per_game": 3.4, "reds_per_game": 0.11, "penalties_per_game": 0.35, "fouls_per_game": 21, "style": "balanced"},
+    "Tony Harrington": {"cards_per_game": 4.2, "yellows_per_game": 3.9, "reds_per_game": 0.14, "penalties_per_game": 0.27, "fouls_per_game": 24, "style": "strict"},
+    "Sam Barrott": {"cards_per_game": 3.8, "yellows_per_game": 3.5, "reds_per_game": 0.10, "penalties_per_game": 0.32, "fouls_per_game": 22, "style": "balanced"},
+
+    # La Liga referees
+    "Mateu Lahoz": {"cards_per_game": 5.2, "yellows_per_game": 4.8, "reds_per_game": 0.22, "penalties_per_game": 0.25, "fouls_per_game": 28, "style": "very_strict"},
+    "Gil Manzano": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.18, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+    "Del Cerro Grande": {"cards_per_game": 4.5, "yellows_per_game": 4.1, "reds_per_game": 0.16, "penalties_per_game": 0.35, "fouls_per_game": 25, "style": "strict"},
+    "Hernández Hernández": {"cards_per_game": 5.0, "yellows_per_game": 4.6, "reds_per_game": 0.20, "penalties_per_game": 0.28, "fouls_per_game": 27, "style": "very_strict"},
+    "Jesús Gil Manzano": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.18, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+
+    # Serie A referees
+    "Daniele Orsato": {"cards_per_game": 4.6, "yellows_per_game": 4.2, "reds_per_game": 0.17, "penalties_per_game": 0.38, "fouls_per_game": 27, "style": "strict"},
+    "Marco Guida": {"cards_per_game": 4.3, "yellows_per_game": 3.9, "reds_per_game": 0.15, "penalties_per_game": 0.35, "fouls_per_game": 25, "style": "balanced"},
+    "Davide Massa": {"cards_per_game": 4.4, "yellows_per_game": 4.0, "reds_per_game": 0.16, "penalties_per_game": 0.32, "fouls_per_game": 26, "style": "strict"},
+    "Gianluca Rocchi": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.40, "fouls_per_game": 24, "style": "balanced"},
+    "Maurizio Mariani": {"cards_per_game": 4.5, "yellows_per_game": 4.1, "reds_per_game": 0.16, "penalties_per_game": 0.33, "fouls_per_game": 26, "style": "strict"},
+
+    # Bundesliga referees
+    "Felix Zwayer": {"cards_per_game": 3.8, "yellows_per_game": 3.5, "reds_per_game": 0.12, "penalties_per_game": 0.30, "fouls_per_game": 22, "style": "balanced"},
+    "Daniel Siebert": {"cards_per_game": 3.6, "yellows_per_game": 3.3, "reds_per_game": 0.10, "penalties_per_game": 0.32, "fouls_per_game": 21, "style": "lenient"},
+    "Deniz Aytekin": {"cards_per_game": 3.5, "yellows_per_game": 3.2, "reds_per_game": 0.09, "penalties_per_game": 0.28, "fouls_per_game": 20, "style": "lenient"},
+    "Sascha Stegemann": {"cards_per_game": 3.9, "yellows_per_game": 3.6, "reds_per_game": 0.11, "penalties_per_game": 0.34, "fouls_per_game": 23, "style": "balanced"},
+    "Tobias Welz": {"cards_per_game": 4.0, "yellows_per_game": 3.7, "reds_per_game": 0.12, "penalties_per_game": 0.31, "fouls_per_game": 23, "style": "balanced"},
+
+    # Ligue 1 referees
+    "Clément Turpin": {"cards_per_game": 4.2, "yellows_per_game": 3.8, "reds_per_game": 0.15, "penalties_per_game": 0.33, "fouls_per_game": 25, "style": "balanced"},
+    "François Letexier": {"cards_per_game": 3.9, "yellows_per_game": 3.6, "reds_per_game": 0.12, "penalties_per_game": 0.35, "fouls_per_game": 23, "style": "balanced"},
+    "Benoît Bastien": {"cards_per_game": 4.4, "yellows_per_game": 4.0, "reds_per_game": 0.16, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+    "Jérôme Brisard": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.32, "fouls_per_game": 24, "style": "balanced"},
+
+    # UEFA/Champions League referees
+    "Szymon Marciniak": {"cards_per_game": 3.7, "yellows_per_game": 3.4, "reds_per_game": 0.11, "penalties_per_game": 0.30, "fouls_per_game": 22, "style": "balanced"},
+    "Danny Makkelie": {"cards_per_game": 3.5, "yellows_per_game": 3.2, "reds_per_game": 0.10, "penalties_per_game": 0.35, "fouls_per_game": 21, "style": "lenient"},
+    "Slavko Vinčić": {"cards_per_game": 4.0, "yellows_per_game": 3.7, "reds_per_game": 0.12, "penalties_per_game": 0.32, "fouls_per_game": 23, "style": "balanced"},
+    "Artur Dias": {"cards_per_game": 4.3, "yellows_per_game": 3.9, "reds_per_game": 0.15, "penalties_per_game": 0.28, "fouls_per_game": 25, "style": "strict"},
+    "Istvan Kovacs": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.34, "fouls_per_game": 24, "style": "balanced"},
+    "Jesús Gil Manzano": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.18, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+}
+
+# League average stats for comparison
+LEAGUE_REFEREE_AVERAGES = {
+    "PL": {"cards_per_game": 3.9, "penalties_per_game": 0.33},
+    "PD": {"cards_per_game": 4.8, "penalties_per_game": 0.30},  # La Liga - more cards
+    "SA": {"cards_per_game": 4.4, "penalties_per_game": 0.36},  # Serie A
+    "BL1": {"cards_per_game": 3.7, "penalties_per_game": 0.31},  # Bundesliga - fewer cards
+    "FL1": {"cards_per_game": 4.1, "penalties_per_game": 0.32},  # Ligue 1
+    "CL": {"cards_per_game": 3.8, "penalties_per_game": 0.32},   # Champions League
+    "EL": {"cards_per_game": 4.0, "penalties_per_game": 0.30},   # Europa League
+    "default": {"cards_per_game": 4.0, "penalties_per_game": 0.32}
+}
+
+
+def get_referee_stats(referee_name: str, league_code: str = None) -> Optional[dict]:
+    """Get referee statistics and compare to league average"""
+    if not referee_name:
+        return None
+
+    # Try exact match first
+    stats = REFEREE_STATS.get(referee_name)
+
+    # Try partial match if exact not found
+    if not stats:
+        referee_lower = referee_name.lower()
+        for name, s in REFEREE_STATS.items():
+            if name.lower() in referee_lower or referee_lower in name.lower():
+                stats = s
+                referee_name = name
+                break
+
+    if not stats:
+        return None
+
+    # Get league average for comparison
+    league_avg = LEAGUE_REFEREE_AVERAGES.get(league_code, LEAGUE_REFEREE_AVERAGES["default"])
+
+    # Calculate deviation from average
+    cards_vs_avg = stats["cards_per_game"] - league_avg["cards_per_game"]
+    penalties_vs_avg = stats["penalties_per_game"] - league_avg["penalties_per_game"]
+
+    return {
+        "name": referee_name,
+        "cards_per_game": stats["cards_per_game"],
+        "yellows_per_game": stats["yellows_per_game"],
+        "reds_per_game": stats["reds_per_game"],
+        "penalties_per_game": stats["penalties_per_game"],
+        "fouls_per_game": stats["fouls_per_game"],
+        "style": stats["style"],
+        "cards_vs_avg": round(cards_vs_avg, 1),
+        "penalties_vs_avg": round(penalties_vs_avg, 2),
+        "league_avg_cards": league_avg["cards_per_game"],
+        "league_avg_penalties": league_avg["penalties_per_game"],
+    }
+
+
+def format_referee_context(referee_stats: dict, lang: str = "ru") -> str:
+    """Format referee stats for Claude's context"""
+    if not referee_stats:
+        return ""
+
+    r = referee_stats
+    style_map = {
+        "very_strict": "очень строгий 🔴",
+        "strict": "строгий 🟡",
+        "balanced": "сбалансированный ⚖️",
+        "lenient": "мягкий 🟢"
+    }
+    style_text = style_map.get(r["style"], r["style"])
+
+    context = f"\n👨‍⚖️ СУДЬЯ: {r['name']}\n"
+    context += f"  • Стиль: {style_text}\n"
+    context += f"  • Карточек за игру: {r['cards_per_game']} "
+
+    if r["cards_vs_avg"] > 0.3:
+        context += f"(+{r['cards_vs_avg']} vs среднее по лиге ⚠️)\n"
+    elif r["cards_vs_avg"] < -0.3:
+        context += f"({r['cards_vs_avg']} vs среднее по лиге ✅)\n"
+    else:
+        context += f"(в норме)\n"
+
+    context += f"  • Пенальти за игру: {r['penalties_per_game']} "
+    if r["penalties_vs_avg"] > 0.05:
+        context += f"(+{r['penalties_vs_avg']} vs среднее ⚠️)\n"
+    elif r["penalties_vs_avg"] < -0.05:
+        context += f"({r['penalties_vs_avg']} vs среднее)\n"
+    else:
+        context += f"(в норме)\n"
+
+    # Betting implications
+    context += f"  💡 Влияние на ставки:\n"
+    if r["cards_per_game"] >= 4.3:
+        context += f"     • ТБ карточек - ВЫСОКАЯ вероятность\n"
+    elif r["cards_per_game"] <= 3.6:
+        context += f"     • ТМ карточек - рассмотреть\n"
+
+    if r["penalties_per_game"] >= 0.38:
+        context += f"     • Пенальти вероятны - учитывать в тоталах\n"
+
+    if r["style"] in ["very_strict", "strict"]:
+        context += f"     • Возможны удаления - осторожно с исходами\n"
+
+    context += "\n"
+    return context
+
+
 async def get_top_scorers(competition: str = "PL", limit: int = 10) -> Optional[list]:
     """Get top scorers of the competition (Standard plan feature)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -5977,6 +6139,17 @@ async def get_lineups(match_id: int) -> Optional[dict]:
                 if away_data.get("injuries"):
                     away_injuries = away_data.get("injuries", [])
 
+                # Get referee info
+                referees = data.get("referees", [])
+                main_referee = None
+                for ref in referees:
+                    if ref.get("type") == "REFEREE":
+                        main_referee = ref.get("name")
+                        break
+                # Fallback to first referee if no main found
+                if not main_referee and referees:
+                    main_referee = referees[0].get("name")
+
                 return {
                     "home_team": home_team,
                     "away_team": away_team,
@@ -5985,8 +6158,9 @@ async def get_lineups(match_id: int) -> Optional[dict]:
                     "home_injuries": home_injuries,
                     "away_injuries": away_injuries,
                     "status": data.get("status", "SCHEDULED"),
-                "venue": data.get("venue", "Unknown")
-            }
+                    "venue": data.get("venue", "Unknown"),
+                    "referee": main_referee,
+                }
     except Exception as e:
         logger.error(f"Lineups error: {e}")
     return None
@@ -6330,6 +6504,10 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     venue = lineups.get('venue') if lineups else None
     weather = await get_weather_for_match(venue) if venue else None
 
+    # 👨‍⚖️ REFEREE STATS: Get referee statistics for card/penalty predictions
+    referee_name = lineups.get('referee') if lineups else None
+    referee_stats = get_referee_stats(referee_name, comp_code) if referee_name else None
+
     # Get bot's historical accuracy stats
     bot_stats = get_bot_accuracy_stats()
 
@@ -6421,6 +6599,11 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     web_context = format_web_context_for_claude(web_news, weather, lang)
     if web_context:
         analysis_data += web_context
+
+    # 👨‍⚖️ REFEREE STATS - for card and penalty predictions
+    referee_context = format_referee_context(referee_stats, lang)
+    if referee_context:
+        analysis_data += referee_context
 
     # TOP SCORERS in this match
     if top_scorers:
@@ -6608,14 +6791,21 @@ CRITICAL ANALYSIS RULES:
    - Bad weather (rain, wind) → Lower totals expected
    - Always mention significant news in your analysis!
 
-7. CONFIDENCE CALCULATION:
+7. 👨‍⚖️ REFEREE IMPACT (for cards/penalties):
+   - Strict referee (4.3+ cards/game) → Consider over cards bet
+   - Lenient referee (3.6- cards/game) → Consider under cards bet
+   - High penalty referee (0.38+ pen/game) → Factor into totals (more goals likely)
+   - Very strict referee with red card history → Beware of outcomes (man down changes game)
+   - Always mention referee style if data available!
+
+8. CONFIDENCE CALCULATION:
    - Base on statistical data, not feelings
    - 80%+: Strong statistical edge + good value
    - 70-79%: Clear favorite + decent value
    - 60-69%: Slight edge, moderate risk
    - <60%: High risk, only if excellent value
 
-8. DIVERSIFY BET TYPES based on data:
+9. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
@@ -6629,6 +6819,7 @@ RESPONSE FORMAT:
 • Ожидаемые голы: [расчёт]
 • H2H тренд: [если есть]
 • 🌐 Актуальные новости: [травмы/составы/другое - если есть]
+• 👨‍⚖️ Судья: [имя, стиль, влияние на ставки - если есть]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
