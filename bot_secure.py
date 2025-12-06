@@ -177,7 +177,18 @@ TRANSLATIONS = {
         "odds": "💰 Коэфф:",
         "reason": "📝 Почему:",
         "first_start_title": "🎉 **Добро пожаловать в AI Betting Bot!**",
-        "first_start_text": "Я помогу тебе делать умные ставки на футбол с помощью AI-анализа.",
+        "first_start_text": """🤖 **Что умеет бот:**
+• AI анализирует форму, H2H, составы, погоду
+• Учитывает класс команд, мотивацию, усталость
+• Прозрачная статистика — сам видишь точность!
+
+🆓 **Бесплатно:**
+• 3 прогноза в день
+• Полная статистика и аналитика
+• Алерты на топовые матчи
+
+⚡ **Как начать:**
+Просто напиши название команды (например: *Барселона*) или нажми кнопку ниже!""",
         "detected_settings": "🌍 Определил твои настройки:",
         "language_label": "Язык",
         "timezone_label": "Часовой пояс",
@@ -305,6 +316,10 @@ TRANSLATIONS = {
         "onboard_step3": "3️⃣ Пригласи друзей — получи бонус",
         "onboard_free_today": "🎁 Сегодня {count} бесплатных прогнозов!",
         "onboard_try_now": "Попробуй прямо сейчас 👇",
+        "try_prediction_btn": "🎯 Попробовать прогноз",
+        "where_to_bet": "🎰 **Где делать ставки:**",
+        "bet_partner_text": "Делай ставки у нашего партнёра 1win — бонус +500% на первый депозит!",
+        "open_1win_btn": "🎰 Открыть 1win",
         # Hot match alert
         "hot_match_title": "🔥 **ГОРЯЧИЙ МАТЧ!**",
         "hot_match_starts": "⏰ Начало через {hours}ч",
@@ -365,7 +380,18 @@ TRANSLATIONS = {
         "odds": "💰 Odds:",
         "reason": "📝 Why:",
         "first_start_title": "🎉 **Welcome to AI Betting Bot!**",
-        "first_start_text": "I'll help you make smart football bets using AI analysis.",
+        "first_start_text": """🤖 **What the bot does:**
+• AI analyzes form, H2H, lineups, weather
+• Considers team class, motivation, fatigue
+• Transparent stats — see accuracy yourself!
+
+🆓 **Free:**
+• 3 predictions per day
+• Full statistics and analytics
+• Alerts for top matches
+
+⚡ **How to start:**
+Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "detected_settings": "🌍 Detected your settings:",
         "language_label": "Language",
         "timezone_label": "Timezone",
@@ -487,6 +513,10 @@ TRANSLATIONS = {
         "onboard_step3": "3️⃣ Invite friends — get bonus",
         "onboard_free_today": "🎁 Today {count} free predictions!",
         "onboard_try_now": "Try it now 👇",
+        "try_prediction_btn": "🎯 Try a prediction",
+        "where_to_bet": "🎰 **Where to bet:**",
+        "bet_partner_text": "Bet with our partner 1win — +500% bonus on first deposit!",
+        "open_1win_btn": "🎰 Open 1win",
         "hot_match_title": "🔥 **HOT MATCH!**",
         "hot_match_starts": "⏰ Starts in {hours}h",
         "hot_match_confidence": "📊 Confidence: {percent}%",
@@ -545,7 +575,18 @@ TRANSLATIONS = {
         "odds": "💰 Odds:",
         "reason": "📝 Por quê:",
         "first_start_title": "🎉 **Bem-vindo ao AI Betting Bot!**",
-        "first_start_text": "Vou ajudá-lo a fazer apostas inteligentes no futebol usando análise de IA.",
+        "first_start_text": """🤖 **O que o bot faz:**
+• IA analisa forma, H2H, escalações, clima
+• Considera classe do time, motivação, fadiga
+• Estatísticas transparentes — veja a precisão!
+
+🆓 **Grátis:**
+• 3 previsões por dia
+• Estatísticas completas
+• Alertas para jogos top
+
+⚡ **Como começar:**
+Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "detected_settings": "🌍 Detectei suas configurações:",
         "language_label": "Idioma",
         "timezone_label": "Fuso horário",
@@ -667,6 +708,10 @@ TRANSLATIONS = {
         "onboard_step3": "3️⃣ Convide amigos — ganhe bônus",
         "onboard_free_today": "🎁 Hoje {count} previsões grátis!",
         "onboard_try_now": "Tente agora 👇",
+        "try_prediction_btn": "🎯 Testar previsão",
+        "where_to_bet": "🎰 **Onde apostar:**",
+        "bet_partner_text": "Aposte com nosso parceiro 1win — bônus +500% no primeiro depósito!",
+        "open_1win_btn": "🎰 Abrir 1win",
         "hot_match_title": "🔥 **JOGO QUENTE!**",
         "hot_match_starts": "⏰ Começa em {hours}h",
         "hot_match_confidence": "📊 Confiança: {percent}%",
@@ -725,7 +770,18 @@ TRANSLATIONS = {
         "odds": "💰 Cuota:",
         "reason": "📝 Por qué:",
         "first_start_title": "🎉 **¡Bienvenido a AI Betting Bot!**",
-        "first_start_text": "Te ayudaré a hacer apuestas inteligentes en fútbol usando análisis de IA.",
+        "first_start_text": """🤖 **Qué hace el bot:**
+• IA analiza forma, H2H, alineaciones, clima
+• Considera clase del equipo, motivación, fatiga
+• Estadísticas transparentes — ¡ve la precisión!
+
+🆓 **Gratis:**
+• 3 pronósticos por día
+• Estadísticas completas
+• Alertas para partidos top
+
+⚡ **Cómo empezar:**
+Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "detected_settings": "🌍 Detecté tus ajustes:",
         "language_label": "Idioma",
         "timezone_label": "Zona horaria",
@@ -847,6 +903,10 @@ TRANSLATIONS = {
         "onboard_step3": "3️⃣ Invita amigos — obtén bono",
         "onboard_free_today": "🎁 Hoy {count} pronósticos gratis!",
         "onboard_try_now": "Pruébalo ahora 👇",
+        "try_prediction_btn": "🎯 Probar pronóstico",
+        "where_to_bet": "🎰 **Dónde apostar:**",
+        "bet_partner_text": "Apuesta con nuestro socio 1win — ¡bono +500% en primer depósito!",
+        "open_1win_btn": "🎰 Abrir 1win",
         "hot_match_title": "🔥 **¡PARTIDO CALIENTE!**",
         "hot_match_starts": "⏰ Empieza en {hours}h",
         "hot_match_confidence": "📊 Confianza: {percent}%",
@@ -905,7 +965,18 @@ TRANSLATIONS = {
         "odds": "💰 Odds:",
         "reason": "📝 Alasan:",
         "first_start_title": "🎉 **Selamat datang di AI Betting Bot!**",
-        "first_start_text": "Saya akan membantu Anda membuat taruhan sepak bola cerdas menggunakan analisis AI.",
+        "first_start_text": """🤖 **Yang dilakukan bot:**
+• AI menganalisis form, H2H, lineup, cuaca
+• Pertimbangkan kelas tim, motivasi, kelelahan
+• Statistik transparan — lihat akurasinya!
+
+🆓 **Gratis:**
+• 3 prediksi per hari
+• Statistik lengkap
+• Alert untuk pertandingan top
+
+⚡ **Cara mulai:**
+Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "detected_settings": "🌍 Pengaturan terdeteksi:",
         "language_label": "Bahasa",
         "timezone_label": "Zona waktu",
@@ -1027,6 +1098,10 @@ TRANSLATIONS = {
         "onboard_step3": "3️⃣ Undang teman — dapatkan bonus",
         "onboard_free_today": "🎁 Hari ini {count} prediksi gratis!",
         "onboard_try_now": "Coba sekarang 👇",
+        "try_prediction_btn": "🎯 Coba prediksi",
+        "where_to_bet": "🎰 **Di mana bertaruh:**",
+        "bet_partner_text": "Taruhan dengan mitra kami 1win — bonus +500% pada deposit pertama!",
+        "open_1win_btn": "🎰 Buka 1win",
         "hot_match_title": "🔥 **PERTANDINGAN PANAS!**",
         "hot_match_starts": "⏰ Mulai dalam {hours}j",
         "hot_match_confidence": "📊 Kepercayaan: {percent}%",
@@ -9078,30 +9153,28 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logger.error(f"Failed to notify referrer {referrer_id}: {e}")
 
-        # Show welcome message
+        # Show welcome message with 1win partner info
         tz_display = get_tz_offset_str(detected_tz)
         welcome_text = f"""{get_text('first_start_title', selected_lang)}
 
 {get_text('first_start_text', selected_lang)}
+
+{get_text('where_to_bet', selected_lang)}
+{get_text('bet_partner_text', selected_lang)}
 
 {get_text('detected_settings', selected_lang)}
 • {get_text('timezone_label', selected_lang)}: {tz_display}
 
 _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
-        # Build main menu keyboard
+        # Build NEW USER keyboard - focused on quick start actions
         keyboard = [
-            [InlineKeyboardButton(get_text("recommendations", selected_lang), callback_data="cmd_recommend"),
-             InlineKeyboardButton(get_text("today", selected_lang), callback_data="cmd_today")],
-            [InlineKeyboardButton(get_text("tomorrow", selected_lang), callback_data="cmd_tomorrow"),
-             InlineKeyboardButton(get_text("leagues", selected_lang), callback_data="cmd_leagues")],
-            [InlineKeyboardButton(get_text("live_alerts", selected_lang), callback_data="cmd_live"),
-             InlineKeyboardButton(get_text("settings", selected_lang), callback_data="cmd_settings")],
-            [InlineKeyboardButton(get_text("favorites", selected_lang), callback_data="cmd_favorites"),
-             InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats")],
-            [InlineKeyboardButton(get_text("premium_btn", selected_lang), callback_data="cmd_premium"),
-             InlineKeyboardButton(get_text("referral_btn", selected_lang), callback_data="cmd_referral")],
-            [InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
+            [InlineKeyboardButton(get_text("try_prediction_btn", selected_lang), callback_data="cmd_recommend")],
+            [InlineKeyboardButton(get_text("today", selected_lang), callback_data="cmd_today"),
+             InlineKeyboardButton(get_text("live_alerts", selected_lang), callback_data="cmd_live")],
+            [InlineKeyboardButton(get_text("open_1win_btn", selected_lang), url=get_affiliate_link(user_id))],
+            [InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats"),
+             InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
         ]
 
         await query.edit_message_text(
@@ -11782,19 +11855,40 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: int, lang: str):
-    """Send onboarding sequence for new users"""
+    """Send onboarding sequence for new users - shows bot stats and quick actions"""
     try:
-        text = f"{get_text('onboard_welcome', lang)}\n\n"
-        text += f"{get_text('onboard_step1', lang)}\n"
-        text += f"{get_text('onboard_step2', lang)}\n"
-        text += f"{get_text('onboard_step3', lang)}\n\n"
-        text += f"{get_text('onboard_free_today', lang).format(count=FREE_DAILY_LIMIT)}\n"
-        text += f"{get_text('onboard_try_now', lang)}"
+        # Get real bot stats to show credibility
+        bot_stats = get_bot_accuracy_stats()
+        accuracy = bot_stats.get("overall_accuracy", 70)
+        total_bets = bot_stats.get("total", 0)
+
+        # Multilingual stats text
+        stats_text = {
+            "ru": f"📊 **Наша статистика:**\n• Точность: {accuracy}%\n• Проверенных прогнозов: {total_bets}+",
+            "en": f"📊 **Our stats:**\n• Accuracy: {accuracy}%\n• Verified predictions: {total_bets}+",
+            "pt": f"📊 **Nossas estatísticas:**\n• Precisão: {accuracy}%\n• Previsões verificadas: {total_bets}+",
+            "es": f"📊 **Nuestras estadísticas:**\n• Precisión: {accuracy}%\n• Pronósticos verificados: {total_bets}+",
+            "id": f"📊 **Statistik kami:**\n• Akurasi: {accuracy}%\n• Prediksi terverifikasi: {total_bets}+"
+        }
+
+        reminder_text = {
+            "ru": "⏰ **Ещё не пробовал?**\n\nНажми кнопку — получи первый прогноз бесплатно!",
+            "en": "⏰ **Haven't tried yet?**\n\nTap a button — get your first prediction free!",
+            "pt": "⏰ **Ainda não testou?**\n\nToque no botão — obtenha sua primeira previsão grátis!",
+            "es": "⏰ **¿Aún no lo probaste?**\n\n¡Toca el botón — obtén tu primer pronóstico gratis!",
+            "id": "⏰ **Belum mencoba?**\n\nKetuk tombol — dapatkan prediksi pertama gratis!"
+        }
+
+        text = reminder_text.get(lang, reminder_text["en"])
+        text += "\n\n"
+        text += stats_text.get(lang, stats_text["en"])
+        text += f"\n\n{get_text('onboard_try_now', lang)}"
 
         keyboard = [
-            [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")],
-            [InlineKeyboardButton(get_text("live_alerts", lang), callback_data="cmd_live")],
-            [InlineKeyboardButton(get_text("referral_invite_btn", lang), callback_data="cmd_referral")]
+            [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
+            [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today"),
+             InlineKeyboardButton(get_text("live_alerts", lang), callback_data="cmd_live")],
+            [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
         ]
 
         await context.bot.send_message(
