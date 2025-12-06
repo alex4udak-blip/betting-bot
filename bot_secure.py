@@ -3800,6 +3800,14 @@ ML_FEATURE_COLUMNS = {
     "class_diff": 0,               # Positive = home is higher class
     "elite_vs_underdog": 0,        # 1 if elite plays weak/relegation team
     "class_mismatch": 0,           # Absolute class difference (for upset detection)
+    # Line movement (sharp money indicators)
+    "home_odds_dropped": 0,        # 1 if home odds dropped significantly (sharp money)
+    "away_odds_dropped": 0,        # 1 if away odds dropped (sharp money on away)
+    "draw_odds_dropped": 0,        # 1 if draw odds dropped
+    "over_odds_dropped": 0,        # 1 if over odds dropped (sharps on goals)
+    "under_odds_dropped": 0,       # 1 if under odds dropped
+    "sharp_money_detected": 0,     # 1 if any significant sharp money movement
+    "line_movement_direction": 0,  # -1=away favored more, 0=stable, 1=home favored more
 }
 
 
@@ -3877,6 +3885,45 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["implied_home"] = 1 / features["odds_home"] if features["odds_home"] > 0 else 0.4
         features["implied_draw"] = 1 / features["odds_draw"] if features["odds_draw"] > 0 else 0.25
         features["implied_away"] = 1 / features["odds_away"] if features["odds_away"] > 0 else 0.35
+
+        # Line movement features (sharp money indicators)
+        movements = odds.get("_line_movements", {})
+        if movements:
+            # Check each outcome for sharp money (odds dropped)
+            for outcome_key in ["Home", "home", "1"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["home_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Away", "away", "2"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["away_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Draw", "draw", "X"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["draw_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Over_2.5", "over", "Over 2.5"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["over_odds_dropped"] = 1
+                    break
+            for outcome_key in ["Under_2.5", "under", "Under 2.5"]:
+                if outcome_key in movements and movements[outcome_key].get("sharp"):
+                    features["under_odds_dropped"] = 1
+                    break
+
+            # Overall sharp money detection
+            sharp_count = sum(1 for m in movements.values() if m.get("sharp"))
+            features["sharp_money_detected"] = 1 if sharp_count > 0 else 0
+
+            # Direction: positive if home favored more now, negative if away
+            home_change = movements.get("Home", movements.get("home", {})).get("change", 0)
+            away_change = movements.get("Away", movements.get("away", {})).get("change", 0)
+            if home_change < -0.1 and away_change > 0.05:
+                features["line_movement_direction"] = 1  # Sharp on home
+            elif away_change < -0.1 and home_change > 0.05:
+                features["line_movement_direction"] = -1  # Sharp on away
+            else:
+                features["line_movement_direction"] = 0  # Stable
     else:
         features["odds_home"] = 2.5
         features["odds_draw"] = 3.5
@@ -7727,6 +7774,18 @@ CRITICAL ANALYSIS RULES:
    - Trap game detected → SKIP or very low stake
    - Better NO BET than forced losing bet!
 
+18. 📉 LINE MOVEMENT / SHARP MONEY (FOLLOW THE SMART MONEY!):
+   - If odds DROPPED significantly (🔥 marked) → Sharp bettors are on this!
+   - Sharp money on Home (home odds dropped 10%+) → Consider П1, increase confidence +10%
+   - Sharp money on Away (away odds dropped) → Consider П2, sharps see value
+   - Sharp money on Over (over odds dropped) → Sharps expect goals, consider ТБ
+   - Sharp money on Under → Sharps expect defensive match, consider ТМ
+   - STEAM MOVE (multiple odds dropped fast) → STRONG signal, follow the move!
+   - If YOUR analysis + Sharp money align → Extra edge! +15% confidence
+   - If YOUR analysis conflicts with sharp money → Be cautious, reduce confidence
+   - Sharp money is an ADDITIONAL factor in edge stacking!
+   - No line movement = neutral (doesn't help or hurt)
+
 RESPONSE FORMAT:
 
 📊 **АНАЛИЗ ДАННЫХ:**
@@ -7739,6 +7798,7 @@ RESPONSE FORMAT:
 • 📅 Усталость: [дни отдыха, преимущество]
 • 🔥 Мотивация: [дерби/титул/вылет]
 • 👑 Класс: [elite/strong/mid/weak]
+• 📉 Движение линий: [sharp money куда идёт - если есть]
 
 🎯 **EDGE STACKING (подсчёт факторов):**
 ✓ Фактор 1: [описание] → в пользу [ставки]
