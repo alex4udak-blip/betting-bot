@@ -1433,6 +1433,14 @@ def init_db():
     except:
         pass
 
+    # Pending UTM sources - stores UTM before user is created
+    c.execute('''CREATE TABLE IF NOT EXISTS pending_utm (
+        user_id INTEGER PRIMARY KEY,
+        utm_source TEXT,
+        referrer_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -1464,8 +1472,47 @@ def get_user(user_id):
         }
     return None
 
-def create_user(user_id, username=None, language="ru", source="organic"):
-    """Create new user. Returns True if new user created, False if already exists."""
+def save_pending_utm(user_id: int, utm_source: str, referrer_id: int = None):
+    """Save UTM source for user before they complete registration.
+    This persists UTM even if bot restarts between /start and language selection."""
+    if utm_source == "organic" and referrer_id is None:
+        return  # Don't save default organic
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT OR REPLACE INTO pending_utm (user_id, utm_source, referrer_id, created_at)
+                 VALUES (?, ?, ?, datetime('now'))""",
+              (user_id, utm_source, referrer_id))
+    conn.commit()
+    conn.close()
+    logger.info(f"Saved pending UTM for {user_id}: {utm_source}, ref={referrer_id}")
+
+
+def get_pending_utm(user_id: int) -> dict:
+    """Get pending UTM data for user."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT utm_source, referrer_id FROM pending_utm WHERE user_id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if row:
+        return {"utm_source": row[0] or "organic", "referrer_id": row[1]}
+    return {"utm_source": "organic", "referrer_id": None}
+
+
+def delete_pending_utm(user_id: int):
+    """Delete pending UTM after user is created."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM pending_utm WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def create_user(user_id, username=None, language="ru", source=None):
+    """Create new user. Returns True if new user created, False if already exists.
+    If source is None, checks pending_utm table for stored UTM source."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
@@ -1474,9 +1521,18 @@ def create_user(user_id, username=None, language="ru", source="organic"):
     exists = c.fetchone() is not None
 
     if not exists:
+        # If source not explicitly provided, check pending_utm
+        if source is None:
+            pending = get_pending_utm(user_id)
+            source = pending["utm_source"]
+
         c.execute("INSERT INTO users (user_id, username, language, source) VALUES (?, ?, ?, ?)",
                   (user_id, username, language, source))
         conn.commit()
+
+        # Clean up pending UTM
+        delete_pending_utm(user_id)
+
     conn.close()
 
     return not exists  # True if new user was created
@@ -6106,6 +6162,10 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store UTM source for later use when creating user
     context.user_data["utm_source"] = utm_source
 
+    # IMPORTANT: Also save to database in case bot restarts before user creation
+    if not existing_user and (utm_source != "organic" or referrer_id):
+        save_pending_utm(user.id, utm_source, referrer_id)
+
     if not existing_user:
         # NEW USER - show language selection first
         detected_lang = detect_language(user)
@@ -7358,8 +7418,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_user = query.from_user
         detected_tz = detect_timezone(tg_user)
 
-        # Get UTM source from context (set during /start)
-        utm_source = context.user_data.get("utm_source", "organic")
+        # Get UTM source - first from context, then from pending_utm (survives bot restart)
+        utm_source = context.user_data.get("utm_source")
+        pending_data = get_pending_utm(user_id)
+        if not utm_source or utm_source == "organic":
+            utm_source = pending_data["utm_source"]
 
         # Create user with selected language and source
         is_new_user = create_user(user_id, tg_user.username, selected_lang, source=utm_source)
@@ -7376,8 +7439,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 utm_source
             )
 
-        # Save referral if exists
-        referrer_id = context.user_data.get("referrer_id")
+        # Save referral if exists - check both context and pending_utm
+        referrer_id = context.user_data.get("referrer_id") or pending_data.get("referrer_id")
         referral_msg = ""
         if referrer_id:
             if save_referral(referrer_id, user_id):
