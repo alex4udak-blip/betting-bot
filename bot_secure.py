@@ -1275,13 +1275,74 @@ def get_user(user_id):
     return None
 
 def create_user(user_id, username=None, language="ru", source="organic"):
-    """Create new user"""
+    """Create new user. Returns True if new user created, False if already exists."""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, username, language, source) VALUES (?, ?, ?, ?)",
-              (user_id, username, language, source))
-    conn.commit()
+
+    # Check if user already exists
+    c.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    exists = c.fetchone() is not None
+
+    if not exists:
+        c.execute("INSERT INTO users (user_id, username, language, source) VALUES (?, ?, ?, ?)",
+                  (user_id, username, language, source))
+        conn.commit()
     conn.close()
+
+    return not exists  # True if new user was created
+
+
+async def notify_admins_new_user(bot, user_id: int, username: str = None, language: str = "ru", source: str = "organic"):
+    """Send notification to all admins about new user registration."""
+    if not ADMIN_IDS:
+        return
+
+    # Get total user count
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users")
+        total_users = c.fetchone()[0]
+        conn.close()
+    except:
+        total_users = "?"
+
+    # Build notification message
+    username_display = f"@{username}" if username else "—"
+    source_emoji = {
+        "organic": "🌱",
+        "referral": "👥",
+        "ads": "📢",
+        "1win": "🎰"
+    }.get(source, "📥")
+
+    lang_flag = {
+        "ru": "🇷🇺",
+        "en": "🇬🇧",
+        "pt": "🇧🇷",
+        "es": "🇪🇸",
+        "id": "🇮🇩"
+    }.get(language, "🌍")
+
+    message = f"""🆕 **Новый пользователь!**
+
+👤 ID: `{user_id}`
+📛 Username: {username_display}
+{lang_flag} Язык: {language}
+{source_emoji} Источник: {source}
+
+📊 Всего пользователей: **{total_users}**"""
+
+    # Send to all admins
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin {admin_id} about new user: {e}")
 
 # Whitelist of allowed settings fields (prevents SQL injection)
 ALLOWED_USER_SETTINGS = frozenset({
@@ -6673,9 +6734,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         utm_source = context.user_data.get("utm_source", "organic")
 
         # Create user with selected language and source
-        create_user(user_id, tg_user.username, selected_lang, source=utm_source)
+        is_new_user = create_user(user_id, tg_user.username, selected_lang, source=utm_source)
         update_user_settings(user_id, timezone=detected_tz)
-        logger.info(f"New user created: {user_id}, lang={selected_lang}, source={utm_source}")
+
+        if is_new_user:
+            logger.info(f"New user created: {user_id}, lang={selected_lang}, source={utm_source}")
+            # Notify admins about new user
+            await notify_admins_new_user(
+                context.bot,
+                user_id,
+                tg_user.username,
+                selected_lang,
+                utm_source
+            )
 
         # Save referral if exists
         referrer_id = context.user_data.get("referrer_id")
