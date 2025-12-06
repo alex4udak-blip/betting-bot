@@ -935,6 +935,37 @@ def init_db():
         model_path TEXT
     )''')
 
+    # Confidence calibration - tracks predicted vs actual accuracy
+    c.execute('''CREATE TABLE IF NOT EXISTS confidence_calibration (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        confidence_band TEXT,
+        predicted_count INTEGER DEFAULT 0,
+        actual_wins INTEGER DEFAULT 0,
+        calibration_factor REAL DEFAULT 1.0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # Learning patterns - what works and what doesn't
+    c.execute('''CREATE TABLE IF NOT EXISTS learning_patterns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pattern_type TEXT,
+        pattern_key TEXT UNIQUE,
+        pattern_data TEXT,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # Learning log - track what the system learned
+    c.execute('''CREATE TABLE IF NOT EXISTS learning_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT,
+        description TEXT,
+        data_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
     # Add new columns if they don't exist (for migration)
     try:
         c.execute("ALTER TABLE predictions ADD COLUMN bet_category TEXT")
@@ -2104,9 +2135,14 @@ def get_pending_predictions():
              "bet_rank": r[8] if len(r) > 8 else 1} for r in rows]
 
 def update_prediction_result(pred_id, result, is_correct):
-    """Update prediction with result and ML training data"""
+    """Update prediction with result and ML training data + trigger learning"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+
+    # Get prediction details for learning
+    c.execute("""SELECT bet_category, confidence, bet_type FROM predictions WHERE id = ?""", (pred_id,))
+    pred_row = c.fetchone()
+
     c.execute("""UPDATE predictions
                  SET result = ?, is_correct = ?, checked_at = CURRENT_TIMESTAMP
                  WHERE id = ?""", (result, is_correct, pred_id))
@@ -2120,6 +2156,19 @@ def update_prediction_result(pred_id, result, is_correct):
 
         # Check if we should train models
         check_and_train_models()
+
+        # Trigger self-learning system
+        if pred_row:
+            bet_category, confidence, bet_type = pred_row
+            # Get ML features if available
+            conn2 = sqlite3.connect(DB_PATH)
+            c2 = conn2.cursor()
+            c2.execute("SELECT features_json FROM ml_training_data WHERE prediction_id = ?", (pred_id,))
+            features_row = c2.fetchone()
+            conn2.close()
+
+            features = json.loads(features_row[0]) if features_row and features_row[0] else None
+            learn_from_result(pred_id, bet_category, confidence or 70, is_correct, features, bet_type or "")
 
 
 def clean_duplicate_predictions() -> dict:
@@ -2953,9 +3002,13 @@ def apply_ml_correction(bet_type: str, claude_confidence: int, ml_features: dict
     else:
         ml_status = "adjusted"  # ML adjusted up
 
-    logger.info(f"ML correction: {bet_type} | Claude {claude_confidence}% + ML {ml_confidence:.0f}% → {adjusted_confidence}% ({ml_status})")
+    # Apply self-learning adjustments (calibration + patterns)
+    final_confidence, learning_adjustments = apply_learning_adjustments(bet_type, adjusted_confidence, ml_features)
 
-    return adjusted_confidence, ml_status, ml_confidence
+    learning_info = f" | Learning: {', '.join(learning_adjustments)}" if learning_adjustments else ""
+    logger.info(f"ML+Learning: {bet_type} | Claude {claude_confidence}% → ML {adjusted_confidence}% → Final {final_confidence}%{learning_info}")
+
+    return final_confidence, ml_status, ml_confidence
 
 
 def check_and_train_models():
@@ -3011,6 +3064,406 @@ def get_ml_status() -> dict:
         "ready_to_train": [cat for cat, data in data_counts.items()
                           if data["verified"] >= ML_MIN_SAMPLES and cat not in models]
     }
+
+
+# ===== SELF-LEARNING SYSTEM =====
+# System that improves predictions over time by learning from results
+
+def get_confidence_band(confidence: int) -> str:
+    """Convert confidence to band for calibration tracking"""
+    if confidence >= 80:
+        return "80-100"
+    elif confidence >= 70:
+        return "70-79"
+    elif confidence >= 60:
+        return "60-69"
+    else:
+        return "under-60"
+
+
+def update_confidence_calibration(bet_category: str, confidence: int, is_win: bool):
+    """Update calibration table after each verified result.
+
+    Tracks: how often predictions at X% confidence actually win.
+    This helps calibrate future predictions.
+    """
+    band = get_confidence_band(confidence)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get or create calibration record
+    c.execute("""SELECT id, predicted_count, actual_wins
+                 FROM confidence_calibration
+                 WHERE bet_category = ? AND confidence_band = ?""",
+              (bet_category, band))
+    row = c.fetchone()
+
+    if row:
+        new_count = row[1] + 1
+        new_wins = row[2] + (1 if is_win else 0)
+        # Calculate new calibration factor
+        actual_rate = new_wins / new_count if new_count > 0 else 0.5
+        expected_rate = (int(band.split("-")[0]) + 5) / 100  # midpoint of band
+        calibration = actual_rate / expected_rate if expected_rate > 0 else 1.0
+
+        c.execute("""UPDATE confidence_calibration
+                     SET predicted_count = ?, actual_wins = ?,
+                         calibration_factor = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?""",
+                  (new_count, new_wins, calibration, row[0]))
+    else:
+        c.execute("""INSERT INTO confidence_calibration
+                     (bet_category, confidence_band, predicted_count, actual_wins, calibration_factor)
+                     VALUES (?, ?, 1, ?, 1.0)""",
+                  (bet_category, band, 1 if is_win else 0))
+
+    conn.commit()
+    conn.close()
+
+
+def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
+    """Adjust confidence based on historical accuracy.
+
+    If 70% predictions actually win only 55% of time, reduce confidence.
+    If 70% predictions win 80% of time, increase confidence.
+    """
+    band = get_confidence_band(raw_confidence)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""SELECT calibration_factor, predicted_count
+                 FROM confidence_calibration
+                 WHERE bet_category = ? AND confidence_band = ?""",
+              (bet_category, band))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or row[1] < 10:  # Need at least 10 samples for calibration
+        return raw_confidence
+
+    calibration = row[0]
+    # Apply calibration (capped at ±20%)
+    calibration = max(0.8, min(1.2, calibration))
+    calibrated = int(raw_confidence * calibration)
+
+    # Keep within valid range
+    return max(30, min(95, calibrated))
+
+
+def detect_pattern(features: dict, bet_type: str) -> str:
+    """Detect pattern from match features for pattern learning.
+
+    Returns a pattern key like:
+    'home_strong_favorite|totals_over' or 'underdog_form_good|outcomes_home'
+    """
+    patterns = []
+
+    # Home/Away strength pattern
+    home_wins = features.get("home_wins", 0)
+    away_wins = features.get("away_wins", 0)
+    position_diff = features.get("position_diff", 0)
+
+    if position_diff >= 10:
+        patterns.append("home_much_higher")
+    elif position_diff >= 5:
+        patterns.append("home_higher")
+    elif position_diff <= -10:
+        patterns.append("away_much_higher")
+    elif position_diff <= -5:
+        patterns.append("away_higher")
+    else:
+        patterns.append("teams_equal")
+
+    # Form pattern
+    if home_wins >= 4:
+        patterns.append("home_hot")
+    elif home_wins <= 1:
+        patterns.append("home_cold")
+
+    if away_wins >= 4:
+        patterns.append("away_hot")
+    elif away_wins <= 1:
+        patterns.append("away_cold")
+
+    # H2H pattern
+    h2h_home = features.get("h2h_home_wins", 0)
+    h2h_away = features.get("h2h_away_wins", 0)
+    if h2h_home >= 3:
+        patterns.append("h2h_home_dominant")
+    elif h2h_away >= 3:
+        patterns.append("h2h_away_dominant")
+
+    # Goals pattern
+    expected_goals = features.get("expected_goals", 2.5)
+    if expected_goals >= 3.0:
+        patterns.append("high_scoring")
+    elif expected_goals <= 2.0:
+        patterns.append("low_scoring")
+
+    # Categorize bet type
+    category = categorize_bet(bet_type)
+
+    # Create pattern key
+    pattern_key = "|".join(sorted(patterns)) + f">{category}"
+    return pattern_key
+
+
+def update_pattern(pattern_key: str, is_win: bool):
+    """Update pattern win/loss record."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT id, wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
+    row = c.fetchone()
+
+    if row:
+        if is_win:
+            c.execute("UPDATE learning_patterns SET wins = wins + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ?", (row[0],))
+        else:
+            c.execute("UPDATE learning_patterns SET losses = losses + 1, last_updated = CURRENT_TIMESTAMP WHERE id = ?", (row[0],))
+    else:
+        c.execute("""INSERT INTO learning_patterns (pattern_type, pattern_key, wins, losses)
+                     VALUES ('match_pattern', ?, ?, ?)""",
+                  (pattern_key, 1 if is_win else 0, 0 if is_win else 1))
+
+    conn.commit()
+    conn.close()
+
+
+def get_pattern_adjustment(pattern_key: str) -> int:
+    """Get confidence adjustment based on pattern history.
+
+    Returns: adjustment in percentage points (-15 to +15)
+    Positive = pattern historically wins
+    Negative = pattern historically loses
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return 0
+
+    wins, losses = row
+    total = wins + losses
+
+    if total < 5:  # Need at least 5 samples
+        return 0
+
+    win_rate = wins / total
+
+    # Calculate adjustment
+    # 50% win rate = 0 adjustment
+    # 70% win rate = +10 adjustment
+    # 30% win rate = -10 adjustment
+    adjustment = int((win_rate - 0.5) * 50)
+
+    # Cap at ±15
+    return max(-15, min(15, adjustment))
+
+
+def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
+                      is_correct: bool, features: dict, bet_type: str):
+    """Main learning function - called after each verified result.
+
+    Updates:
+    1. Confidence calibration
+    2. Pattern learning
+    3. Triggers model retraining if needed
+    """
+    is_win = is_correct == True  # Handle 0, 1, 2 (push)
+
+    # Skip push results for learning
+    if is_correct == 2:  # Push
+        return
+
+    # 1. Update confidence calibration
+    if bet_category:
+        update_confidence_calibration(bet_category, confidence, is_win)
+
+    # 2. Update pattern learning
+    if features:
+        pattern_key = detect_pattern(features, bet_type)
+        update_pattern(pattern_key, is_win)
+
+        # Log significant patterns
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
+        row = c.fetchone()
+        conn.close()
+
+        if row:
+            wins, losses = row
+            total = wins + losses
+            if total >= 10:  # Log after 10 samples
+                win_rate = wins / total * 100
+                if win_rate >= 70 or win_rate <= 30:
+                    log_learning_event(
+                        "pattern_significant",
+                        f"Pattern '{pattern_key}' has {win_rate:.0f}% win rate ({total} samples)",
+                        {"pattern": pattern_key, "wins": wins, "losses": losses}
+                    )
+
+    # 3. Check if model needs retraining
+    if bet_category and should_retrain_model(bet_category):
+        logger.info(f"🔄 Triggering model retrain for {bet_category}")
+        result = train_ml_model(bet_category)
+        if result:
+            log_learning_event(
+                "model_retrained",
+                f"Retrained {bet_category} model: {result['accuracy']:.1%} accuracy",
+                result
+            )
+
+
+def should_retrain_model(bet_category: str) -> bool:
+    """Check if model should be retrained.
+
+    Retrain when:
+    1. New data > 20% more than training data
+    2. Recent accuracy significantly lower than model accuracy
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get model info
+    c.execute("""SELECT accuracy, samples_count, trained_at
+                 FROM ml_models WHERE model_type = ?
+                 ORDER BY trained_at DESC LIMIT 1""", (bet_category,))
+    model = c.fetchone()
+
+    if not model:
+        conn.close()
+        return False  # No model exists yet
+
+    model_accuracy, model_samples, trained_at = model
+
+    # Count current verified samples
+    c.execute("""SELECT COUNT(*) FROM ml_training_data
+                 WHERE bet_category = ? AND target IS NOT NULL""", (bet_category,))
+    current_samples = c.fetchone()[0]
+
+    # Check if we have 20% more data
+    if current_samples > model_samples * 1.2:
+        conn.close()
+        logger.info(f"Retrain {bet_category}: {current_samples} samples vs {model_samples} trained")
+        return True
+
+    # Check recent accuracy (last 20 predictions)
+    c.execute("""SELECT target FROM ml_training_data
+                 WHERE bet_category = ? AND target IS NOT NULL
+                 ORDER BY created_at DESC LIMIT 20""", (bet_category,))
+    recent = c.fetchall()
+    conn.close()
+
+    if len(recent) >= 20:
+        recent_accuracy = sum(1 for r in recent if r[0] == 1) / len(recent)
+        # If recent accuracy is 15%+ lower than model accuracy, retrain
+        if recent_accuracy < model_accuracy - 0.15:
+            logger.info(f"Retrain {bet_category}: recent {recent_accuracy:.1%} vs model {model_accuracy:.1%}")
+            return True
+
+    return False
+
+
+def log_learning_event(event_type: str, description: str, data: dict = None):
+    """Log a learning event for tracking system improvement."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""INSERT INTO learning_log (event_type, description, data_json)
+                 VALUES (?, ?, ?)""",
+              (event_type, description, json.dumps(data) if data else None))
+    conn.commit()
+    conn.close()
+    logger.info(f"📚 Learning: {description}")
+
+
+def get_learning_stats() -> dict:
+    """Get statistics about system learning progress."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Calibration stats
+    c.execute("""SELECT bet_category, confidence_band, predicted_count, actual_wins, calibration_factor
+                 FROM confidence_calibration WHERE predicted_count >= 5
+                 ORDER BY bet_category, confidence_band""")
+    calibrations = {}
+    for row in c.fetchall():
+        cat = row[0]
+        if cat not in calibrations:
+            calibrations[cat] = {}
+        calibrations[cat][row[1]] = {
+            "count": row[2],
+            "wins": row[3],
+            "rate": round(row[3] / row[2] * 100, 1) if row[2] > 0 else 0,
+            "calibration": round(row[4], 2)
+        }
+
+    # Pattern stats - best and worst
+    c.execute("""SELECT pattern_key, wins, losses
+                 FROM learning_patterns
+                 WHERE wins + losses >= 5
+                 ORDER BY CAST(wins AS FLOAT) / (wins + losses) DESC
+                 LIMIT 5""")
+    best_patterns = [{"pattern": r[0], "wins": r[1], "losses": r[2],
+                      "rate": round(r[1]/(r[1]+r[2])*100, 1)} for r in c.fetchall()]
+
+    c.execute("""SELECT pattern_key, wins, losses
+                 FROM learning_patterns
+                 WHERE wins + losses >= 5
+                 ORDER BY CAST(wins AS FLOAT) / (wins + losses) ASC
+                 LIMIT 5""")
+    worst_patterns = [{"pattern": r[0], "wins": r[1], "losses": r[2],
+                       "rate": round(r[1]/(r[1]+r[2])*100, 1)} for r in c.fetchall()]
+
+    # Recent learning events
+    c.execute("""SELECT event_type, description, created_at
+                 FROM learning_log ORDER BY created_at DESC LIMIT 10""")
+    recent_events = [{"type": r[0], "desc": r[1], "time": r[2]} for r in c.fetchall()]
+
+    conn.close()
+
+    return {
+        "calibrations": calibrations,
+        "best_patterns": best_patterns,
+        "worst_patterns": worst_patterns,
+        "recent_learning": recent_events
+    }
+
+
+def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dict) -> tuple:
+    """Apply all learning adjustments to confidence.
+
+    Returns: (adjusted_confidence, adjustments_applied)
+    """
+    adjustments = []
+    confidence = raw_confidence
+
+    category = categorize_bet(bet_type)
+
+    # 1. Apply calibration
+    if category:
+        calibrated = get_calibrated_confidence(category, confidence)
+        if calibrated != confidence:
+            adjustments.append(f"calibration: {confidence}→{calibrated}")
+            confidence = calibrated
+
+    # 2. Apply pattern adjustment
+    if features:
+        pattern_key = detect_pattern(features, bet_type)
+        pattern_adj = get_pattern_adjustment(pattern_key)
+        if pattern_adj != 0:
+            new_conf = max(30, min(95, confidence + pattern_adj))
+            adjustments.append(f"pattern: {'+' if pattern_adj > 0 else ''}{pattern_adj}")
+            confidence = new_conf
+
+    return confidence, adjustments
 
 
 def get_user_stats(user_id, page: int = 0, per_page: int = 7):
@@ -5306,7 +5759,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
         [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats"),
          InlineKeyboardButton("📈 Источники", callback_data="admin_sources")],
-        [InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats")],
+        [InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats"),
+         InlineKeyboardButton("🧠 Обучение", callback_data="admin_learning")],
         [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
         [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
@@ -6333,6 +6787,60 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_learning":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        try:
+            learning = get_learning_stats()
+
+            text = "🧠 **СИСТЕМА САМООБУЧЕНИЯ**\n\n"
+
+            # Calibration stats
+            if learning["calibrations"]:
+                text += "📊 **Калибровка уверенности:**\n"
+                for cat, bands in learning["calibrations"].items():
+                    text += f"  *{cat}:*\n"
+                    for band, data in bands.items():
+                        emoji = "✅" if 0.9 <= data["calibration"] <= 1.1 else "⚠️"
+                        text += f"    {band}%: {data['rate']}% факт (x{data['calibration']}) [{data['count']}]\n"
+                text += "\n"
+            else:
+                text += "📊 Калибровка: данных пока нет\n\n"
+
+            # Best patterns
+            if learning["best_patterns"]:
+                text += "🏆 **Лучшие паттерны:**\n"
+                for p in learning["best_patterns"][:3]:
+                    pattern_short = p["pattern"].split(">")[0][:30]
+                    text += f"✅ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                text += "\n"
+
+            # Worst patterns
+            if learning["worst_patterns"]:
+                text += "⚠️ **Худшие паттерны (избегать):**\n"
+                for p in learning["worst_patterns"][:3]:
+                    pattern_short = p["pattern"].split(">")[0][:30]
+                    text += f"❌ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                text += "\n"
+
+            # Recent learning events
+            if learning["recent_learning"]:
+                text += "📚 **Последние события обучения:**\n"
+                for e in learning["recent_learning"][:5]:
+                    text += f"• {e['desc'][:50]}...\n"
+            else:
+                text += "📚 События обучения: пока нет\n"
+
+            text += "\n💡 Система учится с каждым проверенным прогнозом!"
+
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin learning stats error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
 
     # League selection
     elif data.startswith("league_"):
