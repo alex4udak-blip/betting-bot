@@ -3187,7 +3187,7 @@ def update_prediction_result(pred_id, result, is_correct):
 
             # Update user personalization stats
             if pred_info and pred_info[0] and pred_info[0] > 0:  # user_id > 0 (not bot alerts)
-                user_id, odds = pred_info
+                user_id, odds, _ = pred_info  # 3 values: user_id, odds, league_code
                 update_user_bet_stats(user_id, bet_category, is_correct == 1, odds or 1.5)
 
 
@@ -12435,7 +12435,8 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
             processed += 1
 
         except Exception as e:
-            logger.error(f"Error checking match {match_id}: {e}")
+            import traceback
+            logger.error(f"Error checking match {match_id}: {e}\n{traceback.format_exc()}")
 
     # Process bot alerts (user_id=0) - update DB only, no notification
     for pred in bot_alerts[:40]:
