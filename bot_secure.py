@@ -1965,7 +1965,7 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
 
     Duplicate rules:
     - Main bet (rank=1): Only ONE main bet per match allowed (regardless of bet_type)
-    - Alternative (rank>1): One per bet_type per match
+    - Alternative (rank>1): Max 3 per match, one per bet_type
     """
     category = categorize_bet(bet_type)
 
@@ -1977,12 +1977,22 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
         c.execute("""SELECT id, bet_type FROM predictions
                      WHERE user_id = ? AND match_id = ? AND bet_rank = 1
                      LIMIT 1""", (user_id, match_id))
+        existing = c.fetchone()
     else:
-        # For alternatives: check by bet_type (allow different types)
+        # For alternatives: check if already have 3 alts OR same bet_type exists
+        c.execute("""SELECT COUNT(*) FROM predictions
+                     WHERE user_id = ? AND match_id = ? AND bet_rank > 1""", (user_id, match_id))
+        alt_count = c.fetchone()[0]
+
+        if alt_count >= 3:
+            conn.close()
+            logger.info(f"Skipping ALT: match {match_id} already has 3 alternatives")
+            return None
+
         c.execute("""SELECT id, bet_type FROM predictions
                      WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank > 1
                      LIMIT 1""", (user_id, match_id, bet_type))
-    existing = c.fetchone()
+        existing = c.fetchone()
 
     if existing:
         # Already have this prediction
