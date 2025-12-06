@@ -3404,8 +3404,120 @@ def calculate_kelly(probability: float, odds: float) -> float:
     return max(0, min(kelly / 4, 0.25))
 
 
-def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, away_form: dict) -> tuple:
-    """Validate totals prediction against expected goals.
+# ===== IMPROVED EXPECTED GOALS CALCULATION =====
+# Uses home/away specific stats instead of overall averages
+
+# Average goals per game in major leagues (for reference/normalization)
+LEAGUE_AVG_GOALS = {
+    "PL": 2.70,   # Premier League
+    "BL1": 3.10,  # Bundesliga (higher scoring)
+    "SA": 2.55,   # Serie A
+    "PD": 2.50,   # La Liga
+    "FL1": 2.60,  # Ligue 1
+    "CL": 2.85,   # Champions League
+    "EL": 2.70,   # Europa League
+    "BSA": 2.40,  # Brasileirão
+    "DED": 3.00,  # Eredivisie (high scoring)
+    "PPL": 2.45,  # Liga Portugal
+    "default": 2.60
+}
+
+
+def calculate_expected_goals(home_form: dict, away_form: dict, league_code: str = None) -> dict:
+    """Calculate expected goals using HOME/AWAY specific stats.
+
+    This is more accurate than using overall averages because:
+    - Home teams play differently at home vs away
+    - Away teams play differently at home vs away
+
+    Formula:
+    - expected_home = home_team_home_scored * 0.6 + away_team_away_conceded * 0.4
+    - expected_away = away_team_away_scored * 0.6 + home_team_home_conceded * 0.4
+
+    Weights: Attack (0.6) > Defense (0.4) because team's own attack matters more.
+
+    Returns dict with expected_home, expected_away, expected_total, and method used.
+    """
+    result = {
+        "expected_home": 1.3,  # Default
+        "expected_away": 1.0,
+        "expected_total": 2.3,
+        "method": "default",
+        "confidence": "low"
+    }
+
+    # Get league average for normalization
+    league_avg = LEAGUE_AVG_GOALS.get(league_code, LEAGUE_AVG_GOALS["default"]) if league_code else 2.60
+
+    try:
+        # Try to use HOME/AWAY specific stats (best method)
+        home_home = home_form.get("home", {}) if home_form else {}
+        away_away = away_form.get("away", {}) if away_form else {}
+
+        home_home_scored = home_home.get("avg_goals_scored")
+        home_home_conceded = home_home.get("avg_goals_conceded")
+        away_away_scored = away_away.get("avg_goals_scored")
+        away_away_conceded = away_away.get("avg_goals_conceded")
+
+        # Check if we have HOME/AWAY specific data
+        if all([home_home_scored, home_home_conceded, away_away_scored, away_away_conceded]):
+            # Best method: use home/away specific averages
+            # Weight: team's attack (0.6) + opponent's defense weakness (0.4)
+            expected_home = home_home_scored * 0.6 + away_away_conceded * 0.4
+            expected_away = away_away_scored * 0.6 + home_home_conceded * 0.4
+
+            result["expected_home"] = round(expected_home, 2)
+            result["expected_away"] = round(expected_away, 2)
+            result["expected_total"] = round(expected_home + expected_away, 2)
+            result["method"] = "home_away_specific"
+            result["confidence"] = "high"
+
+            # Add breakdown for transparency
+            result["breakdown"] = {
+                "home_attack": home_home_scored,
+                "home_defense": home_home_conceded,
+                "away_attack": away_away_scored,
+                "away_defense": away_away_conceded
+            }
+
+        else:
+            # Fallback: use overall averages (less accurate)
+            home_overall = home_form.get("overall", {}) if home_form else {}
+            away_overall = away_form.get("overall", {}) if away_form else {}
+
+            home_scored = home_overall.get("avg_goals_scored", 1.4)
+            home_conceded = home_overall.get("avg_goals_conceded", 1.2)
+            away_scored = away_overall.get("avg_goals_scored", 1.2)
+            away_conceded = away_overall.get("avg_goals_conceded", 1.4)
+
+            # Simple average method
+            expected_home = (home_scored + away_conceded) / 2
+            expected_away = (away_scored + home_conceded) / 2
+
+            result["expected_home"] = round(expected_home, 2)
+            result["expected_away"] = round(expected_away, 2)
+            result["expected_total"] = round(expected_home + expected_away, 2)
+            result["method"] = "overall_average"
+            result["confidence"] = "medium"
+
+        # Apply league normalization (optional boost/reduction)
+        # If league is high-scoring (like Bundesliga), slightly increase expectation
+        league_factor = league_avg / 2.60  # 2.60 is our baseline
+        if league_factor > 1.05 or league_factor < 0.95:
+            result["expected_total"] = round(result["expected_total"] * league_factor, 2)
+            result["league_adjustment"] = round((league_factor - 1) * 100, 1)
+
+    except Exception as e:
+        logger.error(f"Expected goals calculation error: {e}")
+        result["method"] = "error_fallback"
+        result["confidence"] = "low"
+
+    return result
+
+
+def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, away_form: dict,
+                                league_code: str = None) -> tuple:
+    """Validate totals prediction against expected goals (using improved calculation).
     Returns (validated_bet_type, validated_confidence, warning_message)"""
 
     if not bet_type or not home_form or not away_form:
@@ -3417,18 +3529,13 @@ def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, 
     if "тб" not in bet_lower and "тм" not in bet_lower and "over" not in bet_lower and "under" not in bet_lower:
         return bet_type, confidence, None
 
-    # Calculate expected goals from form
+    # Use improved expected goals calculation
     try:
-        home_scored = home_form.get('goals_scored', 7.5) / 5  # 5 matches
-        home_conceded = home_form.get('goals_conceded', 5) / 5
-        away_scored = away_form.get('goals_scored', 5) / 5
-        away_conceded = away_form.get('goals_conceded', 7.5) / 5
+        exp_goals = calculate_expected_goals(home_form, away_form, league_code)
+        expected_total = exp_goals["expected_total"]
+        method = exp_goals["method"]
 
-        expected_home = (home_scored + away_conceded) / 2
-        expected_away = (away_scored + home_conceded) / 2
-        expected_total = expected_home + expected_away
-
-        logger.info(f"Totals validation: expected_total={expected_total:.2f}, bet_type={bet_type}")
+        logger.info(f"Totals validation: expected={expected_total:.2f} ({method}), bet={bet_type}, league={league_code}")
 
         is_over = "тб" in bet_lower or "over" in bet_lower or "больше" in bet_lower
         is_under = "тм" in bet_lower or "under" in bet_lower or "меньше" in bet_lower
@@ -3436,16 +3543,15 @@ def validate_totals_prediction(bet_type: str, confidence: int, home_form: dict, 
         # STRICT VALIDATION
         if is_over and expected_total < 2.3:
             # Over recommended but expected goals too low!
-            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} < 2.5, ТБ рискован!"
-            logger.warning(f"Totals mismatch: Over recommended but expected={expected_total:.2f}")
-            # Reduce confidence significantly
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: ожидаемые голы={expected_total:.1f} < 2.5, ТБ рискован!"
+            logger.warning(f"Totals mismatch: Over but expected={expected_total:.2f}")
             new_confidence = min(confidence, 60)
             return bet_type, new_confidence, warning
 
         if is_under and expected_total > 2.7:
             # Under recommended but expected goals too high!
-            warning = f"⚠️ КОНТР-ПРОВЕРКА: expected_total={expected_total:.1f} > 2.5, ТМ рискован!"
-            logger.warning(f"Totals mismatch: Under recommended but expected={expected_total:.2f}")
+            warning = f"⚠️ КОНТР-ПРОВЕРКА: ожидаемые голы={expected_total:.1f} > 2.5, ТМ рискован!"
+            logger.warning(f"Totals mismatch: Under but expected={expected_total:.2f}")
             new_confidence = min(confidence, 60)
             return bet_type, new_confidence, warning
 
@@ -3642,9 +3748,13 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
     features["h2h_away_wins"] = h2h_away_wins
     features["h2h_total"] = h2h_home_wins + h2h_draws + h2h_away_wins
 
-    # Calculated features
-    features["expected_goals"] = (features["home_goals_scored"] + features["away_goals_conceded"]) / 2 + \
-                                  (features["away_goals_scored"] + features["home_goals_conceded"]) / 2
+    # Calculated features - use improved expected goals calculation
+    exp_goals = calculate_expected_goals(home_form, away_form)
+    features["expected_goals"] = exp_goals["expected_total"]
+    features["expected_home_goals"] = exp_goals["expected_home"]
+    features["expected_away_goals"] = exp_goals["expected_away"]
+    features["expected_goals_method"] = 1 if exp_goals["method"] == "home_away_specific" else 0
+
     features["avg_btts_pct"] = (features["home_btts_pct"] + features["away_btts_pct"]) / 2
     features["avg_over25_pct"] = (features["home_over25_pct"] + features["away_over25_pct"]) / 2
 
@@ -6104,15 +6214,22 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
                 analysis_data += f"  ⏱️ Отдых: {rest} дней\n"
         analysis_data += "\n"
 
-    # EXPECTED GOALS calculation
+    # EXPECTED GOALS calculation (using improved home/away specific method)
     if home_form and away_form:
-        expected_home = (home_form['home']['avg_goals_scored'] + away_form['away']['avg_goals_conceded']) / 2
-        expected_away = (away_form['away']['avg_goals_scored'] + home_form['home']['avg_goals_conceded']) / 2
-        expected_total = expected_home + expected_away
-        analysis_data += f"🎯 ОЖИДАЕМЫЕ ГОЛЫ (расчёт):\n"
+        exp_goals = calculate_expected_goals(home_form, away_form, comp_code)
+        expected_home = exp_goals["expected_home"]
+        expected_away = exp_goals["expected_away"]
+        expected_total = exp_goals["expected_total"]
+        method = exp_goals["method"]
+
+        analysis_data += f"🎯 ОЖИДАЕМЫЕ ГОЛЫ (расчёт на основе формы):\n"
         analysis_data += f"  {home}: ~{expected_home:.1f} голов\n"
         analysis_data += f"  {away}: ~{expected_away:.1f} голов\n"
-        analysis_data += f"  Ожидаемый тотал: ~{expected_total:.1f}\n\n"
+        analysis_data += f"  Ожидаемый тотал: ~{expected_total:.1f}\n"
+        if method == "home_away_specific":
+            analysis_data += f"  📊 Метод: домашняя/гостевая статистика (точный)\n\n"
+        else:
+            analysis_data += f"  📊 Метод: общая статистика (приблизительный)\n\n"
 
     # H2H analysis with reliability warning
     if h2h:
