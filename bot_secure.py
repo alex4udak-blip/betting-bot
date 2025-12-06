@@ -713,6 +713,143 @@ TRANSLATIONS = {
         "daily_digest_title": "☀️ **RESUMEN DEL DÍA**",
         "place_bet_btn": "🎰 Apostar",
         "all_matches_btn": "📅 Todos los partidos",
+    },
+    "id": {
+        "welcome": "👋 Halo! Saya bot taruhan AI untuk sepak bola.\n\nGunakan menu di bawah atau ketik nama tim.",
+        "top_bets": "🔥 Taruhan Top",
+        "matches": "⚽ Pertandingan",
+        "stats": "📊 Statistik",
+        "favorites": "⭐ Favorit",
+        "settings": "⚙️ Pengaturan",
+        "help_btn": "❓ Bantuan",
+        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses premium:**\n• $10+ (~Rp156K) → +5 prediksi\n• $40+ (~Rp625K) → 7 hari\n• $100+ (~Rp1,56M) → 30 hari\n• $200+ (~Rp3,12M) → Selamanya\n\n👇 Lakukan deposit melalui link:",
+        "place_bet": "🎰 Pasang taruhan",
+        "no_matches": "Tidak ada pertandingan",
+        "analyzing": "🔍 Menganalisis...",
+        "cup_warning": "⚠️ Pertandingan piala — risiko lebih tinggi!",
+        "rotation_warning": "⚠️ Kemungkinan rotasi pemain",
+        "top_club_warning": "⚠️ Klub top — jangan taruhan melawan",
+        "unlimited": "🎰 Akses tak terbatas",
+        # New translations
+        "choose_action": "Pilih aksi:",
+        "recommendations": "📊 Rekomendasi",
+        "today": "📅 Hari ini",
+        "tomorrow": "📆 Besok",
+        "leagues": "🏆 Liga",
+        "live_alerts": "🔔 Notifikasi live",
+        "help": "❓ Bantuan",
+        "matches_today": "📅 **PERTANDINGAN HARI INI**",
+        "matches_tomorrow": "📆 **PERTANDINGAN BESOK**",
+        "recs_today": "📊 Rekomendasi hari ini",
+        "recs_tomorrow": "📊 Rekomendasi besok",
+        "top_leagues": "🏆 **Liga Top:**",
+        "other_leagues": "🏆 **Liga Lainnya:**",
+        "more_leagues": "➕ Liga lainnya",
+        "back": "🔙 Kembali",
+        "back_to_leagues": "🔙 Ke liga",
+        "loading": "🔍 Memuat {name}...",
+        "no_matches_league": "❌ Tidak ada pertandingan untuk {name}",
+        "free_predictions": "💎 Gratis: {limit} prediksi/hari",
+        "unlimited_deposit": "🔓 Tak terbatas: lakukan deposit melalui link",
+        "live_alerts_on": "🔔 **Notifikasi live aktif!**\n\nMemeriksa pertandingan setiap 10 menit.\nJika menemukan taruhan 70%+ dalam 1-3 jam — akan dikirim notifikasi!\n\nKetik /live untuk menonaktifkan.",
+        "live_alerts_off": "🔕 **Notifikasi live dinonaktifkan**\n\nKetik /live untuk mengaktifkan lagi.",
+        "live_alert_title": "🚨 NOTIFIKASI LIVE!",
+        "in_hours": "Dalam {hours} jam",
+        "bet": "⚡ TARUHAN:",
+        "confidence": "📊 Keyakinan:",
+        "odds": "💰 Odds:",
+        "reason": "📝 Alasan:",
+        "first_start_title": "🎉 **Selamat datang di AI Betting Bot!**",
+        "first_start_text": "Saya akan membantu Anda membuat taruhan sepak bola cerdas menggunakan analisis AI.",
+        "detected_settings": "🌍 Pengaturan terdeteksi:",
+        "language_label": "Bahasa",
+        "timezone_label": "Zona waktu",
+        "change_in_settings": "Anda dapat mengubahnya di pengaturan",
+        # Settings UI
+        "admin_only": "⛔ Khusus admin",
+        "limit_reset": "✅ Batas direset!\n\nUser ID: {user_id}\nPermintaan harian: 0/{limit}\n\nAnda dapat membuat {limit} prediksi baru.",
+        "premium_removed": "✅ Status premium dihapus!\n\nUser ID: {user_id}\nPremium: {premium}\nPermintaan harian: {requests}/{limit}\n\nBatas sekarang aktif.",
+        "select_min_odds": "📉 Pilih odds minimum:",
+        "min_odds_set": "✅ Odds min: {value}",
+        "select_max_odds": "📈 Pilih odds maksimum:",
+        "max_odds_set": "✅ Odds maks: {value}",
+        "select_risk": "⚠️ Pilih tingkat risiko:",
+        "risk_set": "✅ Risiko: {value}",
+        "select_language": "🌍 Pilih bahasa:",
+        "select_timezone": "🕐 Pilih zona waktu:",
+        "select_league": "➕ Pilih liga:",
+        "league_added": "✅ {name} ditambahkan!",
+        "team_added": "✅ {name} ditambahkan ke favorit!",
+        "greeting_response": "👋 Halo! Pilih aksi atau ketik nama tim:",
+        "upcoming_matches": "⚽ **Pertandingan mendatang:**",
+        "analyzing_bets": "🔍 Menganalisis taruhan terbaik...",
+        "analysis_error": "❌ Error analisis.",
+        "sure_searching": "🎯 Mencari taruhan pasti (75%+)...",
+        "searching_match": "🔍 Mencari pertandingan...",
+        "match_not_found": "😕 Pertandingan tidak ditemukan: {query}",
+        "available_matches": "📋 **Pertandingan tersedia:**",
+        "match_found": "✅ Ditemukan: {home} vs {away}\n🏆 {comp}\n\n⏳ Mengumpulkan statistik...",
+        "premium_btn": "💎 Premium",
+        "no_sure_bets": "❌ Tidak ada taruhan pasti 75%+ untuk hari-hari mendatang.",
+        # Referral system
+        "referral_btn": "👥 Teman",
+        "referral_title": "👥 **Program Referral**",
+        "referral_desc": "Undang teman dan dapatkan hari premium bonus!",
+        "referral_link": "🔗 **Link Anda:**",
+        "referral_stats": "📊 **Statistik Anda:**",
+        "referral_invited": "Diundang",
+        "referral_premium": "Beli premium",
+        "referral_earned": "Hari diperoleh",
+        "referral_bonus": "**+{days} hari** premium untuk teman yang direferensikan!",
+        "referral_copy": "👆 Ketuk link untuk menyalin",
+        "referral_rules": "📋 **Aturan:**\n• Untuk setiap teman yang membeli premium — **+3 hari** untuk Anda\n• Bonus diberikan otomatis",
+        "referral_welcome": "🎁 Anda diundang oleh teman! Dapatkan bonus saat membeli premium.",
+        "referral_reminder": "👥 **Undang teman!**\n\nDapatkan **+3 hari** gratis untuk setiap teman dengan premium!\n\n🔗 Link Anda: `{link}`",
+        # Streak system
+        "streak_title": "🔥 **Streak Anda: {days} hari!**",
+        "streak_bonus": "🎁 Bonus streak: **+{bonus}** akurasi prediksi!",
+        "streak_lost": "😢 Streak hilang! Mulai lagi.",
+        "streak_record": "🏆 Rekor Anda: {record} hari",
+        "streak_milestone": "🎉 **{days} hari berturut-turut!** Anda luar biasa! 🔥",
+        # Social proof
+        "social_wins_today": "🏆 **{count} pengguna menang hari ini!**",
+        "social_total_wins": "📊 Total kemenangan minggu ini: **{count}**",
+        "social_top_win": "💰 Kemenangan terbaik hari ini: **{odds}x** di {match}!",
+        "social_accuracy": "🎯 Akurasi prediksi mingguan: **{accuracy}%**",
+        "social_friend_won": "🎉 Teman Anda **{name}** menang taruhan!\n\n{match}\n⚡ {bet} @ {odds}\n\n👥 Undang lebih banyak teman: /ref",
+        # Notifications
+        "notif_welcome_back": "👋 Selamat datang kembali! Ini taruhan top hari ini:",
+        "notif_hot_match": "🔥 **Pertandingan panas dalam {hours} jam!**\n\n{match}\n📊 Keyakinan: {confidence}%",
+        "notif_daily_digest": "📊 **Statistik harian Anda:**\n• Prediksi: {predictions}\n• Kemenangan: {wins}\n• Streak: {streak} hari 🔥",
+        # Premium page
+        "premium_title": "💎 **AKSES PREMIUM**",
+        "premium_unlimited": "🎯 Prediksi tak terbatas dengan akurasi 70%+",
+        "premium_option1_title": "**Opsi 1: Deposit di 1win** 🎰",
+        "premium_option1_desc": "Lakukan deposit — dapatkan premium otomatis!",
+        "premium_option2_title": "**Opsi 2: Kripto (USDT/TON)** 💰",
+        "premium_option2_crypto": "Pilih paket di bawah — bayar via @CryptoBot",
+        "premium_option2_manual": "Hubungi @{support} untuk membayar",
+        "premium_free_title": "👥 **Cara gratis!**",
+        "premium_free_desc": "Undang teman — dapatkan **+3 hari** per teman!",
+        "premium_earned": "Sudah diperoleh: **{days} hari**",
+        "premium_click_below": "Klik tombol di bawah 👇",
+        "premium_after_payment": "Setelah pembayaran — kirim screenshot ke @{support}",
+        "premium_deposit_btn": "🎰 Deposit di 1win",
+        "premium_contact_btn": "💬 Hubungi @{support}",
+        "premium_friends_btn": "👥 Gratis (undang teman)",
+        "premium_status": "✅ Anda memiliki premium hingga: {date}",
+        "friend_fallback": "Teman",
+        # Prediction results
+        "pred_result_title": "📊 **Hasil Prediksi**",
+        "pred_correct": "Prediksi benar!",
+        "pred_incorrect": "Prediksi gagal",
+        "pred_push": "Push (void)",
+        "bet_main": "⚡ UTAMA",
+        "bet_alt": "📌 ALTERNATIF",
+        # Daily digest
+        "daily_digest_title": "☀️ **RINGKASAN HARI INI**",
+        "place_bet_btn": "🎰 Pasang taruhan",
+        "all_matches_btn": "📅 Semua pertandingan",
     }
 }
 
@@ -763,6 +900,7 @@ LANGUAGE_NAMES = {
     "en": "🇬🇧 English",
     "pt": "🇧🇷 Português",
     "es": "🇪🇸 Español",
+    "id": "🇮🇩 Indonesia",
 }
 
 
@@ -1299,6 +1437,7 @@ CURRENCY_TO_USD = {
     "TRY": 0.031,     # 1 TRY = ~$0.031
     "GBP": 1.27,      # 1 GBP = ~$1.27
     "PLN": 0.25,      # 1 PLN = ~$0.25
+    "IDR": 0.000064,  # 1 IDR = ~$0.000064 (1 USD = ~15,600 IDR)
 }
 
 # For backwards compatibility
@@ -5090,7 +5229,8 @@ User preferences:
         "ru": "Отвечай на русском языке.",
         "en": "Respond in English.",
         "pt": "Responda em português.",
-        "es": "Responde en español."
+        "es": "Responde en español.",
+        "id": "Jawab dalam Bahasa Indonesia."
     }
     lang_instruction = lang_map.get(lang, lang_map["ru"])
 
@@ -5265,7 +5405,8 @@ FILTER BY USER PREFERENCES:
         "ru": "Отвечай на русском языке.",
         "en": "Respond in English.",
         "pt": "Responda em português.",
-        "es": "Responde en español."
+        "es": "Responde en español.",
+        "id": "Jawab dalam Bahasa Indonesia."
     }
     lang_instruction = lang_map.get(lang, lang_map["ru"])
     
@@ -5524,6 +5665,7 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "en": {"title": "⚙️ **SETTINGS**", "min": "Min odds", "max": "Max odds", "risk": "Risk", "tz": "Timezone", "premium": "Premium", "yes": "Yes", "no": "No", "tap_to_change": "Tap to change:", "exclude_cups": "Exclude cups"},
         "pt": {"title": "⚙️ **CONFIGURAÇÕES**", "min": "Odds mín", "max": "Odds máx", "risk": "Risco", "tz": "Fuso horário", "premium": "Premium", "yes": "Sim", "no": "Não", "tap_to_change": "Toque para alterar:", "exclude_cups": "Excluir copas"},
         "es": {"title": "⚙️ **AJUSTES**", "min": "Cuota mín", "max": "Cuota máx", "risk": "Riesgo", "tz": "Zona horaria", "premium": "Premium", "yes": "Sí", "no": "No", "tap_to_change": "Toca para cambiar:", "exclude_cups": "Excluir copas"},
+        "id": {"title": "⚙️ **PENGATURAN**", "min": "Odds min", "max": "Odds maks", "risk": "Risiko", "tz": "Zona waktu", "premium": "Premium", "yes": "Ya", "no": "Tidak", "tap_to_change": "Ketuk untuk mengubah:", "exclude_cups": "Kecualikan piala"},
     }
     sl = settings_labels.get(lang, settings_labels["ru"])
 
@@ -5589,7 +5731,7 @@ async def favorites_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text += "\n💡 Напиши название команды и нажми ⭐" if lang == "ru" else "\n💡 Type team name and tap ⭐"
     
-    add_league_label = {"ru": "➕ Добавить лигу", "en": "➕ Add league", "pt": "➕ Adicionar liga", "es": "➕ Añadir liga"}
+    add_league_label = {"ru": "➕ Добавить лигу", "en": "➕ Add league", "pt": "➕ Adicionar liga", "es": "➕ Añadir liga", "id": "➕ Tambah liga"}
     keyboard = [
         [InlineKeyboardButton(add_league_label.get(lang, add_league_label["en"]), callback_data="add_fav_league")],
         [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
@@ -5728,7 +5870,7 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, page: in
         text += f"    📊 {p['bet_type']} ({p['confidence']}%) → {result_text}\n"
 
     # Build keyboard with pagination
-    refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar"}
+    refresh_label = {"ru": "🔄 Обновить", "en": "🔄 Refresh", "pt": "🔄 Atualizar", "es": "🔄 Actualizar", "id": "🔄 Perbarui"}
 
     # Pagination buttons
     nav_buttons = []
@@ -6121,17 +6263,18 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ru": "📜 История пуста. Сделайте прогноз!",
             "en": "📜 No history yet. Make a prediction!",
             "pt": "📜 Histórico vazio. Faça uma previsão!",
-            "es": "📜 Sin historial. ¡Haz una predicción!"
+            "es": "📜 Sin historial. ¡Haz una predicción!",
+            "id": "📜 Riwayat kosong. Buat prediksi!"
         }
         await update.message.reply_text(no_history.get(lang, no_history["ru"]))
         return
 
     # Build history text
     filter_labels = {
-        "all": {"ru": "ВСЕ", "en": "ALL"},
-        "wins": {"ru": "ПОБЕДЫ", "en": "WINS"},
-        "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES"},
-        "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING"}
+        "all": {"ru": "ВСЕ", "en": "ALL", "pt": "TODOS", "es": "TODOS", "id": "SEMUA"},
+        "wins": {"ru": "ПОБЕДЫ", "en": "WINS", "pt": "VITÓRIAS", "es": "VICTORIAS", "id": "MENANG"},
+        "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES", "pt": "DERROTAS", "es": "DERROTAS", "id": "KALAH"},
+        "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING", "pt": "PENDENTES", "es": "PENDIENTES", "id": "MENUNGGU"}
     }
     filter_label = filter_labels[filter_type].get(lang, filter_labels[filter_type]["en"])
 
@@ -6843,10 +6986,10 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         conn.close()
 
         filter_labels = {
-            "all": {"ru": "ВСЕ", "en": "ALL"},
-            "wins": {"ru": "ПОБЕДЫ", "en": "WINS"},
-            "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES"},
-            "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING"}
+            "all": {"ru": "ВСЕ", "en": "ALL", "pt": "TODOS", "es": "TODOS", "id": "SEMUA"},
+            "wins": {"ru": "ПОБЕДЫ", "en": "WINS", "pt": "VITÓRIAS", "es": "VICTORIAS", "id": "MENANG"},
+            "losses": {"ru": "ПОРАЖЕНИЯ", "en": "LOSSES", "pt": "DERROTAS", "es": "DERROTAS", "id": "KALAH"},
+            "pending": {"ru": "ОЖИДАЮТ", "en": "PENDING", "pt": "PENDENTES", "es": "PENDIENTES", "id": "MENUNGGU"}
         }
         filter_label = filter_labels.get(filter_type, filter_labels["all"]).get(lang, "ALL")
 
@@ -7465,7 +7608,8 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             "ru": "✅ Кубки исключены" if new_value else "✅ Кубки включены",
             "en": "✅ Cups excluded" if new_value else "✅ Cups included",
             "pt": "✅ Copas excluídas" if new_value else "✅ Copas incluídas",
-            "es": "✅ Copas excluidas" if new_value else "✅ Copas incluidas"
+            "es": "✅ Copas excluidas" if new_value else "✅ Copas incluidas",
+            "id": "✅ Piala dikecualikan" if new_value else "✅ Piala dimasukkan"
         }
         await query.answer(confirm.get(lang, confirm["ru"]))
         await settings_cmd(update, context)
@@ -7476,6 +7620,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
              InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
             [InlineKeyboardButton("🇧🇷 Português", callback_data="lang_pt"),
              InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es")],
+            [InlineKeyboardButton("🇮🇩 Indonesia", callback_data="lang_id")],
             [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_settings")]
         ]
         await query.edit_message_text(get_text("select_language", lang), reply_markup=InlineKeyboardMarkup(keyboard))
@@ -7487,7 +7632,8 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             "ru": "✅ Язык изменён на русский",
             "en": "✅ Language changed to English",
             "pt": "✅ Idioma alterado para português",
-            "es": "✅ Idioma cambiado a español"
+            "es": "✅ Idioma cambiado a español",
+            "id": "✅ Bahasa diubah ke Indonesia"
         }
         await query.answer(confirm.get(new_lang, "✅"))
         
