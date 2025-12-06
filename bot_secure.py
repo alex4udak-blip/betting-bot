@@ -6251,6 +6251,19 @@ def format_referee_context(referee_stats: dict, lang: str = "ru") -> str:
             "penalties_likely": "Penalties likely - factor into totals",
             "red_cards_risk": "Red cards possible - beware of outcomes"
         },
+        "pt": {
+            "referee": "ÁRBITRO",
+            "style": "Estilo",
+            "cards_per_game": "Cartões por jogo",
+            "penalties_per_game": "Pênaltis por jogo",
+            "vs_league_avg": "vs média da liga",
+            "normal": "normal",
+            "betting_impact": "Impacto nas apostas",
+            "over_cards": "Mais cartões - ALTA probabilidade",
+            "under_cards": "Menos cartões - considerar",
+            "penalties_likely": "Pênaltis prováveis - considerar nos totais",
+            "red_cards_risk": "Expulsões possíveis - cuidado com resultados"
+        },
         "es": {
             "referee": "ÁRBITRO",
             "style": "Estilo",
@@ -6263,6 +6276,19 @@ def format_referee_context(referee_stats: dict, lang: str = "ru") -> str:
             "under_cards": "Menos tarjetas - considerar",
             "penalties_likely": "Penales probables - considerar en totales",
             "red_cards_risk": "Posibles expulsiones - cuidado con resultados"
+        },
+        "id": {
+            "referee": "WASIT",
+            "style": "Gaya",
+            "cards_per_game": "Kartu per pertandingan",
+            "penalties_per_game": "Penalti per pertandingan",
+            "vs_league_avg": "vs rata-rata liga",
+            "normal": "normal",
+            "betting_impact": "Dampak taruhan",
+            "over_cards": "Lebih banyak kartu - probabilitas TINGGI",
+            "under_cards": "Lebih sedikit kartu - pertimbangkan",
+            "penalties_likely": "Penalti mungkin - pertimbangkan di total",
+            "red_cards_risk": "Kartu merah mungkin - hati-hati dengan hasil"
         }
     }
 
