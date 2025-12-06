@@ -8887,14 +8887,201 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("👥 Юзеры", callback_data="admin_users")],
         [InlineKeyboardButton("📊 Детальная статистика", callback_data="admin_stats"),
          InlineKeyboardButton("📈 Источники", callback_data="admin_sources")],
-        [InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats"),
-         InlineKeyboardButton("🧠 Обучение", callback_data="admin_learning")],
-        [InlineKeyboardButton("🔔 Live-алерты", callback_data="admin_live_status"),
-         InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
-        [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
+        [InlineKeyboardButton("🎯 Анализ точности", callback_data="admin_accuracy"),
+         InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats")],
+        [InlineKeyboardButton("🧠 Обучение", callback_data="admin_learning"),
+         InlineKeyboardButton("🔔 Live-алерты", callback_data="admin_live_status")],
+        [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups"),
+         InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
 
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+
+async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Detailed accuracy analysis - admin only"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("📊 Собираю статистику...")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    text = "📊 **ДЕТАЛЬНЫЙ АНАЛИЗ ТОЧНОСТИ**\n" + "=" * 35 + "\n\n"
+
+    # Overall stats
+    c.execute("""
+        SELECT COUNT(*),
+               SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+        FROM predictions WHERE is_correct IS NOT NULL
+    """)
+    total, wins = c.fetchone()
+    wins = wins or 0
+    accuracy = round(wins / total * 100, 1) if total > 0 else 0
+
+    text += f"🎯 **ОБЩАЯ СТАТИСТИКА:**\n"
+    text += f"├ Всего проверенных: {total}\n"
+    text += f"├ Правильных: {wins}\n"
+    text += f"└ **Точность: {accuracy}%**\n\n"
+
+    # Industry benchmark
+    if accuracy >= 57:
+        verdict = "🏆 ОТЛИЧНО! Уровень топ-типстеров"
+    elif accuracy >= 53:
+        verdict = "✅ ХОРОШО! В плюсе на дистанции"
+    elif accuracy >= 50:
+        verdict = "⚠️ СРЕДНЕ. Около безубытка"
+    else:
+        verdict = "❌ СЛАБО. Нужна оптимизация"
+    text += f"📈 **Оценка:** {verdict}\n\n"
+
+    # By confidence level
+    text += f"📈 **ПО УВЕРЕННОСТИ:**\n"
+    c.execute("""
+        SELECT
+            CASE
+                WHEN confidence >= 80 THEN '80-100%'
+                WHEN confidence >= 70 THEN '70-79%'
+                WHEN confidence >= 60 THEN '60-69%'
+                ELSE '<60%'
+            END as conf_range,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND confidence IS NOT NULL
+        GROUP BY conf_range
+        ORDER BY conf_range DESC
+    """)
+    conf_rows = c.fetchall()
+    for row in conf_rows:
+        conf_range, cnt, w = row
+        w = w or 0
+        acc = round(w / cnt * 100, 1) if cnt > 0 else 0
+        emoji = "✅" if acc >= 55 else "⚠️" if acc >= 50 else "❌"
+        text += f"├ {emoji} {conf_range}: {w}/{cnt} = **{acc}%**\n"
+    text += "\n"
+
+    # By bet category
+    text += f"🏷️ **ПО ТИПАМ СТАВОК:**\n"
+    c.execute("""
+        SELECT
+            bet_category,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND bet_category IS NOT NULL
+        GROUP BY bet_category
+        HAVING total >= 3
+        ORDER BY (wins * 1.0 / total) DESC
+    """)
+    category_names = {
+        "totals_over": "ТБ (больше)",
+        "totals_under": "ТМ (меньше)",
+        "outcomes_home": "П1",
+        "outcomes_away": "П2",
+        "outcomes_draw": "Ничья",
+        "btts": "ОЗ",
+        "double_chance": "Двойной шанс",
+        "handicap": "Фора"
+    }
+    cat_rows = c.fetchall()
+    for row in cat_rows:
+        cat, cnt, w = row
+        w = w or 0
+        acc = round(w / cnt * 100, 1) if cnt > 0 else 0
+        name = category_names.get(cat, cat or "Другое")
+        emoji = "✅" if acc >= 55 else "⚠️" if acc >= 50 else "❌"
+        text += f"├ {emoji} {name}: {w}/{cnt} = **{acc}%**\n"
+    text += "\n"
+
+    # Recent trends
+    text += f"📅 **ТРЕНДЫ:**\n"
+    for days, label in [(7, "7 дней"), (14, "14 дней"), (30, "30 дней")]:
+        c.execute(f"""
+            SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            AND created_at >= datetime('now', '-{days} days')
+        """)
+        row = c.fetchone()
+        cnt, w = row[0] or 0, row[1] or 0
+        if cnt > 0:
+            acc = round(w / cnt * 100, 1)
+            emoji = "📈" if acc >= 53 else "📉"
+            text += f"├ {emoji} {label}: {w}/{cnt} = **{acc}%**\n"
+
+    # By league (top 5)
+    text += f"\n🏆 **ТОП ЛИГИ:**\n"
+    c.execute("""
+        SELECT
+            league,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND league IS NOT NULL
+        GROUP BY league
+        HAVING total >= 5
+        ORDER BY (wins * 1.0 / total) DESC
+        LIMIT 5
+    """)
+    league_rows = c.fetchall()
+    for row in league_rows:
+        league, cnt, w = row
+        w = w or 0
+        acc = round(w / cnt * 100, 1) if cnt > 0 else 0
+        emoji = "✅" if acc >= 55 else "⚠️"
+        # Shorten league name
+        short_league = league[:20] + "..." if len(league) > 20 else league
+        text += f"├ {emoji} {short_league}: **{acc}%** ({cnt})\n"
+
+    # ROI calculation (simplified)
+    text += f"\n💰 **ROI (упрощённый):**\n"
+    c.execute("""
+        SELECT
+            SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END) as profit,
+            COUNT(*) as bets
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND odds IS NOT NULL
+    """)
+    row = c.fetchone()
+    if row and row[1] and row[1] > 0:
+        profit = row[0] or 0
+        bets = row[1]
+        roi = round(profit / bets * 100, 1)
+        emoji = "✅" if roi > 0 else "❌"
+        text += f"├ {emoji} ROI: **{roi}%**\n"
+        text += f"└ (При ставке 1 на каждый прогноз)\n"
+    else:
+        text += f"└ Недостаточно данных\n"
+
+    conn.close()
+
+    # Add recommendations
+    text += f"\n💡 **РЕКОМЕНДАЦИИ:**\n"
+    if total < 100:
+        text += "• Мало данных — нужно минимум 100-200 прогнозов\n"
+    if conf_rows:
+        # Find best confidence range
+        best_conf = max(conf_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
+        text += f"• Лучший диапазон уверенности: {best_conf[0]}\n"
+    if cat_rows:
+        # Find worst category
+        worst_cat = min(cat_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
+        worst_name = category_names.get(worst_cat[0], worst_cat[0])
+        worst_acc = round((worst_cat[2] or 0) / worst_cat[1] * 100, 1) if worst_cat[1] > 0 else 0
+        if worst_acc < 50:
+            text += f"• ⚠️ Проблемный тип: {worst_name} ({worst_acc}%)\n"
+
+    # Split message if too long
+    if len(text) > 4000:
+        await update.message.reply_text(text[:4000], parse_mode="Markdown")
+        await update.message.reply_text(text[4000:], parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9890,6 +10077,97 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_accuracy":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        await query.edit_message_text("📊 Собираю статистику точности...")
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        text = "📊 **АНАЛИЗ ТОЧНОСТИ**\n" + "=" * 30 + "\n\n"
+
+        # Overall stats
+        c.execute("""
+            SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions WHERE is_correct IS NOT NULL
+        """)
+        total, wins = c.fetchone()
+        wins = wins or 0
+        accuracy = round(wins / total * 100, 1) if total > 0 else 0
+
+        # Industry verdict
+        if accuracy >= 57:
+            verdict = "🏆 ТОП-УРОВЕНЬ"
+        elif accuracy >= 53:
+            verdict = "✅ В ПЛЮСЕ"
+        elif accuracy >= 50:
+            verdict = "⚠️ БЕЗУБЫТОК"
+        else:
+            verdict = "❌ НУЖНА РАБОТА"
+
+        text += f"🎯 **Общая:** {wins}/{total} = **{accuracy}%**\n"
+        text += f"📈 **Оценка:** {verdict}\n\n"
+
+        # By confidence
+        text += "**По уверенности:**\n"
+        c.execute("""
+            SELECT
+                CASE WHEN confidence >= 80 THEN '80%+' WHEN confidence >= 70 THEN '70-79%' ELSE '<70%' END,
+                COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions WHERE is_correct IS NOT NULL AND confidence IS NOT NULL
+            GROUP BY 1 ORDER BY 1 DESC
+        """)
+        for row in c.fetchall():
+            conf, cnt, w = row
+            w = w or 0
+            acc = round(w / cnt * 100, 1) if cnt > 0 else 0
+            emoji = "✅" if acc >= 55 else "⚠️" if acc >= 50 else "❌"
+            text += f"├ {emoji} {conf}: **{acc}%** ({cnt})\n"
+
+        # By category (top 5)
+        text += "\n**Топ типы ставок:**\n"
+        c.execute("""
+            SELECT bet_category, COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions WHERE is_correct IS NOT NULL AND bet_category IS NOT NULL
+            GROUP BY bet_category HAVING COUNT(*) >= 3
+            ORDER BY (SUM(CASE WHEN is_correct = 1 THEN 1.0 ELSE 0 END) / COUNT(*)) DESC LIMIT 5
+        """)
+        cat_names = {"totals_over": "ТБ", "totals_under": "ТМ", "outcomes_home": "П1",
+                     "outcomes_away": "П2", "btts": "ОЗ", "outcomes_draw": "X"}
+        for row in c.fetchall():
+            cat, cnt, w = row
+            w = w or 0
+            acc = round(w / cnt * 100, 1) if cnt > 0 else 0
+            name = cat_names.get(cat, cat[:10] if cat else "?")
+            emoji = "✅" if acc >= 55 else "⚠️"
+            text += f"├ {emoji} {name}: **{acc}%** ({cnt})\n"
+
+        # ROI
+        c.execute("""
+            SELECT SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END), COUNT(*)
+            FROM predictions WHERE is_correct IS NOT NULL AND odds IS NOT NULL
+        """)
+        row = c.fetchone()
+        if row and row[1] and row[1] > 0:
+            roi = round((row[0] or 0) / row[1] * 100, 1)
+            emoji = "✅" if roi > 0 else "❌"
+            text += f"\n💰 **ROI:** {emoji} **{roi}%**\n"
+
+        conn.close()
+
+        keyboard = [
+            [InlineKeyboardButton("📋 Полный отчёт → /accuracy", callback_data="admin_accuracy_full")],
+            [InlineKeyboardButton("🔙 В админ-панель", callback_data="cmd_start")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    elif data == "admin_accuracy_full":
+        # Just tell user to use /accuracy command for full report
+        await query.answer("Используй /accuracy для полного отчёта", show_alert=True)
 
     elif data == "admin_ml_stats":
         if not is_admin(user_id):
@@ -12541,6 +12819,7 @@ def main():
     app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
     app.add_handler(CommandHandler("mltrain", mltrain_cmd))
     app.add_handler(CommandHandler("train", mltrain_cmd))  # Alias for /mltrain
+    app.add_handler(CommandHandler("accuracy", accuracy_cmd))  # Detailed accuracy analysis
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
