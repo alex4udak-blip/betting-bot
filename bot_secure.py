@@ -9107,7 +9107,7 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
             FROM predictions
             WHERE is_correct IS NOT NULL
-            AND created_at >= datetime('now', '-{days} days')
+            AND predicted_at >= datetime('now', '-{days} days')
         """)
         row = c.fetchone()
         cnt, w = row[0] or 0, row[1] or 0
@@ -9120,24 +9120,24 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"\n🏆 **ТОП ЛИГИ:**\n"
     c.execute("""
         SELECT
-            league,
+            league_code,
             COUNT(*) as total,
             SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
         FROM predictions
-        WHERE is_correct IS NOT NULL AND league IS NOT NULL
-        GROUP BY league
+        WHERE is_correct IS NOT NULL AND league_code IS NOT NULL
+        GROUP BY league_code
         HAVING total >= 5
         ORDER BY (wins * 1.0 / total) DESC
         LIMIT 5
     """)
     league_rows = c.fetchall()
     for row in league_rows:
-        league, cnt, w = row
+        league_code, cnt, w = row
         w = w or 0
         acc = round(w / cnt * 100, 1) if cnt > 0 else 0
         emoji = "✅" if acc >= 55 else "⚠️"
         # Shorten league name
-        short_league = league[:20] + "..." if len(league) > 20 else league
+        short_league = league_code[:20] + "..." if len(league_code) > 20 else league_code
         text += f"├ {emoji} {short_league}: **{acc}%** ({cnt})\n"
 
     # Advanced ROI analysis (TARGET: 50%+)
