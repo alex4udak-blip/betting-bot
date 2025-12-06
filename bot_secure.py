@@ -12703,7 +12703,22 @@ def user_has_made_prediction(user_id: int) -> bool:
 
 
 # Reminder messages for inactive users (multilingual)
+# More aggressive schedule for first hours to activate new users
 INACTIVE_USER_REMINDERS = {
+    "10m": {
+        "ru": "👋 **Добро пожаловать!**\n\nГотов к первому прогнозу?\nНажми кнопку — AI уже анализирует матчи!",
+        "en": "👋 **Welcome!**\n\nReady for your first prediction?\nTap the button — AI is analyzing matches!",
+        "pt": "👋 **Bem-vindo!**\n\nPronto para sua primeira previsão?\nToque no botão — IA está analisando!",
+        "es": "👋 **¡Bienvenido!**\n\n¿Listo para tu primer pronóstico?\n¡Toca el botón — IA está analizando!",
+        "id": "👋 **Selamat datang!**\n\nSiap untuk prediksi pertama?\nKetuk tombol — AI sedang menganalisis!",
+    },
+    "30m": {
+        "ru": "⚽ **Горячий матч!**\n\nПрямо сейчас идёт интересная игра.\nПолучи прогноз за 10 секунд — бесплатно!",
+        "en": "⚽ **Hot match!**\n\nExciting game happening now.\nGet prediction in 10 seconds — free!",
+        "pt": "⚽ **Jogo quente!**\n\nJogo emocionante agora.\nObtenha previsão em 10 segundos — grátis!",
+        "es": "⚽ **¡Partido caliente!**\n\nJuego emocionante ahora.\n¡Pronóstico en 10 segundos — gratis!",
+        "id": "⚽ **Pertandingan panas!**\n\nPertandingan seru sedang berlangsung.\nPrediksi dalam 10 detik — gratis!",
+    },
     "1h": {
         "ru": "⏰ **Прошёл час!**\n\nТы ещё не попробовал AI-прогнозы.\nЭто бесплатно — просто нажми кнопку!",
         "en": "⏰ **One hour passed!**\n\nYou haven't tried AI predictions yet.\nIt's free — just tap a button!",
@@ -12711,14 +12726,21 @@ INACTIVE_USER_REMINDERS = {
         "es": "⏰ **¡Pasó una hora!**\n\nAún no probaste los pronósticos AI.\n¡Es gratis — toca el botón!",
         "id": "⏰ **Satu jam berlalu!**\n\nAnda belum mencoba prediksi AI.\nGratis — ketuk tombol!",
     },
-    "3h": {
-        "ru": "🎯 **Не упусти момент!**\n\nСегодня есть отличные матчи.\nПолучи бесплатный прогноз прямо сейчас!",
-        "en": "🎯 **Don't miss out!**\n\nGreat matches today.\nGet a free prediction right now!",
-        "pt": "🎯 **Não perca!**\n\nÓtimos jogos hoje.\nObtenha uma previsão grátis agora!",
-        "es": "🎯 **¡No te lo pierdas!**\n\nGrandes partidos hoy.\n¡Obtén un pronóstico gratis ahora!",
-        "id": "🎯 **Jangan lewatkan!**\n\nPertandingan bagus hari ini.\nDapatkan prediksi gratis sekarang!",
+    "2h": {
+        "ru": "🎰 **Уже 2 часа!**\n\nДругие пользователи получают прогнозы.\nПопробуй — это реально работает!",
+        "en": "🎰 **2 hours already!**\n\nOther users are getting predictions.\nTry it — it really works!",
+        "pt": "🎰 **Já 2 horas!**\n\nOutros usuários estão recebendo previsões.\nTeste — realmente funciona!",
+        "es": "🎰 **¡Ya 2 horas!**\n\nOtros usuarios reciben pronósticos.\n¡Pruébalo — realmente funciona!",
+        "id": "🎰 **Sudah 2 jam!**\n\nPengguna lain sudah dapat prediksi.\nCoba — ini benar-benar bekerja!",
     },
-    "12h": {
+    "4h": {
+        "ru": "🔥 **4 часа прошло!**\n\nСегодня уже было много удачных прогнозов.\nНе упусти следующий — нажми кнопку!",
+        "en": "🔥 **4 hours passed!**\n\nMany successful predictions today.\nDon't miss the next one — tap now!",
+        "pt": "🔥 **4 horas passaram!**\n\nMuitas previsões certeiras hoje.\nNão perca a próxima — toque agora!",
+        "es": "🔥 **¡4 horas pasaron!**\n\nMuchos pronósticos exitosos hoy.\n¡No pierdas el próximo — toca ahora!",
+        "id": "🔥 **4 jam berlalu!**\n\nBanyak prediksi sukses hari ini.\nJangan lewatkan — ketuk sekarang!",
+    },
+    "8h": {
         "ru": "📊 **Наш AI работает 24/7**\n\nУже проанализировано 100+ матчей.\nПопробуй — это займёт 10 секунд!",
         "en": "📊 **Our AI works 24/7**\n\n100+ matches analyzed.\nTry it — takes 10 seconds!",
         "pt": "📊 **Nossa IA trabalha 24/7**\n\n100+ jogos analisados.\nTeste — leva 10 segundos!",
@@ -12726,11 +12748,11 @@ INACTIVE_USER_REMINDERS = {
         "id": "📊 **AI kami bekerja 24/7**\n\n100+ pertandingan dianalisis.\nCoba — hanya 10 detik!",
     },
     "24h": {
-        "ru": "🔥 **Прошли сутки!**\n\nДругие пользователи уже получили прогнозы.\nНе упусти свой шанс — это бесплатно!",
-        "en": "🔥 **24 hours passed!**\n\nOther users already got predictions.\nDon't miss your chance — it's free!",
-        "pt": "🔥 **24 horas se passaram!**\n\nOutros usuários já receberam previsões.\nNão perca sua chance — é grátis!",
-        "es": "🔥 **¡Pasaron 24 horas!**\n\nOtros usuarios ya recibieron pronósticos.\n¡No pierdas tu oportunidad — es gratis!",
-        "id": "🔥 **24 jam berlalu!**\n\nPengguna lain sudah mendapat prediksi.\nJangan lewatkan — gratis!",
+        "ru": "⚡ **Прошли сутки!**\n\nДругие пользователи уже получили прогнозы.\nНе упусти свой шанс — это бесплатно!",
+        "en": "⚡ **24 hours passed!**\n\nOther users already got predictions.\nDon't miss your chance — it's free!",
+        "pt": "⚡ **24 horas se passaram!**\n\nOutros usuários já receberam previsões.\nNão perca sua chance — é grátis!",
+        "es": "⚡ **¡Pasaron 24 horas!**\n\nOtros usuarios ya recibieron pronósticos.\n¡No pierdas tu oportunidad — es gratis!",
+        "id": "⚡ **24 jam berlalu!**\n\nPengguna lain sudah mendapat prediksi.\nJangan lewatkan — gratis!",
     },
     "48h": {
         "ru": "💎 **Последнее напоминание!**\n\nМы анализируем матчи каждый день.\nПопробуй хотя бы раз — тебе понравится!",
@@ -12794,14 +12816,22 @@ async def send_inactive_user_reminder(context: ContextTypes.DEFAULT_TYPE, user_i
 
 
 def schedule_inactive_user_reminders(context, user_id: int, lang: str):
-    """Schedule all reminder messages for a new user"""
-    # Reminder schedule: 1h, 3h, 12h, 24h, 48h after registration
+    """Schedule all reminder messages for a new user.
+
+    More aggressive schedule for first hours to activate users:
+    - 10min, 30min, 1h, 2h, 4h - intensive first-day activation
+    - 8h, 24h, 48h - follow-up reminders
+    """
+    # Aggressive reminder schedule for first hours
     reminder_schedule = [
-        ("1h", 3600),      # 1 hour
-        ("3h", 10800),     # 3 hours
-        ("12h", 43200),    # 12 hours
-        ("24h", 86400),    # 24 hours
-        ("48h", 172800),   # 48 hours
+        ("10m", 600),       # 10 minutes - welcome nudge
+        ("30m", 1800),      # 30 minutes - hot match alert
+        ("1h", 3600),       # 1 hour
+        ("2h", 7200),       # 2 hours - social proof
+        ("4h", 14400),      # 4 hours - success stories
+        ("8h", 28800),      # 8 hours - AI working 24/7
+        ("24h", 86400),     # 24 hours
+        ("48h", 172800),    # 48 hours - last reminder
     ]
 
     for reminder_key, delay_seconds in reminder_schedule:
@@ -12814,7 +12844,7 @@ def schedule_inactive_user_reminders(context, user_id: int, lang: str):
             name=f"reminder_{reminder_key}_{user_id}"
         )
 
-    logger.info(f"Scheduled 5 reminders for new user {user_id}")
+    logger.info(f"Scheduled 8 activation reminders for new user {user_id}")
 
 
 # Re-engagement alerts for users inactive 12+ hours (multilingual)
