@@ -966,6 +966,31 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
 
+    # Odds history - for line movement tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS odds_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        match_key TEXT,
+        bookmaker TEXT,
+        market TEXT,
+        outcome TEXT,
+        odds REAL,
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # User personalization stats
+    c.execute('''CREATE TABLE IF NOT EXISTS user_bet_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        bet_category TEXT,
+        total_bets INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        avg_odds REAL DEFAULT 1.5,
+        roi REAL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, bet_category)
+    )''')
+
     # Add new columns if they don't exist (for migration)
     try:
         c.execute("ALTER TABLE predictions ADD COLUMN bet_category TEXT")
@@ -2160,15 +2185,22 @@ def update_prediction_result(pred_id, result, is_correct):
         # Trigger self-learning system
         if pred_row:
             bet_category, confidence, bet_type = pred_row
-            # Get ML features if available
+            # Get ML features and user_id, odds if available
             conn2 = sqlite3.connect(DB_PATH)
             c2 = conn2.cursor()
             c2.execute("SELECT features_json FROM ml_training_data WHERE prediction_id = ?", (pred_id,))
             features_row = c2.fetchone()
+            c2.execute("SELECT user_id, odds FROM predictions WHERE id = ?", (pred_id,))
+            pred_info = c2.fetchone()
             conn2.close()
 
             features = json.loads(features_row[0]) if features_row and features_row[0] else None
             learn_from_result(pred_id, bet_category, confidence or 70, is_correct, features, bet_type or "")
+
+            # Update user personalization stats
+            if pred_info and pred_info[0] and pred_info[0] > 0:  # user_id > 0 (not bot alerts)
+                user_id, odds = pred_info
+                update_user_bet_stats(user_id, bet_category, is_correct == 1, odds or 1.5)
 
 
 def clean_duplicate_predictions() -> dict:
@@ -3466,6 +3498,195 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
     return confidence, adjustments
 
 
+# ===== USER PERSONALIZATION =====
+# Analyzes user's betting history to provide personalized recommendations
+
+def update_user_bet_stats(user_id: int, bet_category: str, is_correct: bool, odds: float):
+    """Update user's betting statistics after each verified result"""
+    if not bet_category or is_correct is None:
+        return
+
+    # is_correct: True = win, False = loss, 2 = push (skip)
+    if is_correct == 2:  # Push
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get or create user stats for this category
+    c.execute("""SELECT id, total_bets, wins, losses, avg_odds, roi
+                 FROM user_bet_stats
+                 WHERE user_id = ? AND bet_category = ?""",
+              (user_id, bet_category))
+    row = c.fetchone()
+
+    if row:
+        total = row[1] + 1
+        wins = row[2] + (1 if is_correct else 0)
+        losses = row[3] + (0 if is_correct else 1)
+        # Update average odds
+        old_avg = row[4] or 1.5
+        new_avg = (old_avg * row[1] + (odds or 1.5)) / total if total > 0 else 1.5
+        # Calculate ROI: (wins * avg_odds - total) / total * 100
+        roi = ((wins * new_avg - total) / total * 100) if total > 0 else 0
+
+        c.execute("""UPDATE user_bet_stats
+                     SET total_bets = ?, wins = ?, losses = ?, avg_odds = ?, roi = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?""",
+                  (total, wins, losses, new_avg, roi, row[0]))
+    else:
+        wins = 1 if is_correct else 0
+        losses = 0 if is_correct else 1
+        odds_val = odds or 1.5
+        roi = ((wins * odds_val - 1) / 1 * 100) if is_correct else -100
+
+        c.execute("""INSERT INTO user_bet_stats
+                     (user_id, bet_category, total_bets, wins, losses, avg_odds, roi)
+                     VALUES (?, ?, 1, ?, ?, ?, ?)""",
+                  (user_id, bet_category, wins, losses, odds_val, roi))
+
+    conn.commit()
+    conn.close()
+
+
+def get_user_personalization(user_id: int) -> dict:
+    """Get personalized insights for user based on their betting history"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get user's stats by category
+    c.execute("""SELECT bet_category, total_bets, wins, losses, roi
+                 FROM user_bet_stats
+                 WHERE user_id = ? AND total_bets >= 3
+                 ORDER BY total_bets DESC""", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"has_data": False}
+
+    best_categories = []
+    worst_categories = []
+    recommendations = []
+
+    category_names = {
+        "totals_over": "ТБ 2.5",
+        "totals_under": "ТМ 2.5",
+        "outcomes_home": "П1",
+        "outcomes_away": "П2",
+        "outcomes_draw": "Ничья",
+        "btts": "Обе забьют",
+        "double_chance": "Двойной шанс",
+        "handicap": "Фора"
+    }
+
+    for cat, total, wins, losses, roi in rows:
+        win_rate = (wins / total * 100) if total > 0 else 0
+        cat_name = category_names.get(cat, cat)
+
+        if win_rate >= 60 and total >= 5:
+            best_categories.append({
+                "category": cat,
+                "name": cat_name,
+                "win_rate": win_rate,
+                "roi": roi,
+                "total": total
+            })
+        elif win_rate <= 40 and total >= 5:
+            worst_categories.append({
+                "category": cat,
+                "name": cat_name,
+                "win_rate": win_rate,
+                "roi": roi,
+                "total": total
+            })
+
+    # Generate recommendations
+    if best_categories:
+        best = best_categories[0]
+        recommendations.append({
+            "type": "boost",
+            "category": best["category"],
+            "message_ru": f"🎯 {best['name']} — твой сильный тип! {best['win_rate']:.0f}% побед",
+            "message_en": f"🎯 {best['name']} is your strength! {best['win_rate']:.0f}% win rate"
+        })
+
+    if worst_categories:
+        worst = worst_categories[0]
+        recommendations.append({
+            "type": "warning",
+            "category": worst["category"],
+            "message_ru": f"⚠️ {worst['name']} — осторожно! Только {worst['win_rate']:.0f}% побед",
+            "message_en": f"⚠️ {worst['name']} — be careful! Only {worst['win_rate']:.0f}% win rate"
+        })
+
+    return {
+        "has_data": True,
+        "best_categories": best_categories[:3],
+        "worst_categories": worst_categories[:3],
+        "recommendations": recommendations,
+        "total_categories": len(rows)
+    }
+
+
+def get_personalized_advice(user_id: int, bet_category: str, lang: str = "ru") -> Optional[str]:
+    """Get personalized advice for a specific bet type based on user's history"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""SELECT total_bets, wins, losses, roi
+                 FROM user_bet_stats
+                 WHERE user_id = ? AND bet_category = ?""",
+              (user_id, bet_category))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or row[0] < 5:  # Need at least 5 bets for advice
+        return None
+
+    total, wins, losses, roi = row
+    win_rate = (wins / total * 100) if total > 0 else 0
+
+    category_names = {
+        "ru": {
+            "totals_over": "ТБ 2.5",
+            "totals_under": "ТМ 2.5",
+            "outcomes_home": "П1",
+            "outcomes_away": "П2",
+            "outcomes_draw": "Ничья",
+            "btts": "BTTS",
+            "double_chance": "1X/X2/12",
+            "handicap": "Фора"
+        },
+        "en": {
+            "totals_over": "Over 2.5",
+            "totals_under": "Under 2.5",
+            "outcomes_home": "Home Win",
+            "outcomes_away": "Away Win",
+            "outcomes_draw": "Draw",
+            "btts": "BTTS",
+            "double_chance": "Double Chance",
+            "handicap": "Handicap"
+        }
+    }
+
+    cat_name = category_names.get(lang, category_names["en"]).get(bet_category, bet_category)
+
+    if win_rate >= 65:
+        if lang == "ru":
+            return f"🎯 **Твой конёк!** {cat_name}: {win_rate:.0f}% побед ({wins}/{total})"
+        else:
+            return f"🎯 **Your strength!** {cat_name}: {win_rate:.0f}% wins ({wins}/{total})"
+    elif win_rate <= 40:
+        if lang == "ru":
+            return f"⚠️ **Осторожно!** {cat_name}: только {win_rate:.0f}% побед ({wins}/{total})"
+        else:
+            return f"⚠️ **Be careful!** {cat_name}: only {win_rate:.0f}% wins ({wins}/{total})"
+
+    return None
+
+
 def get_user_stats(user_id, page: int = 0, per_page: int = 7):
     """Get user's prediction statistics with categories and pagination"""
     conn = sqlite3.connect(DB_PATH)
@@ -3914,7 +4135,20 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict
                 btts_count = 0
                 over25_count = 0
 
+                # Rest days calculation
+                last_match_date = None
+                rest_days = None
+
                 for m in matches[:limit]:
+                    # Get last match date (first match in list is most recent)
+                    if last_match_date is None:
+                        match_date_str = m.get("utcDate", "")
+                        if match_date_str:
+                            try:
+                                last_match_date = datetime.fromisoformat(match_date_str.replace("Z", "+00:00"))
+                                rest_days = (datetime.now(last_match_date.tzinfo) - last_match_date).days
+                            except:
+                                pass
                     home_id = m.get("homeTeam", {}).get("id")
                     score = m.get("score", {}).get("fullTime", {})
                     home_goals = score.get("home", 0) or 0
@@ -4005,6 +4239,8 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict
                     },
                     "btts_percent": round(btts_count / num_matches * 100, 1) if num_matches > 0 else 0,
                     "over25_percent": round(over25_count / num_matches * 100, 1) if num_matches > 0 else 0,
+                    "rest_days": rest_days,
+                    "last_match_date": last_match_date.isoformat() if last_match_date else None,
                 }
     except Exception as e:
         logger.error(f"Enhanced form error: {e}")
@@ -4271,18 +4507,79 @@ async def get_team_squad(team_id: int) -> Optional[dict]:
     return None
 
 
+def save_odds_history(match_key: str, bookmaker: str, odds_data: dict):
+    """Save odds to history for line movement tracking"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        for market_outcome, price in odds_data.items():
+            # Parse market and outcome from key like "Over_2.5" or "Home"
+            c.execute("""INSERT INTO odds_history (match_key, bookmaker, market, outcome, odds)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (match_key, bookmaker, "general", market_outcome, price))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Save odds history error: {e}")
+
+
+def get_line_movement(match_key: str, current_odds: dict) -> dict:
+    """Compare current odds with historical to detect line movement"""
+    movements = {}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        # Get oldest recorded odds for this match (first time we saw it)
+        c.execute("""SELECT outcome, odds, recorded_at FROM odds_history
+                     WHERE match_key = ?
+                     ORDER BY recorded_at ASC""", (match_key,))
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            return {}
+
+        first_odds = {}
+        for outcome, odds, _ in rows:
+            if outcome not in first_odds:
+                first_odds[outcome] = odds
+
+        # Compare with current
+        for outcome, current in current_odds.items():
+            if outcome in first_odds:
+                first = first_odds[outcome]
+                diff = current - first
+                if abs(diff) >= 0.05:  # Significant movement
+                    pct_change = (diff / first) * 100
+                    direction = "↓" if diff < 0 else "↑"
+                    movements[outcome] = {
+                        "first": first,
+                        "current": current,
+                        "change": diff,
+                        "pct": pct_change,
+                        "direction": direction,
+                        "sharp": diff < -0.15  # Sharp money indicator (odds dropped significantly)
+                    }
+    except Exception as e:
+        logger.error(f"Line movement error: {e}")
+    return movements
+
+
 async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
-    """Get betting odds (ASYNC)"""
+    """Get betting odds with 1win priority and line movement tracking (ASYNC)"""
     if not ODDS_API_KEY:
         return None
 
     session = await get_http_session()
 
+    # Priority bookmakers (1win first, then others)
+    PRIORITY_BOOKMAKERS = ["1win", "1xbet", "betway", "pinnacle", "bet365", "unibet", "williamhill"]
+
     try:
         url = f"{ODDS_API_URL}/sports/soccer/odds"
         params = {
             "apiKey": ODDS_API_KEY,
-            "regions": "eu",
+            "regions": "eu,uk",  # Extended regions
             "markets": "h2h,spreads,totals,btts",
             "oddsFormat": "decimal"
         }
@@ -4297,31 +4594,93 @@ async def get_odds(home_team: str, away_team: str) -> Optional[dict]:
                     event_home = (event.get("home_team") or "").lower()
                     event_away = (event.get("away_team") or "").lower()
 
-                    if (home_lower in event_home or away_lower in event_away):
+                    if (home_lower in event_home or away_lower in event_away) or \
+                       (home_lower in event_away or away_lower in event_home):
+
+                        match_key = f"{event.get('home_team')}_{event.get('away_team')}_{event.get('commence_time', '')[:10]}"
+                        bookmakers = event.get("bookmakers", [])
+
+                        # Sort bookmakers by priority
+                        def bookmaker_priority(bm):
+                            name = bm.get("key", "").lower()
+                            for i, priority in enumerate(PRIORITY_BOOKMAKERS):
+                                if priority in name:
+                                    return i
+                            return 999
+
+                        bookmakers_sorted = sorted(bookmakers, key=bookmaker_priority)
 
                         odds = {}
-                        for bookmaker in event.get("bookmakers", [])[:1]:
+                        all_bookmaker_odds = {}  # For comparison
+                        selected_bookmaker = None
+
+                        for bookmaker in bookmakers_sorted:
+                            bm_name = bookmaker.get("key", "unknown")
+                            bm_odds = {}
+
                             for market in bookmaker.get("markets", []):
                                 if market.get("key") == "h2h":
                                     for outcome in market.get("outcomes", []):
-                                        odds[outcome.get("name")] = outcome.get("price")
+                                        bm_odds[outcome.get("name")] = outcome.get("price")
                                 elif market.get("key") == "totals":
                                     for outcome in market.get("outcomes", []):
                                         name = outcome.get("name")
                                         point = outcome.get("point", 2.5)
-                                        odds[f"{name}_{point}"] = outcome.get("price")
+                                        bm_odds[f"{name}_{point}"] = outcome.get("price")
                                 elif market.get("key") == "spreads":
                                     for outcome in market.get("outcomes", []):
                                         name = outcome.get("name")
                                         point = outcome.get("point", 0)
-                                        # Format: "Team (+1.5)" or "Team (-0.5)"
                                         sign = "+" if point > 0 else ""
-                                        odds[f"{name} ({sign}{point})"] = outcome.get("price")
+                                        bm_odds[f"{name} ({sign}{point})"] = outcome.get("price")
                                 elif market.get("key") == "btts":
                                     for outcome in market.get("outcomes", []):
-                                        name = outcome.get("name")  # "Yes" or "No"
-                                        odds[f"BTTS_{name}"] = outcome.get("price")
-                        return odds
+                                        name = outcome.get("name")
+                                        bm_odds[f"BTTS_{name}"] = outcome.get("price")
+
+                            all_bookmaker_odds[bm_name] = bm_odds
+
+                            # Use first bookmaker (highest priority) as main odds
+                            if not odds and bm_odds:
+                                odds = bm_odds.copy()
+                                selected_bookmaker = bm_name
+
+                        if odds:
+                            # Save to history for line tracking
+                            save_odds_history(match_key, selected_bookmaker, odds)
+
+                            # Get line movement
+                            movements = get_line_movement(match_key, odds)
+
+                            # Calculate average odds across bookmakers for value detection
+                            avg_odds = {}
+                            for outcome in odds.keys():
+                                values = [bm_odds.get(outcome) for bm_odds in all_bookmaker_odds.values() if bm_odds.get(outcome)]
+                                if values:
+                                    avg_odds[outcome] = sum(values) / len(values)
+
+                            # Add metadata
+                            odds["_bookmaker"] = selected_bookmaker
+                            odds["_bookmakers_count"] = len(all_bookmaker_odds)
+                            odds["_line_movements"] = movements
+                            odds["_avg_odds"] = avg_odds
+
+                            # Detect value (our odds vs average)
+                            value_bets = {}
+                            for outcome, price in odds.items():
+                                if outcome.startswith("_"):
+                                    continue
+                                avg = avg_odds.get(outcome)
+                                if avg and price > avg * 1.02:  # 2%+ above average
+                                    value_bets[outcome] = {
+                                        "odds": price,
+                                        "avg": avg,
+                                        "value_pct": ((price / avg) - 1) * 100
+                                    }
+                            odds["_value_bets"] = value_bets
+
+                            logger.info(f"Odds from {selected_bookmaker}: {len(odds)-5} markets, {len(movements)} movements, {len(value_bets)} value")
+                            return odds
     except Exception as e:
         logger.error(f"Odds error: {e}")
     return None
@@ -4451,7 +4810,17 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += f"  🏠 ДОМА: {hf['home']['wins']}W-{hf['home']['draws']}D-{hf['home']['losses']}L (винрейт {hf['home']['win_rate']}%)\n"
         analysis_data += f"      Средние голы: забито {hf['home']['avg_goals_scored']}, пропущено {hf['home']['avg_goals_conceded']}\n"
         analysis_data += f"  ✈️ В гостях: {hf['away']['wins']}W-{hf['away']['draws']}D-{hf['away']['losses']}L (винрейт {hf['away']['win_rate']}%)\n"
-        analysis_data += f"  📈 BTTS: {hf['btts_percent']}% | Тотал >2.5: {hf['over25_percent']}%\n\n"
+        analysis_data += f"  📈 BTTS: {hf['btts_percent']}% | Тотал >2.5: {hf['over25_percent']}%\n"
+        # Rest days
+        if hf.get('rest_days') is not None:
+            rest = hf['rest_days']
+            if rest <= 2:
+                analysis_data += f"  ⚠️ УСТАЛОСТЬ: только {rest} дней отдыха!\n"
+            elif rest >= 7:
+                analysis_data += f"  ✅ Свежие: {rest} дней отдыха\n"
+            else:
+                analysis_data += f"  ⏱️ Отдых: {rest} дней\n"
+        analysis_data += "\n"
 
     if away_form:
         af = away_form
@@ -4460,7 +4829,17 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += f"  🏠 Дома: {af['home']['wins']}W-{af['home']['draws']}D-{af['home']['losses']}L (винрейт {af['home']['win_rate']}%)\n"
         analysis_data += f"  ✈️ В ГОСТЯХ: {af['away']['wins']}W-{af['away']['draws']}D-{af['away']['losses']}L (винрейт {af['away']['win_rate']}%)\n"
         analysis_data += f"      Средние голы: забито {af['away']['avg_goals_scored']}, пропущено {af['away']['avg_goals_conceded']}\n"
-        analysis_data += f"  📈 BTTS: {af['btts_percent']}% | Тотал >2.5: {af['over25_percent']}%\n\n"
+        analysis_data += f"  📈 BTTS: {af['btts_percent']}% | Тотал >2.5: {af['over25_percent']}%\n"
+        # Rest days
+        if af.get('rest_days') is not None:
+            rest = af['rest_days']
+            if rest <= 2:
+                analysis_data += f"  ⚠️ УСТАЛОСТЬ: только {rest} дней отдыха!\n"
+            elif rest >= 7:
+                analysis_data += f"  ✅ Свежие: {rest} дней отдыха\n"
+            else:
+                analysis_data += f"  ⏱️ Отдых: {rest} дней\n"
+        analysis_data += "\n"
 
     # EXPECTED GOALS calculation
     if home_form and away_form:
@@ -4520,15 +4899,37 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     if lineups and lineups.get('venue'):
         analysis_data += f"🏟️ Стадион: {lineups['venue']}\n\n"
 
-    # Odds with VALUE calculation
+    # Odds with VALUE calculation, line movements, and bookmaker info
     if odds:
-        analysis_data += "💰 КОЭФФИЦИЕНТЫ И VALUE:\n"
+        bookmaker = odds.get("_bookmaker", "unknown")
+        bm_count = odds.get("_bookmakers_count", 1)
+        analysis_data += f"💰 КОЭФФИЦИЕНТЫ ({bookmaker}, из {bm_count} букмекеров):\n"
+
         for k, v in odds.items():
+            if k.startswith("_"):  # Skip metadata
+                continue
             if isinstance(v, (int, float)) and v > 1:
                 implied = round(1 / v * 100, 1)
-                analysis_data += f"  {k}: {v} (implied prob: {implied}%)\n"
-            else:
-                analysis_data += f"  {k}: {v}\n"
+                analysis_data += f"  {k}: {v} (prob: {implied}%)\n"
+
+        # Line movements (sharp money indicator)
+        movements = odds.get("_line_movements", {})
+        if movements:
+            analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ:\n"
+            for outcome, mv in movements.items():
+                sharp_icon = "🔥" if mv.get("sharp") else ""
+                analysis_data += f"  {outcome}: {mv['first']} → {mv['current']} ({mv['direction']}{abs(mv['pct']):.1f}%) {sharp_icon}\n"
+            sharp_moves = [m for m in movements.values() if m.get("sharp")]
+            if sharp_moves:
+                analysis_data += "  ⚡ SHARP MONEY DETECTED - линия упала значительно!\n"
+
+        # Value bets (our odds vs average)
+        value_bets = odds.get("_value_bets", {})
+        if value_bets:
+            analysis_data += "\n💎 VALUE BETS (коэфф выше среднего):\n"
+            for outcome, vb in value_bets.items():
+                analysis_data += f"  {outcome}: {vb['odds']} vs avg {vb['avg']:.2f} (+{vb['value_pct']:.1f}% value)\n"
+
         analysis_data += "\n"
 
     # Bot's historical performance (to inform AI)
@@ -7427,6 +7828,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% банкролла ({stake_text})"
             else:
                 analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
+
+        # Add personalized advice based on user's history
+        bet_category = categorize_bet(bet_type)
+        personal_advice = get_personalized_advice(user_id, bet_category, lang)
+        if personal_advice:
+            analysis = analysis + f"\n\n{personal_advice}"
 
         # Save MAIN prediction (bet_rank=1) with ML features
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
