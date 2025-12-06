@@ -11514,6 +11514,223 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
         await asyncio.sleep(1)
 
 
+def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
+                                 is_correct: bool, confidence: int = None,
+                                 home_team: str = "", away_team: str = "",
+                                 lang: str = "ru") -> str:
+    """Generate a human-readable explanation for why prediction worked or didn't.
+
+    This helps users understand the result and keeps them engaged even when predictions fail.
+    """
+    total_goals = home_score + away_score
+    bet_lower = bet_type.lower()
+
+    # Labels for different languages
+    labels = {
+        "ru": {
+            "worked": "💡 **Почему сработало:**",
+            "failed": "💡 **Почему не сработало:**",
+            "goals_scored": f"забито {total_goals} гол(ов)",
+            "home_won": f"{home_team} выиграли",
+            "away_won": f"{away_team} выиграли",
+            "draw": "матч завершился вничью",
+            "both_scored": "обе команды забили",
+            "not_both_scored": "одна из команд не забила",
+            "high_scoring": "матч получился результативным",
+            "low_scoring": "матч получился малорезультативным",
+            "unexpected": "результат оказался неожиданным",
+            "favorite_won": "фаворит подтвердил класс",
+            "underdog_surprised": "аутсайдер удивил",
+            "stats_confirmed": "статистика подтвердилась",
+            "stats_failed": "статистика не сработала — такое бывает",
+            "variance": "Беттинг — это про вероятности, не гарантии",
+            "keep_going": "Продолжай следить за нашими прогнозами!",
+            "good_call": "Отличный анализ — так держать!",
+        },
+        "en": {
+            "worked": "💡 **Why it worked:**",
+            "failed": "💡 **Why it didn't work:**",
+            "goals_scored": f"{total_goals} goals scored",
+            "home_won": f"{home_team} won",
+            "away_won": f"{away_team} won",
+            "draw": "match ended in a draw",
+            "both_scored": "both teams scored",
+            "not_both_scored": "one team didn't score",
+            "high_scoring": "high-scoring match",
+            "low_scoring": "low-scoring match",
+            "unexpected": "unexpected result",
+            "favorite_won": "favorite confirmed their class",
+            "underdog_surprised": "underdog surprised",
+            "stats_confirmed": "statistics confirmed",
+            "stats_failed": "stats didn't work out — it happens",
+            "variance": "Betting is about probabilities, not guarantees",
+            "keep_going": "Keep following our predictions!",
+            "good_call": "Great analysis — keep it up!",
+        },
+        "pt": {
+            "worked": "💡 **Por que funcionou:**",
+            "failed": "💡 **Por que não funcionou:**",
+            "goals_scored": f"{total_goals} gols marcados",
+            "home_won": f"{home_team} venceu",
+            "away_won": f"{away_team} venceu",
+            "draw": "jogo terminou empatado",
+            "both_scored": "ambas equipes marcaram",
+            "not_both_scored": "uma equipe não marcou",
+            "high_scoring": "jogo com muitos gols",
+            "low_scoring": "jogo com poucos gols",
+            "unexpected": "resultado inesperado",
+            "favorite_won": "favorito confirmou sua classe",
+            "underdog_surprised": "azarão surpreendeu",
+            "stats_confirmed": "estatísticas confirmadas",
+            "stats_failed": "estatísticas não funcionaram — acontece",
+            "variance": "Apostas são sobre probabilidades, não garantias",
+            "keep_going": "Continue acompanhando nossas previsões!",
+            "good_call": "Ótima análise — continue assim!",
+        },
+        "es": {
+            "worked": "💡 **Por qué funcionó:**",
+            "failed": "💡 **Por qué no funcionó:**",
+            "goals_scored": f"{total_goals} goles anotados",
+            "home_won": f"{home_team} ganó",
+            "away_won": f"{away_team} ganó",
+            "draw": "partido terminó en empate",
+            "both_scored": "ambos equipos anotaron",
+            "not_both_scored": "un equipo no anotó",
+            "high_scoring": "partido con muchos goles",
+            "low_scoring": "partido con pocos goles",
+            "unexpected": "resultado inesperado",
+            "favorite_won": "favorito confirmó su clase",
+            "underdog_surprised": "el débil sorprendió",
+            "stats_confirmed": "estadísticas confirmadas",
+            "stats_failed": "estadísticas no funcionaron — pasa",
+            "variance": "Las apuestas son probabilidades, no garantías",
+            "keep_going": "¡Sigue nuestros pronósticos!",
+            "good_call": "¡Gran análisis — sigue así!",
+        },
+        "id": {
+            "worked": "💡 **Mengapa berhasil:**",
+            "failed": "💡 **Mengapa tidak berhasil:**",
+            "goals_scored": f"{total_goals} gol tercetak",
+            "home_won": f"{home_team} menang",
+            "away_won": f"{away_team} menang",
+            "draw": "pertandingan berakhir imbang",
+            "both_scored": "kedua tim mencetak gol",
+            "not_both_scored": "satu tim tidak mencetak gol",
+            "high_scoring": "pertandingan banyak gol",
+            "low_scoring": "pertandingan minim gol",
+            "unexpected": "hasil tidak terduga",
+            "favorite_won": "favorit membuktikan kelasnya",
+            "underdog_surprised": "tim lemah mengejutkan",
+            "stats_confirmed": "statistik terbukti",
+            "stats_failed": "statistik tidak bekerja — itu terjadi",
+            "variance": "Taruhan tentang probabilitas, bukan jaminan",
+            "keep_going": "Terus ikuti prediksi kami!",
+            "good_call": "Analisis hebat — pertahankan!",
+        },
+    }
+
+    lbl = labels.get(lang, labels["en"])
+
+    # Start with header
+    header = lbl["worked"] if is_correct else lbl["failed"]
+    explanations = []
+
+    # Analyze based on bet type
+    if "тб" in bet_lower or "over" in bet_lower or "больше" in bet_lower:
+        # Total Over bet
+        if is_correct:
+            explanations.append(f"{lbl['high_scoring']} ({lbl['goals_scored']})")
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            explanations.append(f"{lbl['low_scoring']} ({lbl['goals_scored']})")
+            explanations.append(lbl["stats_failed"])
+
+    elif "тм" in bet_lower or "under" in bet_lower or "меньше" in bet_lower:
+        # Total Under bet
+        if is_correct:
+            explanations.append(f"{lbl['low_scoring']} ({lbl['goals_scored']})")
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            explanations.append(f"{lbl['high_scoring']} ({lbl['goals_scored']})")
+            explanations.append(lbl["stats_failed"])
+
+    elif "п1" in bet_lower or "home" in bet_lower or "победа 1" in bet_lower or "1x2: 1" in bet_lower:
+        # Home win
+        if is_correct:
+            explanations.append(lbl["home_won"])
+            explanations.append(lbl["favorite_won"] if home_score > away_score + 1 else lbl["stats_confirmed"])
+        else:
+            if home_score < away_score:
+                explanations.append(lbl["away_won"])
+                explanations.append(lbl["underdog_surprised"])
+            else:
+                explanations.append(lbl["draw"])
+                explanations.append(lbl["unexpected"])
+
+    elif "п2" in bet_lower or "away" in bet_lower or "победа 2" in bet_lower or "1x2: 2" in bet_lower:
+        # Away win
+        if is_correct:
+            explanations.append(lbl["away_won"])
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            if away_score < home_score:
+                explanations.append(lbl["home_won"])
+                explanations.append(lbl["favorite_won"])
+            else:
+                explanations.append(lbl["draw"])
+                explanations.append(lbl["unexpected"])
+
+    elif "ничья" in bet_lower or "draw" in bet_lower or "1x2: x" in bet_lower:
+        # Draw
+        if is_correct:
+            explanations.append(lbl["draw"])
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            if home_score > away_score:
+                explanations.append(lbl["home_won"])
+            else:
+                explanations.append(lbl["away_won"])
+            explanations.append(lbl["unexpected"])
+
+    elif "обе забьют" in bet_lower or "btts" in bet_lower or "оз: да" in bet_lower:
+        # Both teams to score - Yes
+        if is_correct:
+            explanations.append(lbl["both_scored"])
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            explanations.append(lbl["not_both_scored"])
+            explanations.append(lbl["stats_failed"])
+
+    elif "обе не забьют" in bet_lower or "btts: no" in bet_lower or "оз: нет" in bet_lower:
+        # Both teams to score - No
+        if is_correct:
+            explanations.append(lbl["not_both_scored"])
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            explanations.append(lbl["both_scored"])
+            explanations.append(lbl["stats_failed"])
+    else:
+        # Generic explanation for other bet types
+        if is_correct:
+            explanations.append(lbl["stats_confirmed"])
+        else:
+            explanations.append(lbl["stats_failed"])
+
+    # Add encouragement
+    if is_correct:
+        explanations.append(lbl["good_call"])
+    else:
+        explanations.append(lbl["variance"])
+        explanations.append(lbl["keep_going"])
+
+    # Format output
+    result = f"{header}\n"
+    for exp in explanations:
+        result += f"• {exp}\n"
+
+    return result.strip()
+
+
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
     """Check results of past predictions - grouped by match for combined notifications"""
     logger.info("Checking prediction results...")
@@ -11570,6 +11787,8 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
 
             main_line = ""
             alt_lines = []
+            main_bet_type = None
+            main_is_correct = None
 
             for pred in preds:
                 is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
@@ -11590,10 +11809,25 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                 bet_rank = pred.get("bet_rank", 1)
                 if bet_rank == 1:
                     main_line = f"⚡ {get_text('bet_main', lang)}: {pred['bet_type']} {emoji}"
+                    main_bet_type = pred['bet_type']
+                    main_is_correct = is_correct
                 else:
                     alt_lines.append(f"📌 {get_text('bet_alt', lang)}: {pred['bet_type']} {emoji}")
 
-            # Send ONE combined notification
+            # Generate explanation for the main bet
+            explanation = ""
+            if main_bet_type and main_is_correct is not None:
+                explanation = generate_result_explanation(
+                    bet_type=main_bet_type,
+                    home_score=home_score,
+                    away_score=away_score,
+                    is_correct=main_is_correct is True,
+                    home_team=preds[0].get('home', ''),
+                    away_team=preds[0].get('away', ''),
+                    lang=lang
+                )
+
+            # Send ONE combined notification with explanation
             try:
                 msg = f"{get_text('pred_result_title', lang)}\n\n"
                 msg += f"⚽ **{preds[0]['home']}** vs **{preds[0]['away']}**\n"
@@ -11602,7 +11836,11 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                 if main_line:
                     msg += f"{main_line}\n"
                 if alt_lines:
-                    msg += "\n".join(alt_lines)
+                    msg += "\n".join(alt_lines) + "\n"
+
+                # Add explanation
+                if explanation:
+                    msg += f"\n{explanation}"
 
                 await context.bot.send_message(
                     chat_id=user_id,
