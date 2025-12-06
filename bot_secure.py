@@ -3700,18 +3700,31 @@ ML_FEATURE_COLUMNS = {
     "referee_reds_per_game": 0.12,
     "referee_style": 2,  # 4=very_strict, 3=strict, 2=balanced, 1=lenient
     "referee_cards_vs_avg": 0,
-    # Web news indicator (NEW)
+    # Web news indicator
     "has_web_news": 0,
-    # === ADD NEW FEATURES HERE ===
-    # Example: "fixture_congestion": 0,
-    # Example: "motivation_score": 5,
+    # Fixture congestion (calendar load)
+    "home_rest_days": 5,           # Days since last match
+    "away_rest_days": 5,
+    "home_congestion_score": 0,    # 0=fresh, 1=normal, 2=tired, 3=exhausted
+    "away_congestion_score": 0,
+    "rest_advantage": 0,           # Positive = home has more rest
+    # Motivation factors
+    "is_derby": 0,                 # 1 if derby match
+    "home_motivation": 5,          # 1-10 scale
+    "away_motivation": 5,
+    "home_relegation_battle": 0,   # 1 if in bottom 4
+    "away_relegation_battle": 0,
+    "home_title_race": 0,          # 1 if in top 3
+    "away_title_race": 0,
+    "motivation_diff": 0,          # home_motivation - away_motivation
 }
 
 
 def extract_features(home_form: dict, away_form: dict, standings: dict,
                      odds: dict, h2h: list, home_team: str, away_team: str,
-                     referee_stats: dict = None, has_web_news: bool = False) -> dict:
-    """Extract numerical features for ML model"""
+                     referee_stats: dict = None, has_web_news: bool = False,
+                     congestion: dict = None, motivation: dict = None) -> dict:
+    """Extract numerical features for ML model including congestion and motivation"""
     features = {}
 
     # Home team form features
@@ -3837,6 +3850,42 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
 
     # Web news indicator (1 if we have fresh news)
     features["has_web_news"] = 1 if has_web_news else 0
+
+    # Fixture congestion features (calendar load)
+    if congestion:
+        features["home_rest_days"] = congestion.get("home_rest_days", 5)
+        features["away_rest_days"] = congestion.get("away_rest_days", 5)
+        features["home_congestion_score"] = congestion.get("home_congestion", 0)
+        features["away_congestion_score"] = congestion.get("away_congestion", 0)
+        features["rest_advantage"] = congestion.get("rest_advantage", 0)
+        features["fatigue_risk"] = 1 if (congestion.get("home_tired") or congestion.get("away_tired")) else 0
+    else:
+        features["home_rest_days"] = 5
+        features["away_rest_days"] = 5
+        features["home_congestion_score"] = 0
+        features["away_congestion_score"] = 0
+        features["rest_advantage"] = 0
+        features["fatigue_risk"] = 0
+
+    # Motivation features (derby, relegation, title race)
+    if motivation:
+        features["is_derby"] = 1 if motivation.get("is_derby") else 0
+        features["home_motivation"] = motivation.get("home_motivation", 5)
+        features["away_motivation"] = motivation.get("away_motivation", 5)
+        features["motivation_diff"] = motivation.get("motivation_diff", 0)
+        features["home_relegation_battle"] = 1 if motivation.get("home_relegation") else 0
+        features["away_relegation_battle"] = 1 if motivation.get("away_relegation") else 0
+        features["home_title_race"] = 1 if motivation.get("home_title_race") else 0
+        features["away_title_race"] = 1 if motivation.get("away_title_race") else 0
+    else:
+        features["is_derby"] = 0
+        features["home_motivation"] = 5
+        features["away_motivation"] = 5
+        features["motivation_diff"] = 0
+        features["home_relegation_battle"] = 0
+        features["away_relegation_battle"] = 0
+        features["home_title_race"] = 0
+        features["away_title_race"] = 0
 
     return features
 
@@ -6060,6 +6109,332 @@ def format_referee_context(referee_stats: dict, lang: str = "ru") -> str:
     return context
 
 
+# ===== FIXTURE CONGESTION (CALENDAR LOAD) =====
+
+def calculate_congestion_score(rest_days: int) -> int:
+    """Calculate congestion score from rest days.
+
+    Returns: 0=fresh (7+ days), 1=normal (5-6), 2=tired (3-4), 3=exhausted (0-2)
+    """
+    if rest_days is None:
+        return 1  # Default to normal
+    if rest_days >= 7:
+        return 0  # Fresh
+    elif rest_days >= 5:
+        return 1  # Normal
+    elif rest_days >= 3:
+        return 2  # Tired
+    else:
+        return 3  # Exhausted
+
+
+def get_congestion_analysis(home_form: dict, away_form: dict) -> dict:
+    """Analyze fixture congestion for both teams.
+
+    Returns dict with rest days, congestion scores, and advantage.
+    """
+    home_rest = home_form.get("rest_days") if home_form else None
+    away_rest = away_form.get("rest_days") if away_form else None
+
+    home_congestion = calculate_congestion_score(home_rest)
+    away_congestion = calculate_congestion_score(away_rest)
+
+    # Rest advantage (positive = home has more rest)
+    rest_advantage = 0
+    if home_rest is not None and away_rest is not None:
+        rest_advantage = home_rest - away_rest
+
+    return {
+        "home_rest_days": home_rest or 5,
+        "away_rest_days": away_rest or 5,
+        "home_congestion": home_congestion,
+        "away_congestion": away_congestion,
+        "rest_advantage": rest_advantage,
+        "home_tired": home_congestion >= 2,
+        "away_tired": away_congestion >= 2,
+    }
+
+
+def format_congestion_context(congestion: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format congestion analysis for Claude (multilingual)"""
+
+    labels = {
+        "ru": {
+            "title": "ЗАГРУЖЕННОСТЬ КАЛЕНДАРЯ",
+            "rest_days": "дней отдыха",
+            "fresh": "свежие ✅",
+            "normal": "нормально",
+            "tired": "устали ⚠️",
+            "exhausted": "измотаны 🔴",
+            "advantage": "Преимущество в отдыхе",
+            "days": "дней",
+            "rotation_risk": "⚠️ Риск ротации состава!",
+            "fatigue_warning": "⚠️ Усталость может повлиять на результат!"
+        },
+        "en": {
+            "title": "FIXTURE CONGESTION",
+            "rest_days": "days rest",
+            "fresh": "fresh ✅",
+            "normal": "normal",
+            "tired": "tired ⚠️",
+            "exhausted": "exhausted 🔴",
+            "advantage": "Rest advantage",
+            "days": "days",
+            "rotation_risk": "⚠️ Squad rotation risk!",
+            "fatigue_warning": "⚠️ Fatigue may affect result!"
+        },
+        "es": {
+            "title": "CONGESTIÓN DE PARTIDOS",
+            "rest_days": "días de descanso",
+            "fresh": "frescos ✅",
+            "normal": "normal",
+            "tired": "cansados ⚠️",
+            "exhausted": "agotados 🔴",
+            "advantage": "Ventaja de descanso",
+            "days": "días",
+            "rotation_risk": "⚠️ Riesgo de rotación!",
+            "fatigue_warning": "⚠️ La fatiga puede afectar!"
+        }
+    }
+
+    l = labels.get(lang, labels["en"])
+
+    # Status text based on congestion score
+    status_map = {0: l["fresh"], 1: l["normal"], 2: l["tired"], 3: l["exhausted"]}
+
+    context = f"\n📅 {l['title']}:\n"
+    context += f"  • {home_team}: {congestion['home_rest_days']} {l['rest_days']} - {status_map[congestion['home_congestion']]}\n"
+    context += f"  • {away_team}: {congestion['away_rest_days']} {l['rest_days']} - {status_map[congestion['away_congestion']]}\n"
+
+    if abs(congestion['rest_advantage']) >= 2:
+        better_team = home_team if congestion['rest_advantage'] > 0 else away_team
+        context += f"  📊 {l['advantage']}: {better_team} (+{abs(congestion['rest_advantage'])} {l['days']})\n"
+
+    if congestion['home_congestion'] >= 3 or congestion['away_congestion'] >= 3:
+        context += f"  {l['rotation_risk']}\n"
+    elif congestion['home_tired'] or congestion['away_tired']:
+        context += f"  {l['fatigue_warning']}\n"
+
+    context += "\n"
+    return context
+
+
+# ===== MOTIVATION FACTORS =====
+
+# Known derby matches (team name patterns)
+DERBY_PAIRS = [
+    # England
+    ("arsenal", "tottenham"),       # North London Derby
+    ("arsenal", "chelsea"),         # London Derby
+    ("liverpool", "everton"),       # Merseyside Derby
+    ("liverpool", "manchester united"), # Classic rivalry
+    ("manchester united", "manchester city"), # Manchester Derby
+    ("manchester city", "liverpool"),  # Title rivals
+    ("chelsea", "tottenham"),       # London Derby
+    ("newcastle", "sunderland"),    # Tyne-Wear Derby
+    ("west ham", "millwall"),       # East London Derby
+    ("aston villa", "birmingham"),  # Second City Derby
+    # Spain
+    ("real madrid", "barcelona"),   # El Clásico
+    ("real madrid", "atlético"),    # Madrid Derby
+    ("atletico madrid", "real madrid"),
+    ("barcelona", "espanyol"),      # Barcelona Derby
+    ("sevilla", "real betis"),      # Seville Derby
+    ("athletic", "real sociedad"),  # Basque Derby
+    # Italy
+    ("inter", "milan"),             # Derby della Madonnina
+    ("ac milan", "inter"),
+    ("juventus", "torino"),         # Turin Derby
+    ("roma", "lazio"),              # Derby della Capitale
+    ("napoli", "roma"),             # Derby del Sole
+    # Germany
+    ("dortmund", "schalke"),        # Revierderby
+    ("bayern", "dortmund"),         # Der Klassiker
+    ("hamburg", "werder"),          # Nordderby
+    # France
+    ("paris saint-germain", "marseille"), # Le Classique
+    ("psg", "marseille"),
+    ("lyon", "saint-étienne"),      # Derby Rhône-Alpes
+    # Others
+    ("benfica", "porto"),           # O Clássico
+    ("ajax", "feyenoord"),          # De Klassieker
+    ("galatasaray", "fenerbahçe"),  # Intercontinental Derby
+]
+
+
+def is_derby_match(home_team: str, away_team: str) -> bool:
+    """Check if match is a derby"""
+    home_lower = home_team.lower()
+    away_lower = away_team.lower()
+
+    for team1, team2 in DERBY_PAIRS:
+        if (team1 in home_lower or home_lower in team1) and \
+           (team2 in away_lower or away_lower in team2):
+            return True
+        if (team2 in home_lower or home_lower in team2) and \
+           (team1 in away_lower or away_lower in team1):
+            return True
+    return False
+
+
+def calculate_motivation(position: int, total_teams: int = 20, is_derby: bool = False,
+                         is_cup: bool = False) -> dict:
+    """Calculate motivation score based on position and context.
+
+    Returns dict with motivation score (1-10) and factors.
+    """
+    motivation = 5  # Base motivation
+    factors = []
+
+    # Derby boost
+    if is_derby:
+        motivation += 2
+        factors.append("derby")
+
+    # Cup matches - always high motivation
+    if is_cup:
+        motivation += 1
+        factors.append("cup")
+
+    # Position-based motivation
+    relegation_zone = max(3, int(total_teams * 0.2))  # Bottom 20%
+    title_zone = max(3, int(total_teams * 0.15))      # Top 15%
+
+    if position is not None:
+        if position <= title_zone:
+            motivation += 2
+            factors.append("title_race")
+        elif position <= title_zone + 2:
+            motivation += 1
+            factors.append("european_spots")
+        elif position >= total_teams - relegation_zone + 1:
+            motivation += 3  # Survival is strongest motivator!
+            factors.append("relegation_battle")
+        elif position >= total_teams - relegation_zone - 2:
+            motivation += 1
+            factors.append("relegation_risk")
+
+    # Cap at 10
+    motivation = min(10, motivation)
+
+    return {
+        "score": motivation,
+        "factors": factors,
+        "in_title_race": "title_race" in factors,
+        "in_relegation": "relegation_battle" in factors or "relegation_risk" in factors,
+    }
+
+
+def get_motivation_analysis(home_team: str, away_team: str,
+                            home_position: int, away_position: int,
+                            is_cup: bool = False, total_teams: int = 20) -> dict:
+    """Full motivation analysis for both teams."""
+
+    derby = is_derby_match(home_team, away_team)
+
+    home_motivation = calculate_motivation(home_position, total_teams, derby, is_cup)
+    away_motivation = calculate_motivation(away_position, total_teams, derby, is_cup)
+
+    return {
+        "is_derby": derby,
+        "home_motivation": home_motivation["score"],
+        "away_motivation": away_motivation["score"],
+        "home_factors": home_motivation["factors"],
+        "away_factors": away_motivation["factors"],
+        "home_title_race": home_motivation["in_title_race"],
+        "away_title_race": away_motivation["in_title_race"],
+        "home_relegation": home_motivation["in_relegation"],
+        "away_relegation": away_motivation["in_relegation"],
+        "motivation_diff": home_motivation["score"] - away_motivation["score"],
+    }
+
+
+def format_motivation_context(motivation: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format motivation analysis for Claude (multilingual)"""
+
+    labels = {
+        "ru": {
+            "title": "МОТИВАЦИЯ",
+            "derby": "🔥 ДЕРБИ!",
+            "score": "Мотивация",
+            "title_race": "борьба за титул 🏆",
+            "european_spots": "борьба за еврокубки",
+            "relegation_battle": "борьба за выживание ⚠️",
+            "relegation_risk": "риск вылета",
+            "cup": "кубковый матч",
+            "advantage": "Преимущество в мотивации",
+            "high_stakes": "💥 Матч с высокими ставками!",
+        },
+        "en": {
+            "title": "MOTIVATION",
+            "derby": "🔥 DERBY!",
+            "score": "Motivation",
+            "title_race": "title race 🏆",
+            "european_spots": "European spots battle",
+            "relegation_battle": "relegation battle ⚠️",
+            "relegation_risk": "relegation risk",
+            "cup": "cup match",
+            "advantage": "Motivation advantage",
+            "high_stakes": "💥 High stakes match!",
+        },
+        "es": {
+            "title": "MOTIVACIÓN",
+            "derby": "🔥 ¡DERBI!",
+            "score": "Motivación",
+            "title_race": "lucha por el título 🏆",
+            "european_spots": "lucha por Europa",
+            "relegation_battle": "lucha por salvación ⚠️",
+            "relegation_risk": "riesgo de descenso",
+            "cup": "partido de copa",
+            "advantage": "Ventaja motivacional",
+            "high_stakes": "💥 ¡Partido de alto riesgo!",
+        }
+    }
+
+    l = labels.get(lang, labels["en"])
+
+    factor_map = {
+        "derby": l["derby"],
+        "title_race": l["title_race"],
+        "european_spots": l["european_spots"],
+        "relegation_battle": l["relegation_battle"],
+        "relegation_risk": l["relegation_risk"],
+        "cup": l["cup"],
+    }
+
+    context = f"\n🔥 {l['title']}:\n"
+
+    if motivation["is_derby"]:
+        context += f"  {l['derby']}\n"
+
+    # Home team
+    home_factors_text = ", ".join([factor_map.get(f, f) for f in motivation["home_factors"] if f != "derby"])
+    context += f"  • {home_team}: {l['score']} {motivation['home_motivation']}/10"
+    if home_factors_text:
+        context += f" ({home_factors_text})"
+    context += "\n"
+
+    # Away team
+    away_factors_text = ", ".join([factor_map.get(f, f) for f in motivation["away_factors"] if f != "derby"])
+    context += f"  • {away_team}: {l['score']} {motivation['away_motivation']}/10"
+    if away_factors_text:
+        context += f" ({away_factors_text})"
+    context += "\n"
+
+    # Motivation difference
+    if abs(motivation["motivation_diff"]) >= 2:
+        better_team = home_team if motivation["motivation_diff"] > 0 else away_team
+        context += f"  📊 {l['advantage']}: {better_team} (+{abs(motivation['motivation_diff'])})\n"
+
+    # High stakes warning
+    if motivation["is_derby"] or motivation["home_relegation"] or motivation["away_relegation"] or \
+       motivation["home_title_race"] or motivation["away_title_race"]:
+        context += f"  {l['high_stakes']}\n"
+
+    context += "\n"
+    return context
+
+
 async def get_top_scorers(competition: str = "PL", limit: int = 10) -> Optional[list]:
     """Get top scorers of the competition (Standard plan feature)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -6716,6 +7091,32 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     if referee_context:
         analysis_data += referee_context
 
+    # 📅 FIXTURE CONGESTION - calendar load analysis
+    congestion = get_congestion_analysis(home_form, away_form)
+    congestion_context = format_congestion_context(congestion, home, away, lang)
+    if congestion_context:
+        analysis_data += congestion_context
+
+    # 🔥 MOTIVATION - derby, relegation, title race analysis
+    home_pos = 10
+    away_pos = 10
+    total_teams = 20
+    if standings:
+        for team in standings.get("standings", []):
+            team_name = team.get("team", {}).get("name", "").lower()
+            if home.lower() in team_name or team_name in home.lower():
+                home_pos = team.get("position", 10)
+            if away.lower() in team_name or team_name in away.lower():
+                away_pos = team.get("position", 10)
+        # Get total teams in competition
+        total_teams = len(standings.get("standings", [])) or 20
+
+    is_cup = "cup" in comp.lower() or "copa" in comp.lower() or "coupe" in comp.lower()
+    motivation = get_motivation_analysis(home, away, home_pos, away_pos, is_cup, total_teams)
+    motivation_context = format_motivation_context(motivation, home, away, lang)
+    if motivation_context:
+        analysis_data += motivation_context
+
     # TOP SCORERS in this match
     if top_scorers:
         home_scorers = [s for s in top_scorers if s['team'].lower() in home.lower() or home.lower() in s['team'].lower()]
@@ -6795,7 +7196,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML (including referee and web news data)
+    # Extract features for ML (including referee, web news, congestion, motivation)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -6805,7 +7206,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         home_team=home,
         away_team=away,
         referee_stats=referee_stats,
-        has_web_news=web_news.get("searched", False) if web_news else False
+        has_web_news=web_news.get("searched", False) if web_news else False,
+        congestion=congestion,
+        motivation=motivation
     )
 
     # Get ML predictions if models are trained
@@ -6911,14 +7314,32 @@ CRITICAL ANALYSIS RULES:
    - Very strict referee with red card history → Beware of outcomes (man down changes game)
    - Always mention referee style if data available!
 
-8. CONFIDENCE CALCULATION:
+8. 📅 FIXTURE CONGESTION (CALENDAR LOAD):
+   - Team with 0-2 days rest = EXHAUSTED → Lower win confidence (-10-15%)
+   - Team with 3-4 days rest = TIRED → Slight confidence reduction (-5%)
+   - Team with 7+ days rest = FRESH → Can handle physical battles better
+   - BIG rest advantage (3+ days more) → Significant edge for fresher team!
+   - If both teams tired → Consider Under totals (less energy = fewer goals)
+   - Congested calendar → Higher rotation risk, check lineups!
+   - Always mention fatigue if one team has <3 days rest!
+
+9. 🔥 MOTIVATION FACTOR (CRITICAL FOR ACCURACY!):
+   - DERBY MATCH → Expect unpredictable result! Lower main bet confidence, consider X or BTTS
+   - Relegation battle (17-20 position) → Team fights for survival, higher motivation (+10%)
+   - Title race (1-3 position) → Maximum motivation, reliable performance
+   - Nothing to play for (mid-table, season ending) → Lower motivation, upset risk
+   - Cup match → Extra motivation, but rotation possible
+   - Motivation mismatch (high vs low) → Advantage for motivated team!
+   - Always factor motivation into confidence calculation!
+
+10. CONFIDENCE CALCULATION:
    - Base on statistical data, not feelings
    - 80%+: Strong statistical edge + good value
    - 70-79%: Clear favorite + decent value
    - 60-69%: Slight edge, moderate risk
    - <60%: High risk, only if excellent value
 
-9. DIVERSIFY BET TYPES based on data:
+11. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
@@ -6933,6 +7354,8 @@ RESPONSE FORMAT:
 • H2H тренд: [если есть]
 • 🌐 Актуальные новости: [травмы/составы/другое - если есть]
 • 👨‍⚖️ Судья: [имя, стиль, влияние на ставки - если есть]
+• 📅 Загруженность: [дни отдыха, кто свежее - если есть]
+• 🔥 Мотивация: [дерби/борьба за титул/вылет - если есть]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
@@ -10241,6 +10664,24 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         h2h = await get_h2h(match_id) if match_id else None
         standings = await get_standings(comp_code)
 
+        # Calculate congestion and motivation for ML features
+        congestion = get_congestion_analysis(home_form_enhanced, away_form_enhanced)
+
+        home_pos = 10
+        away_pos = 10
+        total_teams = 20
+        if standings:
+            for team in standings.get("standings", []):
+                team_name = team.get("team", {}).get("name", "").lower()
+                if home.lower() in team_name or team_name in home.lower():
+                    home_pos = team.get("position", 10)
+                if away.lower() in team_name or team_name in away.lower():
+                    away_pos = team.get("position", 10)
+            total_teams = len(standings.get("standings", [])) or 20
+
+        is_cup = "cup" in comp.lower() or "copa" in comp.lower() or "coupe" in comp.lower()
+        motivation = get_motivation_analysis(home, away, home_pos, away_pos, is_cup, total_teams)
+
         # Extract ML features for training
         ml_features = extract_features(
             home_form=home_form_enhanced,
@@ -10249,7 +10690,9 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
             odds=odds,
             h2h=h2h.get("matches", []) if h2h else [],
             home_team=home,
-            away_team=away
+            away_team=away,
+            congestion=congestion,
+            motivation=motivation
         )
 
         # Convert enhanced form to simple form for text generation
