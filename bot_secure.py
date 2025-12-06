@@ -1936,7 +1936,7 @@ def parse_alternative_bets(analysis: str) -> list:
     """
     alternatives = []
 
-    # Look for [ALT1], [ALT2], [ALT3] format
+    # Method 1: Look for [ALT1], [ALT2], [ALT3] format
     for i in range(1, 4):
         alt_match = re.search(rf'\[ALT{i}\]\s*(.+?)(?=\[ALT|\n⚠️|\n✅|$)', analysis, re.IGNORECASE | re.DOTALL)
         if alt_match:
@@ -1946,13 +1946,33 @@ def parse_alternative_bets(analysis: str) -> list:
                 alternatives.append((bet_type, confidence, odds))
                 logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
 
-    # Fallback: try numbered list format (1. 2. 3.)
+    # Method 2: Look for "ДОПОЛНИТЕЛЬНЫЕ" section
+    if not alternatives:
+        dop_match = re.search(r'ДОПОЛНИТЕЛЬНЫЕ.*?(?=⚠️|✅|РИСКИ|ВЕРДИКТ|$)', analysis, re.IGNORECASE | re.DOTALL)
+        if dop_match:
+            dop_section = dop_match.group(0)
+            # Parse each line in alternatives section
+            for line in dop_section.split('\n'):
+                line = line.strip()
+                if not line or 'ДОПОЛНИТЕЛЬНЫЕ' in line.upper():
+                    continue
+                bet_type, confidence, odds = parse_bet_from_text(line)
+                if bet_type and len(alternatives) < 3:
+                    alternatives.append((bet_type, confidence, odds))
+                    logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
+
+    # Method 3: Fallback - numbered list format (1. 2. 3.)
     if not alternatives:
         for line in analysis.split('\n'):
             if re.match(r'^\s*[123]\.\s', line):
                 bet_type, confidence, odds = parse_bet_from_text(line)
                 if bet_type:
                     alternatives.append((bet_type, confidence, odds))
+
+    if alternatives:
+        logger.info(f"Total alternatives found: {len(alternatives)}")
+    else:
+        logger.warning("No alternatives found in analysis")
 
     return alternatives[:3]  # Max 3 alternatives
 
