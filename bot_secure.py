@@ -6296,6 +6296,30 @@ def format_congestion_context(congestion: dict, home_team: str, away_team: str, 
             "days": "días",
             "rotation_risk": "⚠️ Riesgo de rotación!",
             "fatigue_warning": "⚠️ La fatiga puede afectar!"
+        },
+        "pt": {
+            "title": "CONGESTÃO DE JOGOS",
+            "rest_days": "dias de descanso",
+            "fresh": "descansados ✅",
+            "normal": "normal",
+            "tired": "cansados ⚠️",
+            "exhausted": "exaustos 🔴",
+            "advantage": "Vantagem de descanso",
+            "days": "dias",
+            "rotation_risk": "⚠️ Risco de rotação!",
+            "fatigue_warning": "⚠️ Fadiga pode afetar!"
+        },
+        "id": {
+            "title": "KEPADATAN JADWAL",
+            "rest_days": "hari istirahat",
+            "fresh": "segar ✅",
+            "normal": "normal",
+            "tired": "lelah ⚠️",
+            "exhausted": "kelelahan 🔴",
+            "advantage": "Keunggulan istirahat",
+            "days": "hari",
+            "rotation_risk": "⚠️ Risiko rotasi pemain!",
+            "fatigue_warning": "⚠️ Kelelahan bisa mempengaruhi!"
         }
     }
 
@@ -6490,6 +6514,30 @@ def format_motivation_context(motivation: dict, home_team: str, away_team: str, 
             "cup": "partido de copa",
             "advantage": "Ventaja motivacional",
             "high_stakes": "💥 ¡Partido de alto riesgo!",
+        },
+        "pt": {
+            "title": "MOTIVAÇÃO",
+            "derby": "🔥 CLÁSSICO!",
+            "score": "Motivação",
+            "title_race": "briga pelo título 🏆",
+            "european_spots": "briga por vaga europeia",
+            "relegation_battle": "luta contra rebaixamento ⚠️",
+            "relegation_risk": "risco de rebaixamento",
+            "cup": "jogo de copa",
+            "advantage": "Vantagem motivacional",
+            "high_stakes": "💥 Jogo de alto risco!",
+        },
+        "id": {
+            "title": "MOTIVASI",
+            "derby": "🔥 DERBY!",
+            "score": "Motivasi",
+            "title_race": "perebutan gelar 🏆",
+            "european_spots": "perebutan Eropa",
+            "relegation_battle": "zona degradasi ⚠️",
+            "relegation_risk": "risiko degradasi",
+            "cup": "pertandingan piala",
+            "advantage": "Keunggulan motivasi",
+            "high_stakes": "💥 Pertandingan penting!",
         }
     }
 
@@ -9193,6 +9241,9 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             name=f"onboarding_{user_id}"
         )
 
+        # Schedule reminder series for inactive users (1h, 3h, 12h, 24h, 48h)
+        schedule_inactive_user_reminders(context, user_id, selected_lang)
+
         return
 
     # Command callbacks
@@ -11855,21 +11906,65 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: int, lang: str):
-    """Send onboarding sequence for new users - shows bot stats and quick actions"""
+    """Send onboarding sequence for new users - shows ONLY strong stats (>70%) for marketing"""
     try:
-        # Get real bot stats to show credibility
+        # Get real bot stats
         bot_stats = get_bot_accuracy_stats()
-        accuracy = bot_stats.get("overall_accuracy", 70)
-        total_bets = bot_stats.get("total", 0)
 
-        # Multilingual stats text
-        stats_text = {
-            "ru": f"📊 **Наша статистика:**\n• Точность: {accuracy}%\n• Проверенных прогнозов: {total_bets}+",
-            "en": f"📊 **Our stats:**\n• Accuracy: {accuracy}%\n• Verified predictions: {total_bets}+",
-            "pt": f"📊 **Nossas estatísticas:**\n• Precisão: {accuracy}%\n• Previsões verificadas: {total_bets}+",
-            "es": f"📊 **Nuestras estadísticas:**\n• Precisión: {accuracy}%\n• Pronósticos verificados: {total_bets}+",
-            "id": f"📊 **Statistik kami:**\n• Akurasi: {accuracy}%\n• Prediksi terverifikasi: {total_bets}+"
-        }
+        # Build stats text showing ONLY strong points (>70%)
+        strong_points = []
+
+        # Check overall accuracy
+        overall_acc = bot_stats.get("overall_accuracy", 0)
+        if overall_acc >= 70:
+            strong_points.append(("overall", overall_acc))
+
+        # Check by confidence range - high confidence is usually better
+        by_conf = bot_stats.get("by_confidence", {})
+        for conf_range in ["80-100%", "70-79%"]:
+            conf_data = by_conf.get(conf_range, {})
+            if conf_data.get("accuracy", 0) >= 70 and conf_data.get("total", 0) >= 5:
+                strong_points.append((f"conf_{conf_range}", conf_data["accuracy"]))
+                break  # Only show one
+
+        # Check best bet types
+        by_type = bot_stats.get("by_bet_type", {})
+        best_types = []
+        for bet_type, data in by_type.items():
+            if data.get("accuracy", 0) >= 70 and data.get("total", 0) >= 5:
+                best_types.append((bet_type, data["accuracy"]))
+        best_types.sort(key=lambda x: x[1], reverse=True)
+
+        # Format multilingual stats - only show strong points
+        def format_strong_stats(lang_code: str) -> str:
+            labels = {
+                "ru": {"title": "📊 **Сильные стороны:**", "overall": "Общая точность",
+                       "conf": "Точность топ-ставок", "type": "Лучшие типы ставок"},
+                "en": {"title": "📊 **Our strengths:**", "overall": "Overall accuracy",
+                       "conf": "High confidence accuracy", "type": "Best bet types"},
+                "pt": {"title": "📊 **Nossos pontos fortes:**", "overall": "Precisão geral",
+                       "conf": "Precisão alta confiança", "type": "Melhores tipos"},
+                "es": {"title": "📊 **Nuestros puntos fuertes:**", "overall": "Precisión general",
+                       "conf": "Precisión alta confianza", "type": "Mejores tipos"},
+                "id": {"title": "📊 **Keunggulan kami:**", "overall": "Akurasi keseluruhan",
+                       "conf": "Akurasi prediksi top", "type": "Jenis taruhan terbaik"}
+            }
+            lbl = labels.get(lang_code, labels["en"])
+
+            lines = [lbl["title"]]
+            for point_type, acc in strong_points:
+                if point_type == "overall":
+                    lines.append(f"• {lbl['overall']}: **{acc}%**")
+                elif point_type.startswith("conf_"):
+                    lines.append(f"• {lbl['conf']}: **{acc}%**")
+
+            if best_types[:2]:
+                type_names = [f"{t[0]} ({t[1]}%)" for t in best_types[:2]]
+                lines.append(f"• {lbl['type']}: {', '.join(type_names)}")
+
+            return "\n".join(lines) if len(lines) > 1 else ""
+
+        stats_text_formatted = format_strong_stats(lang)
 
         reminder_text = {
             "ru": "⏰ **Ещё не пробовал?**\n\nНажми кнопку — получи первый прогноз бесплатно!",
@@ -11880,8 +11975,9 @@ async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: 
         }
 
         text = reminder_text.get(lang, reminder_text["en"])
-        text += "\n\n"
-        text += stats_text.get(lang, stats_text["en"])
+        # Only add stats if we have strong points to show
+        if stats_text_formatted:
+            text += "\n\n" + stats_text_formatted
         text += f"\n\n{get_text('onboard_try_now', lang)}"
 
         keyboard = [
@@ -11903,6 +11999,243 @@ async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: 
 
     except Exception as e:
         logger.error(f"Failed to send onboarding to {user_id}: {e}")
+
+
+def user_has_made_prediction(user_id: int) -> bool:
+    """Check if user has made at least one prediction request"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT daily_requests FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return row[0] > 0  # Has made at least 1 request
+        return False
+    except Exception as e:
+        logger.error(f"Error checking user activity: {e}")
+        return True  # Assume active to avoid spamming
+
+
+# Reminder messages for inactive users (multilingual)
+INACTIVE_USER_REMINDERS = {
+    "1h": {
+        "ru": "⏰ **Прошёл час!**\n\nТы ещё не попробовал AI-прогнозы.\nЭто бесплатно — просто нажми кнопку!",
+        "en": "⏰ **One hour passed!**\n\nYou haven't tried AI predictions yet.\nIt's free — just tap a button!",
+        "pt": "⏰ **Uma hora se passou!**\n\nVocê ainda não testou as previsões AI.\nÉ grátis — toque no botão!",
+        "es": "⏰ **¡Pasó una hora!**\n\nAún no probaste los pronósticos AI.\n¡Es gratis — toca el botón!",
+        "id": "⏰ **Satu jam berlalu!**\n\nAnda belum mencoba prediksi AI.\nGratis — ketuk tombol!",
+    },
+    "3h": {
+        "ru": "🎯 **Не упусти момент!**\n\nСегодня есть отличные матчи.\nПолучи бесплатный прогноз прямо сейчас!",
+        "en": "🎯 **Don't miss out!**\n\nGreat matches today.\nGet a free prediction right now!",
+        "pt": "🎯 **Não perca!**\n\nÓtimos jogos hoje.\nObtenha uma previsão grátis agora!",
+        "es": "🎯 **¡No te lo pierdas!**\n\nGrandes partidos hoy.\n¡Obtén un pronóstico gratis ahora!",
+        "id": "🎯 **Jangan lewatkan!**\n\nPertandingan bagus hari ini.\nDapatkan prediksi gratis sekarang!",
+    },
+    "12h": {
+        "ru": "📊 **Наш AI работает 24/7**\n\nУже проанализировано 100+ матчей.\nПопробуй — это займёт 10 секунд!",
+        "en": "📊 **Our AI works 24/7**\n\n100+ matches analyzed.\nTry it — takes 10 seconds!",
+        "pt": "📊 **Nossa IA trabalha 24/7**\n\n100+ jogos analisados.\nTeste — leva 10 segundos!",
+        "es": "📊 **Nuestra IA trabaja 24/7**\n\n100+ partidos analizados.\n¡Pruébalo — toma 10 segundos!",
+        "id": "📊 **AI kami bekerja 24/7**\n\n100+ pertandingan dianalisis.\nCoba — hanya 10 detik!",
+    },
+    "24h": {
+        "ru": "🔥 **Прошли сутки!**\n\nДругие пользователи уже получили прогнозы.\nНе упусти свой шанс — это бесплатно!",
+        "en": "🔥 **24 hours passed!**\n\nOther users already got predictions.\nDon't miss your chance — it's free!",
+        "pt": "🔥 **24 horas se passaram!**\n\nOutros usuários já receberam previsões.\nNão perca sua chance — é grátis!",
+        "es": "🔥 **¡Pasaron 24 horas!**\n\nOtros usuarios ya recibieron pronósticos.\n¡No pierdas tu oportunidad — es gratis!",
+        "id": "🔥 **24 jam berlalu!**\n\nPengguna lain sudah mendapat prediksi.\nJangan lewatkan — gratis!",
+    },
+    "48h": {
+        "ru": "💎 **Последнее напоминание!**\n\nМы анализируем матчи каждый день.\nПопробуй хотя бы раз — тебе понравится!",
+        "en": "💎 **Last reminder!**\n\nWe analyze matches daily.\nTry at least once — you'll love it!",
+        "pt": "💎 **Último lembrete!**\n\nAnalisamos jogos diariamente.\nTeste pelo menos uma vez — você vai gostar!",
+        "es": "💎 **¡Último recordatorio!**\n\nAnalizamos partidos diariamente.\n¡Prueba al menos una vez — te gustará!",
+        "id": "💎 **Pengingat terakhir!**\n\nKami menganalisis pertandingan setiap hari.\nCoba sekali — Anda akan suka!",
+    },
+}
+
+
+async def send_inactive_user_reminder(context: ContextTypes.DEFAULT_TYPE, user_id: int, lang: str, reminder_key: str):
+    """Send reminder to inactive user if they haven't made any predictions"""
+    try:
+        # Check if user has made any predictions
+        if user_has_made_prediction(user_id):
+            logger.info(f"User {user_id} already active, skipping {reminder_key} reminder")
+            return
+
+        # Check if user hasn't blocked the bot
+        user = get_user(user_id)
+        if not user:
+            return
+
+        # Get reminder text
+        reminder_texts = INACTIVE_USER_REMINDERS.get(reminder_key, INACTIVE_USER_REMINDERS["1h"])
+        text = reminder_texts.get(lang, reminder_texts["en"])
+
+        # Add stats for credibility - only if >70%
+        bot_stats = get_bot_accuracy_stats()
+        accuracy = bot_stats.get("overall_accuracy", 0)
+
+        if accuracy >= 70:
+            stats_line = {
+                "ru": f"\n\n📈 Точность наших прогнозов: {accuracy}%",
+                "en": f"\n\n📈 Our prediction accuracy: {accuracy}%",
+                "pt": f"\n\n📈 Nossa precisão: {accuracy}%",
+                "es": f"\n\n📈 Nuestra precisión: {accuracy}%",
+                "id": f"\n\n📈 Akurasi prediksi: {accuracy}%",
+            }
+            text += stats_line.get(lang, stats_line["en"])
+
+        keyboard = [
+            [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
+            [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
+            [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
+        ]
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+        logger.info(f"Sent {reminder_key} reminder to inactive user {user_id}")
+        mark_notification_sent(user_id, f"reminder_{reminder_key}")
+
+    except Exception as e:
+        logger.error(f"Failed to send {reminder_key} reminder to {user_id}: {e}")
+
+
+def schedule_inactive_user_reminders(context, user_id: int, lang: str):
+    """Schedule all reminder messages for a new user"""
+    # Reminder schedule: 1h, 3h, 12h, 24h, 48h after registration
+    reminder_schedule = [
+        ("1h", 3600),      # 1 hour
+        ("3h", 10800),     # 3 hours
+        ("12h", 43200),    # 12 hours
+        ("24h", 86400),    # 24 hours
+        ("48h", 172800),   # 48 hours
+    ]
+
+    for reminder_key, delay_seconds in reminder_schedule:
+        async def reminder_callback(ctx, uid=user_id, lg=lang, rk=reminder_key):
+            await send_inactive_user_reminder(ctx, uid, lg, rk)
+
+        context.job_queue.run_once(
+            reminder_callback,
+            when=delay_seconds,
+            name=f"reminder_{reminder_key}_{user_id}"
+        )
+
+    logger.info(f"Scheduled 5 reminders for new user {user_id}")
+
+
+# Re-engagement alerts for users inactive 12+ hours (multilingual)
+REENGAGEMENT_MESSAGES = {
+    "12h": {
+        "ru": "👋 **Давно не виделись!**\n\nЗа последние 12 часов было много интересных матчей.\nПроверь, что сегодня на прогнозе!",
+        "en": "👋 **Long time no see!**\n\nLots of interesting matches in the last 12 hours.\nCheck today's predictions!",
+        "pt": "👋 **Há quanto tempo!**\n\nMuitos jogos interessantes nas últimas 12 horas.\nConfira as previsões de hoje!",
+        "es": "👋 **¡Cuánto tiempo!**\n\nMuchos partidos interesantes en las últimas 12 horas.\n¡Mira los pronósticos de hoy!",
+        "id": "👋 **Lama tidak bertemu!**\n\nBanyak pertandingan menarik 12 jam terakhir.\nCek prediksi hari ini!",
+    },
+    "24h": {
+        "ru": "⚽ **Пропустил целый день!**\n\nВчера было несколько отличных прогнозов.\nСегодня тоже есть горячие матчи — не пропусти!",
+        "en": "⚽ **Missed a whole day!**\n\nYesterday had some great predictions.\nToday has hot matches too — don't miss out!",
+        "pt": "⚽ **Perdeu um dia inteiro!**\n\nOntem teve ótimas previsões.\nHoje também tem jogos quentes — não perca!",
+        "es": "⚽ **¡Te perdiste un día entero!**\n\nAyer hubo excelentes pronósticos.\n¡Hoy también hay partidos calientes — no te lo pierdas!",
+        "id": "⚽ **Melewatkan sehari penuh!**\n\nKemarin ada prediksi bagus.\nHari ini juga ada pertandingan panas — jangan lewatkan!",
+    },
+    "48h": {
+        "ru": "🔥 **2 дня без прогнозов?**\n\nМы работали — анализировали матчи, искали value ставки.\nВозвращайся — бесплатный прогноз ждёт!",
+        "en": "🔥 **2 days without predictions?**\n\nWe were working — analyzing matches, finding value bets.\nCome back — free prediction awaits!",
+        "pt": "🔥 **2 dias sem previsões?**\n\nEstávamos trabalhando — analisando jogos, achando apostas de valor.\nVolte — previsão grátis te espera!",
+        "es": "🔥 **¿2 días sin pronósticos?**\n\nEstuvimos trabajando — analizando partidos, buscando value.\n¡Vuelve — pronóstico gratis te espera!",
+        "id": "🔥 **2 hari tanpa prediksi?**\n\nKami bekerja — menganalisis pertandingan, mencari value bet.\nKembali — prediksi gratis menunggu!",
+    },
+}
+
+
+async def send_reengagement_alerts(context: ContextTypes.DEFAULT_TYPE):
+    """Send re-engagement alerts to users inactive for 12+, 24+, 48+ hours"""
+    logger.info("Running re-engagement alerts...")
+
+    # Define time windows (hours_min, hours_max, alert_type)
+    time_windows = [
+        (12, 24, "12h"),    # 12-24 hours inactive
+        (24, 48, "24h"),    # 24-48 hours inactive
+        (48, 96, "48h"),    # 48-96 hours inactive
+    ]
+
+    total_sent = 0
+
+    for hours_min, hours_max, alert_type in time_windows:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            # Get users who were active but became inactive in this window
+            c.execute("""SELECT user_id, language FROM users
+                         WHERE last_active BETWEEN datetime('now', ? || ' hours')
+                         AND datetime('now', ? || ' hours')
+                         AND daily_requests > 0""",
+                      (f"-{hours_max}", f"-{hours_min}"))
+            users = c.fetchall()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error getting {alert_type} inactive users: {e}")
+            continue
+
+        if not users:
+            continue
+
+        for user_id, lang in users:
+            lang = lang or "ru"
+
+            # Check cooldown - don't spam
+            if not should_send_notification(user_id, f"reengagement_{alert_type}", cooldown_hours=24):
+                continue
+
+            try:
+                messages = REENGAGEMENT_MESSAGES.get(alert_type, REENGAGEMENT_MESSAGES["12h"])
+                text = messages.get(lang, messages["en"])
+
+                # Add strong stats if available
+                bot_stats = get_bot_accuracy_stats()
+                accuracy = bot_stats.get("overall_accuracy", 0)
+                if accuracy >= 70:
+                    stats_line = {
+                        "ru": f"\n\n📈 Текущая точность: **{accuracy}%**",
+                        "en": f"\n\n📈 Current accuracy: **{accuracy}%**",
+                        "pt": f"\n\n📈 Precisão atual: **{accuracy}%**",
+                        "es": f"\n\n📈 Precisión actual: **{accuracy}%**",
+                        "id": f"\n\n📈 Akurasi saat ini: **{accuracy}%**",
+                    }
+                    text += stats_line.get(lang, stats_line["en"])
+
+                keyboard = [
+                    [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
+                    [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
+                    [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, f"reengagement_{alert_type}")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Failed to send {alert_type} re-engagement to {user_id}: {e}")
+
+    logger.info(f"Re-engagement alerts sent: {total_sent}")
 
 
 async def send_marketing_notifications(context: ContextTypes.DEFAULT_TYPE):
@@ -12231,6 +12564,7 @@ def main():
     job_queue.run_repeating(send_evening_digest, interval=3600, first=300)  # Check hourly (22:00 MSK)
     job_queue.run_repeating(send_morning_alert, interval=3600, first=300)   # Check hourly (10:00 MSK)
     job_queue.run_repeating(send_inactive_user_alerts, interval=21600, first=3600)  # Every 6 hours
+    job_queue.run_repeating(send_reengagement_alerts, interval=14400, first=2700)  # Every 4 hours (12h+ inactive)
     job_queue.run_repeating(send_weekly_report, interval=3600, first=300)   # Check hourly (Sunday 20:00)
     job_queue.run_repeating(send_hot_match_alerts, interval=1800, first=600)  # Every 30 min
 
