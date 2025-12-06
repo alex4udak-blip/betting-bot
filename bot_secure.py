@@ -5552,15 +5552,16 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Please select your language:
 Пожалуйста, выберите язык:
-
 Por favor, selecione seu idioma:
-Por favor, selecciona tu idioma:"""
+Por favor, selecciona tu idioma:
+Silakan pilih bahasa Anda:"""
 
         keyboard = [
             [InlineKeyboardButton("🇷🇺 Русский", callback_data=f"set_initial_lang_ru"),
              InlineKeyboardButton("🇬🇧 English", callback_data=f"set_initial_lang_en")],
             [InlineKeyboardButton("🇧🇷 Português", callback_data=f"set_initial_lang_pt"),
-             InlineKeyboardButton("🇪🇸 Español", callback_data=f"set_initial_lang_es")]
+             InlineKeyboardButton("🇪🇸 Español", callback_data=f"set_initial_lang_es")],
+            [InlineKeyboardButton("🇮🇩 Indonesia", callback_data=f"set_initial_lang_id")]
         ]
 
         # Pre-select detected language hint
@@ -7262,7 +7263,9 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             for src, count, prem in sources:
                 pct = round(count / total_users * 100, 1) if total_users > 0 else 0
                 prem_str = f" ({prem}💎)" if prem > 0 else ""
-                text += f"• **{src}**: {count} ({pct}%){prem_str}\n"
+                # Escape underscores in source name for Markdown
+                src_escaped = src.replace("_", "\\_")
+                text += f"• **{src_escaped}**: {count} ({pct}%){prem_str}\n"
                 # Add filter button for each source
                 keyboard_rows.append([InlineKeyboardButton(
                     f"👥 {src} ({count})",
