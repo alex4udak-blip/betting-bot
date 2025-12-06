@@ -2445,11 +2445,13 @@ def parse_alternative_bets(analysis: str) -> list:
             alt_text = alt_match.group(1).strip()
             bet_type, confidence, odds = parse_bet_from_text(alt_text)
             if bet_type:
-                alternatives.append((bet_type, confidence, odds))
-                logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
+                # Avoid duplicates
+                if not any(alt[0] == bet_type for alt in alternatives):
+                    alternatives.append((bet_type, confidence, odds))
+                    logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
 
     # Method 2: Look for "ДОПОЛНИТЕЛЬНЫЕ" section with better regex
-    if not alternatives:
+    if len(alternatives) < 3:
         # Try multiple section header variations
         section_patterns = [
             r'📈\s*\**ДОПОЛНИТЕЛЬНЫЕ[^:]*:\**\s*\n(.*?)(?=\n⚠️|\n✅|\nРИСКИ|\nВЕРДИКТ|$)',
@@ -2471,16 +2473,18 @@ def parse_alternative_bets(analysis: str) -> list:
                 # Skip empty lines and header lines
                 if not line or 'ДОПОЛНИТЕЛЬНЫЕ' in line.upper() or line.startswith('📈'):
                     continue
-                # Skip lines that are just markers
-                if line in ['[ALT1]', '[ALT2]', '[ALT3]', '-', '•', '*']:
+                # Skip lines that are just markers or instructions
+                if line in ['[ALT1]', '[ALT2]', '[ALT3]', '-', '•', '*'] or 'ОБЯЗАТЕЛЬНО' in line or 'ВСЕГДА' in line:
                     continue
                 bet_type, confidence, odds = parse_bet_from_text(line)
                 if bet_type and len(alternatives) < 3:
-                    alternatives.append((bet_type, confidence, odds))
-                    logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
+                    # Avoid duplicates
+                    if not any(alt[0] == bet_type for alt in alternatives):
+                        alternatives.append((bet_type, confidence, odds))
+                        logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
 
     # Method 3: Fallback - bullet/numbered list after ДОПОЛНИТЕЛЬНЫЕ
-    if not alternatives:
+    if len(alternatives) < 3:
         lines = analysis.split('\n')
         in_alt_section = False
         for line in lines:
@@ -2494,6 +2498,9 @@ def parse_alternative_bets(analysis: str) -> list:
                 break
             # Parse lines in section
             if in_alt_section and line_stripped:
+                # Skip instruction lines
+                if 'ОБЯЗАТЕЛЬНО' in line_stripped or 'ВСЕГДА' in line_stripped:
+                    continue
                 # Match numbered (1. 2. 3.), bullet (• - *) or [ALT] formats
                 if re.match(r'^[\d•\-\*\[\]]+\.?\s*', line_stripped) or '@' in line_stripped:
                     bet_type, confidence, odds = parse_bet_from_text(line_stripped)
@@ -2503,8 +2510,42 @@ def parse_alternative_bets(analysis: str) -> list:
                             alternatives.append((bet_type, confidence, odds))
                             logger.info(f"Parsed ALT (method 3): {bet_type} @ {odds} ({confidence}%)")
 
+    # Method 4: Direct bet type search in alternatives section (most aggressive)
+    if len(alternatives) < 3:
+        bet_patterns = [
+            (r'(?:1X|1Х)\s*[@|]\s*[\d.]+', '1X'),
+            (r'(?:X2|Х2)\s*[@|]\s*[\d.]+', 'X2'),
+            (r'(?:12)\s*[@|]\s*[\d.]+', '12'),
+            (r'(?:BTTS|ОЗ|Обе забьют)\s*[@|]\s*[\d.]+', 'BTTS'),
+            (r'(?:ТБ|Over)\s*2\.?5\s*[@|]\s*[\d.]+', 'ТБ 2.5'),
+            (r'(?:ТМ|Under)\s*2\.?5\s*[@|]\s*[\d.]+', 'ТМ 2.5'),
+            (r'(?:П1|P1|Home)\s*[@|]\s*[\d.]+', 'П1'),
+            (r'(?:П2|P2|Away)\s*[@|]\s*[\d.]+', 'П2'),
+            (r'(?:Ничья|Draw|X)\s*[@|]\s*[\d.]+', 'X'),
+        ]
+
+        # Only search in the alternatives section
+        alt_section_match = re.search(r'ДОПОЛНИТЕЛЬНЫЕ.*?(⚠️|✅|РИСКИ|$)', analysis, re.IGNORECASE | re.DOTALL)
+        if alt_section_match:
+            alt_section = alt_section_match.group(0)
+            for pattern, bet_name in bet_patterns:
+                if len(alternatives) >= 3:
+                    break
+                match = re.search(pattern, alt_section, re.IGNORECASE)
+                if match and not any(alt[0] == bet_name for alt in alternatives):
+                    # Try to extract odds
+                    odds_match = re.search(r'[@|]\s*([\d.]+)', match.group(0))
+                    odds = float(odds_match.group(1)) if odds_match else 1.8
+                    # Try to extract confidence
+                    conf_match = re.search(r'(\d+)\s*%', alt_section[match.end():match.end()+50])
+                    confidence = int(conf_match.group(1)) if conf_match else 65
+                    alternatives.append((bet_name, confidence, odds))
+                    logger.info(f"Parsed ALT (method 4): {bet_name} @ {odds} ({confidence}%)")
+
     if alternatives:
         logger.info(f"✅ Total alternatives found: {len(alternatives)}")
+        if len(alternatives) < 3:
+            logger.warning(f"⚠️ Only {len(alternatives)}/3 alternatives parsed - Claude may have generated fewer")
     else:
         logger.warning("⚠️ No alternatives found in analysis")
 
@@ -5508,10 +5549,11 @@ RESPONSE FORMAT:
 💰 Банк: X%
 📝 Почему: [основано на конкретных данных выше]
 
-📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
+📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ (ОБЯЗАТЕЛЬНО 3 шт!):**
 [ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
 [ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
 [ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
+(ВСЕГДА давай ровно 3 альтернативы - выбирай из: П1, П2, X, 1X, X2, 12, ТБ2.5, ТМ2.5, BTTS)
 
 ⚠️ **РИСКИ:**
 [Конкретные риски на основе данных]
