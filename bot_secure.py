@@ -12291,7 +12291,7 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
 
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
     """Check results of past predictions - grouped by match for combined notifications"""
-    logger.info("Checking prediction results...")
+    logger.info("=== CHECK RESULTS JOB STARTED ===")
 
     pending = get_pending_predictions()
 
@@ -12469,7 +12469,7 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error checking bot alert {pred['id']}: {e}")
 
-    logger.info(f"Results check complete: {processed} user matches, {len(bot_alerts)} bot alerts")
+    logger.info(f"=== CHECK RESULTS JOB DONE: {processed} user matches, {len(bot_alerts)} bot alerts ===")
 
 
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
