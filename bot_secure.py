@@ -3808,6 +3808,11 @@ ML_FEATURE_COLUMNS = {
     "under_odds_dropped": 0,       # 1 if under odds dropped
     "sharp_money_detected": 0,     # 1 if any significant sharp money movement
     "line_movement_direction": 0,  # -1=away favored more, 0=stable, 1=home favored more
+    # Coach change features
+    "home_new_coach": 0,           # 1 if home team has new coach (<5 matches)
+    "away_new_coach": 0,           # 1 if away team has new coach (<5 matches)
+    "home_coach_boost": 0,         # 0-15 boost from new coach effect
+    "away_coach_boost": 0,         # 0-15 boost from new coach effect
 }
 
 
@@ -3815,8 +3820,8 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                      odds: dict, h2h: list, home_team: str, away_team: str,
                      referee_stats: dict = None, has_web_news: bool = False,
                      congestion: dict = None, motivation: dict = None,
-                     team_class: dict = None) -> dict:
-    """Extract numerical features for ML model including congestion, motivation, and team class"""
+                     team_class: dict = None, coach_factor: dict = None) -> dict:
+    """Extract numerical features for ML model including congestion, motivation, team class, and coach"""
     features = {}
 
     # Home team form features
@@ -4035,6 +4040,18 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["class_diff"] = 0
         features["elite_vs_underdog"] = 0
         features["class_mismatch"] = 0
+
+    # Coach change features (new coach boost)
+    if coach_factor:
+        features["home_new_coach"] = 1 if coach_factor.get("home_new_coach") else 0
+        features["away_new_coach"] = 1 if coach_factor.get("away_new_coach") else 0
+        features["home_coach_boost"] = coach_factor.get("home_coach_boost", 0)
+        features["away_coach_boost"] = coach_factor.get("away_coach_boost", 0)
+    else:
+        features["home_new_coach"] = 0
+        features["away_new_coach"] = 0
+        features["home_coach_boost"] = 0
+        features["away_coach_boost"] = 0
 
     return features
 
@@ -6087,6 +6104,36 @@ REFEREE_STATS = {
     "Artur Dias": {"cards_per_game": 4.3, "yellows_per_game": 3.9, "reds_per_game": 0.15, "penalties_per_game": 0.28, "fouls_per_game": 25, "style": "strict"},
     "Istvan Kovacs": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.34, "fouls_per_game": 24, "style": "balanced"},
     "Jesús Gil Manzano": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.18, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+
+    # Brazilian Serie A referees (BSA) - tend to be stricter with cards
+    "Raphael Claus": {"cards_per_game": 5.2, "yellows_per_game": 4.8, "reds_per_game": 0.20, "penalties_per_game": 0.35, "fouls_per_game": 28, "style": "strict"},
+    "Wilton Pereira Sampaio": {"cards_per_game": 5.0, "yellows_per_game": 4.6, "reds_per_game": 0.18, "penalties_per_game": 0.32, "fouls_per_game": 27, "style": "strict"},
+    "Anderson Daronco": {"cards_per_game": 5.5, "yellows_per_game": 5.0, "reds_per_game": 0.25, "penalties_per_game": 0.38, "fouls_per_game": 30, "style": "very_strict"},
+    "Braulio da Silva Machado": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.17, "penalties_per_game": 0.30, "fouls_per_game": 26, "style": "strict"},
+    "Flavio Rodrigues de Souza": {"cards_per_game": 4.6, "yellows_per_game": 4.2, "reds_per_game": 0.16, "penalties_per_game": 0.33, "fouls_per_game": 25, "style": "balanced"},
+    "Ramon Abatti Abel": {"cards_per_game": 5.1, "yellows_per_game": 4.7, "reds_per_game": 0.19, "penalties_per_game": 0.34, "fouls_per_game": 28, "style": "strict"},
+    "Bruno Arleu de Araujo": {"cards_per_game": 4.9, "yellows_per_game": 4.5, "reds_per_game": 0.18, "penalties_per_game": 0.31, "fouls_per_game": 27, "style": "strict"},
+    "Luiz Flavio de Oliveira": {"cards_per_game": 4.7, "yellows_per_game": 4.3, "reds_per_game": 0.17, "penalties_per_game": 0.35, "fouls_per_game": 26, "style": "balanced"},
+    "Wagner do Nascimento Magalhaes": {"cards_per_game": 5.3, "yellows_per_game": 4.9, "reds_per_game": 0.21, "penalties_per_game": 0.30, "fouls_per_game": 29, "style": "very_strict"},
+    "Leandro Pedro Vuaden": {"cards_per_game": 4.5, "yellows_per_game": 4.1, "reds_per_game": 0.15, "penalties_per_game": 0.32, "fouls_per_game": 25, "style": "balanced"},
+    "Marcelo de Lima Henrique": {"cards_per_game": 4.4, "yellows_per_game": 4.0, "reds_per_game": 0.14, "penalties_per_game": 0.28, "fouls_per_game": 24, "style": "balanced"},
+    "Paulo Roberto Alves Junior": {"cards_per_game": 4.8, "yellows_per_game": 4.4, "reds_per_game": 0.17, "penalties_per_game": 0.33, "fouls_per_game": 26, "style": "strict"},
+    "Savio Pereira Sampaio": {"cards_per_game": 5.0, "yellows_per_game": 4.6, "reds_per_game": 0.18, "penalties_per_game": 0.31, "fouls_per_game": 27, "style": "strict"},
+    "Jean Pierre Goncalves Lima": {"cards_per_game": 4.6, "yellows_per_game": 4.2, "reds_per_game": 0.16, "penalties_per_game": 0.34, "fouls_per_game": 25, "style": "balanced"},
+    "Denis da Silva Ribeiro Serafim": {"cards_per_game": 4.9, "yellows_per_game": 4.5, "reds_per_game": 0.18, "penalties_per_game": 0.30, "fouls_per_game": 27, "style": "strict"},
+
+    # Portuguese Liga referees (PPL)
+    "Artur Soares Dias": {"cards_per_game": 4.5, "yellows_per_game": 4.1, "reds_per_game": 0.16, "penalties_per_game": 0.32, "fouls_per_game": 26, "style": "strict"},
+    "Joao Pinheiro": {"cards_per_game": 4.2, "yellows_per_game": 3.8, "reds_per_game": 0.14, "penalties_per_game": 0.35, "fouls_per_game": 24, "style": "balanced"},
+    "Tiago Martins": {"cards_per_game": 4.4, "yellows_per_game": 4.0, "reds_per_game": 0.15, "penalties_per_game": 0.30, "fouls_per_game": 25, "style": "balanced"},
+    "Nuno Almeida": {"cards_per_game": 4.6, "yellows_per_game": 4.2, "reds_per_game": 0.17, "penalties_per_game": 0.33, "fouls_per_game": 26, "style": "strict"},
+    "Luis Godinho": {"cards_per_game": 4.3, "yellows_per_game": 3.9, "reds_per_game": 0.15, "penalties_per_game": 0.31, "fouls_per_game": 25, "style": "balanced"},
+
+    # Eredivisie referees (DED)
+    "Serdar Gözübüyük": {"cards_per_game": 4.0, "yellows_per_game": 3.7, "reds_per_game": 0.12, "penalties_per_game": 0.35, "fouls_per_game": 23, "style": "balanced"},
+    "Bas Nijhuis": {"cards_per_game": 3.8, "yellows_per_game": 3.5, "reds_per_game": 0.11, "penalties_per_game": 0.38, "fouls_per_game": 22, "style": "lenient"},
+    "Allard Lindhout": {"cards_per_game": 4.1, "yellows_per_game": 3.8, "reds_per_game": 0.13, "penalties_per_game": 0.32, "fouls_per_game": 24, "style": "balanced"},
+    "Dennis Higler": {"cards_per_game": 3.9, "yellows_per_game": 3.6, "reds_per_game": 0.12, "penalties_per_game": 0.34, "fouls_per_game": 23, "style": "balanced"},
 }
 
 # League average stats for comparison
@@ -6098,6 +6145,9 @@ LEAGUE_REFEREE_AVERAGES = {
     "FL1": {"cards_per_game": 4.1, "penalties_per_game": 0.32},  # Ligue 1
     "CL": {"cards_per_game": 3.8, "penalties_per_game": 0.32},   # Champions League
     "EL": {"cards_per_game": 4.0, "penalties_per_game": 0.30},   # Europa League
+    "BSA": {"cards_per_game": 4.9, "penalties_per_game": 0.33},  # Brazilian Serie A - very strict
+    "PPL": {"cards_per_game": 4.4, "penalties_per_game": 0.32},  # Portuguese Liga
+    "DED": {"cards_per_game": 3.9, "penalties_per_game": 0.35},  # Eredivisie
     "default": {"cards_per_game": 4.0, "penalties_per_game": 0.32}
 }
 
@@ -6470,8 +6520,203 @@ def is_derby_match(home_team: str, away_team: str) -> bool:
     return False
 
 
+# ===== COACH CHANGE TRACKING =====
+# Track recent coach changes - "new coach boost" typically lasts 2-3 matches
+# Format: "team_name": {"coach": "name", "appointed": "YYYY-MM-DD", "matches_since": N}
+# Update this periodically based on news
+
+RECENT_COACH_CHANGES = {
+    # Format: lowercase team name -> coach info
+    # Example entries (update with real data):
+    # "manchester united": {"coach": "Ruben Amorim", "appointed": "2024-11-11", "matches_since": 0},
+}
+
+
+def get_coach_change_info(team_name: str) -> Optional[dict]:
+    """Check if team has a recent coach change.
+
+    Returns dict with coach info if new coach (< 5 matches), None otherwise.
+    """
+    team_normalized = normalize_team_name(team_name)
+
+    for team_key, info in RECENT_COACH_CHANGES.items():
+        if team_key in team_normalized or team_normalized in team_key:
+            matches = info.get("matches_since", 10)
+            if matches < 5:  # "New coach boost" period
+                return {
+                    "coach": info.get("coach", "Unknown"),
+                    "matches_since": matches,
+                    "is_new": matches <= 2,  # Very new (first 2 matches)
+                    "boost": 15 if matches <= 2 else 10 if matches <= 4 else 5,
+                }
+    return None
+
+
+def calculate_coach_factor(home_team: str, away_team: str) -> dict:
+    """Calculate coach change factor for both teams.
+
+    New coach typically brings:
+    - First 2 matches: +15% motivation boost (honeymoon period)
+    - Matches 3-4: +10% boost
+    - Match 5+: Effect fades
+
+    Returns dict with home_new_coach, away_new_coach, and boost values.
+    """
+    home_coach = get_coach_change_info(home_team)
+    away_coach = get_coach_change_info(away_team)
+
+    return {
+        "home_new_coach": home_coach is not None,
+        "away_new_coach": away_coach is not None,
+        "home_coach_info": home_coach,
+        "away_coach_info": away_coach,
+        "home_coach_boost": home_coach.get("boost", 0) if home_coach else 0,
+        "away_coach_boost": away_coach.get("boost", 0) if away_coach else 0,
+    }
+
+
+def format_coach_context(coach_factor: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format coach change info for Claude analysis."""
+    if not coach_factor.get("home_new_coach") and not coach_factor.get("away_new_coach"):
+        return ""
+
+    labels = {
+        "ru": {
+            "title": "СМЕНА ТРЕНЕРА",
+            "new_coach": "Новый тренер",
+            "matches": "матчей",
+            "honeymoon": "🔥 Эффект нового тренера! (+{boost}% мотивация)",
+            "warning": "⚠️ Новый тренер = тактическая перестройка",
+        },
+        "en": {
+            "title": "COACH CHANGE",
+            "new_coach": "New coach",
+            "matches": "matches",
+            "honeymoon": "🔥 New coach effect! (+{boost}% motivation)",
+            "warning": "⚠️ New coach = tactical changes",
+        },
+        "pt": {
+            "title": "MUDANÇA DE TÉCNICO",
+            "new_coach": "Novo técnico",
+            "matches": "jogos",
+            "honeymoon": "🔥 Efeito novo técnico! (+{boost}% motivação)",
+            "warning": "⚠️ Novo técnico = mudanças táticas",
+        },
+        "es": {
+            "title": "CAMBIO DE ENTRENADOR",
+            "new_coach": "Nuevo entrenador",
+            "matches": "partidos",
+            "honeymoon": "🔥 Efecto nuevo DT! (+{boost}% motivación)",
+            "warning": "⚠️ Nuevo DT = cambios tácticos",
+        },
+        "id": {
+            "title": "PERGANTIAN PELATIH",
+            "new_coach": "Pelatih baru",
+            "matches": "pertandingan",
+            "honeymoon": "🔥 Efek pelatih baru! (+{boost}% motivasi)",
+            "warning": "⚠️ Pelatih baru = perubahan taktik",
+        },
+    }
+
+    l = labels.get(lang, labels["en"])
+    context = f"\n👔 {l['title']}:\n"
+
+    if coach_factor.get("home_new_coach"):
+        info = coach_factor["home_coach_info"]
+        context += f"  • {home_team}: {l['new_coach']} ({info['coach']}) - {info['matches_since']} {l['matches']}\n"
+        context += f"    {l['honeymoon'].format(boost=info['boost'])}\n"
+
+    if coach_factor.get("away_new_coach"):
+        info = coach_factor["away_coach_info"]
+        context += f"  • {away_team}: {l['new_coach']} ({info['coach']}) - {info['matches_since']} {l['matches']}\n"
+        context += f"    {l['honeymoon'].format(boost=info['boost'])}\n"
+
+    if coach_factor.get("home_new_coach") or coach_factor.get("away_new_coach"):
+        context += f"  {l['warning']}\n"
+
+    return context
+
+
+def normalize_team_name(name: str) -> str:
+    """Normalize team name for matching - remove common suffixes, lowercase."""
+    if not name:
+        return ""
+    name = name.lower().strip()
+    # Remove common suffixes
+    for suffix in [" fc", " cf", " sc", " ac", " fk", " sk", " bk", " if",
+                   " united", " city", " town", " county", " athletic",
+                   " sporting", " real", " club", " futbol"]:
+        name = name.replace(suffix, "")
+    return name.strip()
+
+
+def find_team_in_standings(team_name: str, standings: list) -> dict:
+    """Find team in standings using fuzzy matching.
+
+    Returns dict with position, points, won, drawn, lost, goalsFor, goalsAgainst
+    or None if not found.
+    """
+    if not standings or not team_name:
+        return None
+
+    team_normalized = normalize_team_name(team_name)
+
+    # Try exact match first
+    for team_data in standings:
+        standing_name = team_data.get("team", {}).get("name", "")
+        standing_normalized = normalize_team_name(standing_name)
+
+        if team_normalized == standing_normalized:
+            return {
+                "position": team_data.get("position", 10),
+                "points": team_data.get("points", 0),
+                "won": team_data.get("won", 0),
+                "drawn": team_data.get("drawn", 0),
+                "lost": team_data.get("lost", 0),
+                "goals_for": team_data.get("goalsFor", 0),
+                "goals_against": team_data.get("goalsAgainst", 0),
+                "played": team_data.get("playedGames", 0),
+            }
+
+    # Try partial match
+    for team_data in standings:
+        standing_name = team_data.get("team", {}).get("name", "")
+        standing_normalized = normalize_team_name(standing_name)
+
+        # Check if one contains the other
+        if team_normalized in standing_normalized or standing_normalized in team_normalized:
+            return {
+                "position": team_data.get("position", 10),
+                "points": team_data.get("points", 0),
+                "won": team_data.get("won", 0),
+                "drawn": team_data.get("drawn", 0),
+                "lost": team_data.get("lost", 0),
+                "goals_for": team_data.get("goalsFor", 0),
+                "goals_against": team_data.get("goalsAgainst", 0),
+                "played": team_data.get("playedGames", 0),
+            }
+
+        # Check individual words
+        team_words = set(team_normalized.split())
+        standing_words = set(standing_normalized.split())
+        if team_words & standing_words:  # If any word matches
+            return {
+                "position": team_data.get("position", 10),
+                "points": team_data.get("points", 0),
+                "won": team_data.get("won", 0),
+                "drawn": team_data.get("drawn", 0),
+                "lost": team_data.get("lost", 0),
+                "goals_for": team_data.get("goalsFor", 0),
+                "goals_against": team_data.get("goalsAgainst", 0),
+                "played": team_data.get("playedGames", 0),
+            }
+
+    return None
+
+
 def calculate_motivation(position: int, total_teams: int = 20, is_derby: bool = False,
-                         is_cup: bool = False) -> dict:
+                         is_cup: bool = False, points_from_top: int = None,
+                         points_from_relegation: int = None, recent_form: str = None) -> dict:
     """Calculate motivation score based on position and context.
 
     Returns dict with motivation score (1-10) and factors.
@@ -6507,6 +6752,28 @@ def calculate_motivation(position: int, total_teams: int = 20, is_derby: bool = 
             motivation += 1
             factors.append("relegation_risk")
 
+    # Points-based motivation boost
+    if points_from_top is not None and points_from_top <= 3:
+        motivation += 1  # Close to leader
+        if "title_race" not in factors:
+            factors.append("close_to_top")
+
+    if points_from_relegation is not None and points_from_relegation <= 3:
+        motivation += 1  # Close to danger zone
+        if "relegation_battle" not in factors and "relegation_risk" not in factors:
+            factors.append("close_to_relegation")
+
+    # Recent form momentum
+    if recent_form:
+        wins = recent_form.upper().count('W')
+        losses = recent_form.upper().count('L')
+        if wins >= 3:  # Hot streak
+            motivation += 1
+            factors.append("hot_streak")
+        elif losses >= 3:  # Cold streak - desperate
+            motivation += 1
+            factors.append("desperate")
+
     # Cap at 10
     motivation = min(10, motivation)
 
@@ -6520,13 +6787,52 @@ def calculate_motivation(position: int, total_teams: int = 20, is_derby: bool = 
 
 def get_motivation_analysis(home_team: str, away_team: str,
                             home_position: int, away_position: int,
-                            is_cup: bool = False, total_teams: int = 20) -> dict:
-    """Full motivation analysis for both teams."""
+                            is_cup: bool = False, total_teams: int = 20,
+                            home_standings: dict = None, away_standings: dict = None,
+                            home_form: str = None, away_form: str = None) -> dict:
+    """Full motivation analysis for both teams with enhanced data."""
 
     derby = is_derby_match(home_team, away_team)
 
-    home_motivation = calculate_motivation(home_position, total_teams, derby, is_cup)
-    away_motivation = calculate_motivation(away_position, total_teams, derby, is_cup)
+    # Calculate points from top and relegation zone
+    home_pts_from_top = None
+    home_pts_from_rel = None
+    away_pts_from_top = None
+    away_pts_from_rel = None
+
+    if home_standings:
+        home_position = home_standings.get("position", home_position)
+        # Calculate gaps if we have points data
+        if "points" in home_standings:
+            home_pts = home_standings["points"]
+            # Assume leader has ~2.2 points per game average
+            games_played = home_standings.get("played", 10)
+            if games_played > 0:
+                # Rough estimate - in reality we'd need leader's points
+                leader_pts_estimate = int(games_played * 2.2)
+                home_pts_from_top = max(0, leader_pts_estimate - home_pts)
+
+    if away_standings:
+        away_position = away_standings.get("position", away_position)
+        if "points" in away_standings:
+            away_pts = away_standings["points"]
+            games_played = away_standings.get("played", 10)
+            if games_played > 0:
+                leader_pts_estimate = int(games_played * 2.2)
+                away_pts_from_top = max(0, leader_pts_estimate - away_pts)
+
+    home_motivation = calculate_motivation(
+        home_position, total_teams, derby, is_cup,
+        points_from_top=home_pts_from_top,
+        points_from_relegation=home_pts_from_rel,
+        recent_form=home_form
+    )
+    away_motivation = calculate_motivation(
+        away_position, total_teams, derby, is_cup,
+        points_from_top=away_pts_from_top,
+        points_from_relegation=away_pts_from_rel,
+        recent_form=away_form
+    )
 
     return {
         "is_derby": derby,
@@ -6539,6 +6845,8 @@ def get_motivation_analysis(home_team: str, away_team: str,
         "home_relegation": home_motivation["in_relegation"],
         "away_relegation": away_motivation["in_relegation"],
         "motivation_diff": home_motivation["score"] - away_motivation["score"],
+        "home_position": home_position,
+        "away_position": away_position,
     }
 
 
@@ -7498,21 +7806,44 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     home_pos = 10
     away_pos = 10
     total_teams = 20
+    home_standings_data = None
+    away_standings_data = None
+
     if standings:
-        for team in standings.get("standings", []):
-            team_name = team.get("team", {}).get("name", "").lower()
-            if home.lower() in team_name or team_name in home.lower():
-                home_pos = team.get("position", 10)
-            if away.lower() in team_name or team_name in away.lower():
-                away_pos = team.get("position", 10)
-        # Get total teams in competition
-        total_teams = len(standings.get("standings", [])) or 20
+        standings_list = standings.get("standings", [])
+        total_teams = len(standings_list) or 20
+
+        # Use improved team matching
+        home_standings_data = find_team_in_standings(home, standings_list)
+        away_standings_data = find_team_in_standings(away, standings_list)
+
+        if home_standings_data:
+            home_pos = home_standings_data.get("position", 10)
+        if away_standings_data:
+            away_pos = away_standings_data.get("position", 10)
 
     is_cup = "cup" in comp.lower() or "copa" in comp.lower() or "coupe" in comp.lower()
-    motivation = get_motivation_analysis(home, away, home_pos, away_pos, is_cup, total_teams)
+
+    # Get recent form strings for motivation
+    home_form_str = home_form.get("overall", {}).get("form", "") if home_form else ""
+    away_form_str = away_form.get("overall", {}).get("form", "") if away_form else ""
+
+    motivation = get_motivation_analysis(
+        home, away, home_pos, away_pos, is_cup, total_teams,
+        home_standings=home_standings_data,
+        away_standings=away_standings_data,
+        home_form=home_form_str,
+        away_form=away_form_str
+    )
     motivation_context = format_motivation_context(motivation, home, away, lang)
     if motivation_context:
         analysis_data += motivation_context
+
+    # 👔 COACH CHANGE - new coach boost factor
+    coach_factor = calculate_coach_factor(home, away)
+    coach_context = format_coach_context(coach_factor, home, away, lang)
+    if coach_context:
+        analysis_data += coach_context
 
     # 👑 TEAM CLASS - elite factor analysis
     team_class = get_team_class_analysis(home, away, home_pos, away_pos, total_teams)
@@ -7599,7 +7930,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML (including referee, web news, congestion, motivation)
+    # Extract features for ML (including referee, web news, congestion, motivation, coach)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -7612,7 +7943,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         has_web_news=web_news.get("searched", False) if web_news else False,
         congestion=congestion,
         motivation=motivation,
-        team_class=team_class
+        team_class=team_class,
+        coach_factor=coach_factor
     )
 
     # Get ML predictions if models are trained
@@ -7805,6 +8137,17 @@ CRITICAL ANALYSIS RULES:
    - If YOUR analysis conflicts with sharp money → Be cautious, reduce confidence
    - Sharp money is an ADDITIONAL factor in edge stacking!
    - No line movement = neutral (doesn't help or hurt)
+
+19. 👔 COACH CHANGE FACTOR (NEW COACH BOOST!):
+   - NEW coach (first 2 matches) → +15% motivation boost (honeymoon period)
+   - Coach with 3-4 matches → +10% boost (still adapting)
+   - After 5+ matches → Effect fades, normal analysis
+   - New coach = tactical changes, formations may be different
+   - Watch for: Different playing style, new signings getting chances
+   - RISK: Unpredictable tactics, players still learning system
+   - EDGE: Market often slow to react to new coach appointment
+   - If new coach + good fixtures = Great opportunity!
+   - Add this as FACTOR in edge stacking if applicable
 
 RESPONSE FORMAT:
 
