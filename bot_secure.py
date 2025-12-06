@@ -2049,16 +2049,21 @@ def update_prediction_result(pred_id, result, is_correct):
 
 
 def clean_duplicate_predictions() -> dict:
-    """Remove duplicate predictions, keeping only the first one per match per user.
-    Returns stats about what was cleaned."""
+    """Remove duplicate predictions, keeping only the first one per unique combination.
+
+    A duplicate is defined as same: user_id + match_id + bet_type + bet_rank
+    This preserves:
+    - Different bet types for same match (e.g., П1 and ТБ 2.5)
+    - Main bets (rank=1) and alternative bets (rank=2+) separately
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Find duplicates (same user_id + match_id, keep oldest)
+    # Find TRUE duplicates (same user_id + match_id + bet_type + bet_rank, keep oldest)
     c.execute("""
-        SELECT user_id, match_id, COUNT(*) as cnt, MIN(id) as keep_id
+        SELECT user_id, match_id, bet_type, bet_rank, COUNT(*) as cnt, MIN(id) as keep_id
         FROM predictions
-        GROUP BY user_id, match_id
+        GROUP BY user_id, match_id, bet_type, bet_rank
         HAVING cnt > 1
     """)
     duplicates = c.fetchall()
@@ -2066,11 +2071,11 @@ def clean_duplicate_predictions() -> dict:
     deleted_count = 0
     affected_matches = 0
 
-    for user_id, match_id, count, keep_id in duplicates:
+    for user_id, match_id, bet_type, bet_rank, count, keep_id in duplicates:
         # Delete all except the first one
         c.execute("""DELETE FROM predictions
-                     WHERE user_id = ? AND match_id = ? AND id != ?""",
-                  (user_id, match_id, keep_id))
+                     WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank = ? AND id != ?""",
+                  (user_id, match_id, bet_type, bet_rank, keep_id))
         deleted_count += c.rowcount
         affected_matches += 1
 
