@@ -174,7 +174,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум доступ:**\n• $10+ (~900₽/R$50) → +5 прогнозов\n• $40+ (~3,600₽/R$200) → 7 дней\n• $100+ (~9,000₽/R$500) → 30 дней\n• $200+ (~18,000₽/R$1000) → Навсегда\n\n👇 Сделай депозит по ссылке:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит в 1win — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -311,7 +311,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium access:**\n• $10+ (~₦15,000/R$50) → +5 predictions\n• $40+ (~₦60,000/R$200) → 7 days\n• $100+ (~₦150,000/R$500) → 30 days\n• $200+ (~₦300,000/R$1000) → Lifetime\n\n👇 Make a deposit via link:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit on 1win — get premium automatically.\n\n👇 Tap the button below:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -448,7 +448,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso premium:**\n• $10+ (~R$50) → +5 previsões\n• $40+ (~R$200) → 7 dias\n• $100+ (~R$500) → 30 dias\n• $200+ (~R$1000) → Vitalício\n\n👇 Faça um depósito pelo link:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito no 1win — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -585,7 +585,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **Acceso premium:**\n• $10+ (~R$50) → +5 pronósticos\n• $40+ (~R$200) → 7 días\n• $100+ (~R$500) → 30 días\n• $200+ (~R$1000) → De por vida\n\n👇 Haz un depósito por el enlace:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito en 1win — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -722,7 +722,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorit",
         "settings": "⚙️ Pengaturan",
         "help_btn": "❓ Bantuan",
-        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses premium:**\n• $10+ (~Rp156K) → +5 prediksi\n• $40+ (~Rp625K) → 7 hari\n• $100+ (~Rp1,56M) → 30 hari\n• $200+ (~Rp3,12M) → Selamanya\n\n👇 Lakukan deposit melalui link:",
+        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit di 1win — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
         "place_bet": "🎰 Pasang taruhan",
         "no_matches": "Tidak ada pertandingan",
         "analyzing": "🔍 Menganalisis...",
@@ -1508,6 +1508,127 @@ PREMIUM_TIERS = {
     1000: 36500  # R$1000+ = Lifetime
 }
 
+# ===== GEO-BASED PREMIUM TIERS =====
+# Different countries have different purchasing power, so we adjust thresholds
+
+# Nigeria (NG) - Lower thresholds, prices in Naira
+PREMIUM_TIERS_NG = {
+    3: "bonus_5",    # $3+ (~₦5,000) = +5 bonus predictions
+    10: 7,           # $10+ (~₦15,000) = 7 days premium
+    25: 30,          # $25+ (~₦40,000) = 30 days premium
+    50: 36500        # $50+ (~₦80,000) = Lifetime
+}
+
+# Russia (RU) - Medium thresholds, prices in Rubles
+PREMIUM_TIERS_RU = {
+    5: "bonus_5",    # $5+ (~500₽) = +5 bonus predictions
+    15: 7,           # $15+ (~1,500₽) = 7 days premium
+    40: 30,          # $40+ (~4,000₽) = 30 days premium
+    100: 36500       # $100+ (~10,000₽) = Lifetime
+}
+
+# Indonesia (ID) - Medium-low thresholds, prices in Rupiah
+PREMIUM_TIERS_ID = {
+    5: "bonus_5",    # $5+ (~Rp78K) = +5 bonus predictions
+    20: 7,           # $20+ (~Rp312K) = 7 days premium
+    50: 30,          # $50+ (~Rp780K) = 30 days premium
+    100: 36500       # $100+ (~Rp1.56M) = Lifetime
+}
+
+# Geo-specific tier mapping
+GEO_PREMIUM_TIERS = {
+    "NG": PREMIUM_TIERS_NG,
+    "RU": PREMIUM_TIERS_RU,
+    "ID": PREMIUM_TIERS_ID,
+    "DEFAULT": PREMIUM_TIERS_USD
+}
+
+# Geo-specific price display texts
+GEO_PRICE_DISPLAY = {
+    "NG": {
+        "currency_symbol": "₦",
+        "prices": [
+            ("$3+", "~₦5,000", "+5 predictions"),
+            ("$10+", "~₦15,000", "7 days"),
+            ("$25+", "~₦40,000", "30 days"),
+            ("$50+", "~₦80,000", "Lifetime"),
+        ]
+    },
+    "RU": {
+        "currency_symbol": "₽",
+        "prices": [
+            ("$5+", "~500₽", "+5 predictions"),
+            ("$15+", "~1,500₽", "7 days"),
+            ("$40+", "~4,000₽", "30 days"),
+            ("$100+", "~10,000₽", "Lifetime"),
+        ]
+    },
+    "ID": {
+        "currency_symbol": "Rp",
+        "prices": [
+            ("$5+", "~Rp78K", "+5 predictions"),
+            ("$20+", "~Rp312K", "7 days"),
+            ("$50+", "~Rp780K", "30 days"),
+            ("$100+", "~Rp1.56M", "Lifetime"),
+        ]
+    },
+    "DEFAULT": {
+        "currency_symbol": "$",
+        "prices": [
+            ("$10+", "~R$50/900₽", "+5 predictions"),
+            ("$40+", "~R$200/3,600₽", "7 days"),
+            ("$100+", "~R$500/9,000₽", "30 days"),
+            ("$200+", "~R$1000/18,000₽", "Lifetime"),
+        ]
+    }
+}
+
+
+def get_user_geo(user_id: int) -> str:
+    """Detect user's geo based on source field in database.
+
+    Returns:
+        'NG' for Nigeria
+        'RU' for Russia
+        'ID' for Indonesia
+        'DEFAULT' for others
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT source FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+        conn.close()
+
+        if not row or not row[0]:
+            return "DEFAULT"
+
+        source = row[0].lower()
+
+        # Check for Nigeria
+        if "_ng" in source or "nigeria" in source:
+            return "NG"
+
+        # Check for Russia
+        if "_ru" in source or "russia" in source:
+            return "RU"
+
+        # Check for Indonesia
+        if "_id" in source or "indonesia" in source:
+            return "ID"
+
+        return "DEFAULT"
+
+    except Exception as e:
+        logger.error(f"Error getting user geo: {e}")
+        return "DEFAULT"
+
+
+def get_premium_tiers_for_geo(geo: str) -> dict:
+    """Get premium tiers for specific geo."""
+    return GEO_PREMIUM_TIERS.get(geo, PREMIUM_TIERS_USD)
+
+
 def convert_to_usd(amount: float, currency: str) -> float:
     """Convert amount from local currency to USD."""
     currency = currency.upper()
@@ -1515,41 +1636,52 @@ def convert_to_usd(amount: float, currency: str) -> float:
     return amount * rate
 
 
-def calculate_premium_reward(amount: float, currency: str = "BRL") -> dict:
-    """Calculate premium reward based on deposit amount.
+def calculate_premium_reward(amount: float, currency: str = "BRL", geo: str = "DEFAULT") -> dict:
+    """Calculate premium reward based on deposit amount and user's geo.
+
+    Args:
+        amount: Deposit amount in local currency
+        currency: Currency code (BRL, USD, RUB, NGN, etc.)
+        geo: User's geo code (NG, RU, ID, DEFAULT)
 
     Returns dict with:
     - type: 'premium' or 'bonus_predictions' or 'none'
     - days: premium days (if premium)
     - predictions: bonus predictions (if bonus)
     - amount_usd: converted amount
+    - geo: applied geo
     """
     amount_usd = convert_to_usd(amount, currency)
 
+    # Get geo-specific tiers (falls back to DEFAULT if unknown)
+    tiers = get_premium_tiers_for_geo(geo)
+
     # Check tiers from highest to lowest
-    for threshold, reward in sorted(PREMIUM_TIERS_USD.items(), reverse=True):
+    for threshold, reward in sorted(tiers.items(), reverse=True):
         if amount_usd >= threshold:
             if reward == "bonus_5":
                 return {
                     "type": "bonus_predictions",
                     "predictions": 5,
                     "days": 0,
-                    "amount_usd": amount_usd
+                    "amount_usd": amount_usd,
+                    "geo": geo
                 }
             else:
                 return {
                     "type": "premium",
                     "days": reward,
                     "predictions": 0,
-                    "amount_usd": amount_usd
+                    "amount_usd": amount_usd,
+                    "geo": geo
                 }
 
-    return {"type": "none", "days": 0, "predictions": 0, "amount_usd": amount_usd}
+    return {"type": "none", "days": 0, "predictions": 0, "amount_usd": amount_usd, "geo": geo}
 
 
-def calculate_premium_days(amount: float, currency: str = "BRL") -> int:
+def calculate_premium_days(amount: float, currency: str = "BRL", geo: str = "DEFAULT") -> int:
     """Calculate premium days based on deposit amount (legacy function)."""
-    reward = calculate_premium_reward(amount, currency)
+    reward = calculate_premium_reward(amount, currency, geo)
     return reward.get("days", 0)
 
 
@@ -1969,12 +2101,17 @@ def process_1win_postback(data: dict) -> dict:
             conn.close()
             return {"status": "duplicate", "reason": "transaction already processed"}
 
-        # Calculate reward (premium days OR bonus predictions)
-        reward = calculate_premium_reward(amount, currency)
+        # Get user's geo for personalized thresholds
+        user_geo = get_user_geo(telegram_user_id)
+
+        # Calculate reward (premium days OR bonus predictions) with geo-specific thresholds
+        reward = calculate_premium_reward(amount, currency, user_geo)
 
         if reward["type"] == "none":
             conn.close()
-            return {"status": "ignored", "reason": f"deposit {amount} {currency} (${reward['amount_usd']:.2f}) below minimum $10"}
+            # Get minimum threshold for this geo
+            min_threshold = min(get_premium_tiers_for_geo(user_geo).keys())
+            return {"status": "ignored", "reason": f"deposit {amount} {currency} (${reward['amount_usd']:.2f}) below minimum ${min_threshold} for geo={user_geo}"}
 
         premium_days = reward.get("days", 0)
         bonus_predictions = reward.get("predictions", 0)
@@ -6151,11 +6288,26 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+def get_geo_prices_text(geo: str) -> str:
+    """Generate price list text based on user's geo."""
+    display = GEO_PRICE_DISPLAY.get(geo, GEO_PRICE_DISPLAY["DEFAULT"])
+    prices = display["prices"]
+
+    lines = []
+    for usd, local, reward in prices:
+        lines.append(f"• {usd} ({local}) → {reward}")
+
+    return "\n".join(lines)
+
+
 async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show premium options - 1win deposit or crypto payment"""
     user_id = update.effective_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
+
+    # Get user's geo for personalized prices
+    user_geo = get_user_geo(user_id)
 
     # Check if already premium
     is_prem = user.get("is_premium", 0) if user else 0
@@ -6184,6 +6336,9 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         earned_text = get_text("premium_click_below", lang)
 
+    # Get geo-personalized prices
+    geo_prices = get_geo_prices_text(user_geo)
+
     text = f"""{get_text("premium_title", lang)}
 
 {status_text}{get_text("premium_unlimited", lang)}
@@ -6193,10 +6348,7 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {get_text("premium_option1_title", lang)}
 {get_text("premium_option1_desc", lang)}
 
-• $10+ (~R$50/900₽/₦15K) → +5 predictions
-• $40+ (~R$200/3,600₽/₦60K) → 7 days
-• $100+ (~R$500/9,000₽/₦150K) → 30 days
-• $200+ (~R$1000/18,000₽/₦300K) → Lifetime
+{geo_prices}
 
 ━━━━━━━━━━━━━━━━━━━━
 
