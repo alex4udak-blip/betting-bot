@@ -12953,6 +12953,339 @@ async def send_reengagement_alerts(context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Re-engagement alerts sent: {total_sent}")
 
 
+# =============================================================================
+# SUCCESS TRIGGER SYSTEM - Smart reactivation based on bot performance
+# =============================================================================
+
+SUCCESS_TRIGGER_MESSAGES = {
+    "win_streak": {
+        "ru": "🔥 **СЕРИЯ ПОБЕД!**\n\nМы угадали **{streak} прогнозов подряд!**\nПрисоединяйся — горячая серия продолжается!",
+        "en": "🔥 **WIN STREAK!**\n\nWe hit **{streak} predictions in a row!**\nJoin now — hot streak continues!",
+        "pt": "🔥 **SEQUÊNCIA DE VITÓRIAS!**\n\nAcertamos **{streak} previsões seguidas!**\nEntre agora — sequência continua!",
+        "es": "🔥 **¡RACHA GANADORA!**\n\n¡Acertamos **{streak} pronósticos seguidos!**\n¡Únete — la racha continúa!",
+        "id": "🔥 **STREAK KEMENANGAN!**\n\nKami menang **{streak} prediksi berturut-turut!**\nGabung sekarang — streak berlanjut!",
+    },
+    "hot_day": {
+        "ru": "⚡ **ГОРЯЧИЙ ДЕНЬ!**\n\nСегодня уже **{wins} из {total} прогнозов** сыграли!\nТочность дня: **{accuracy}%** 🎯",
+        "en": "⚡ **HOT DAY!**\n\nToday **{wins} of {total} predictions** hit!\nDaily accuracy: **{accuracy}%** 🎯",
+        "pt": "⚡ **DIA QUENTE!**\n\nHoje **{wins} de {total} previsões** acertaram!\nPrecisão do dia: **{accuracy}%** 🎯",
+        "es": "⚡ **¡DÍA CALIENTE!**\n\n¡Hoy **{wins} de {total} pronósticos** acertaron!\nPrecisión del día: **{accuracy}%** 🎯",
+        "id": "⚡ **HARI PANAS!**\n\nHari ini **{wins} dari {total} prediksi** menang!\nAkurasi hari ini: **{accuracy}%** 🎯",
+    },
+    "missed_wins": {
+        "ru": "😱 **Ты пропустил!**\n\nЗа последние дни **{missed} наших прогнозов сыграли**.\nНе пропусти следующий — зайди прямо сейчас!",
+        "en": "😱 **You missed out!**\n\nLast few days **{missed} of our predictions won**.\nDon't miss the next one — check now!",
+        "pt": "😱 **Você perdeu!**\n\nÚltimos dias **{missed} previsões nossas ganharam**.\nNão perca a próxima — confira agora!",
+        "es": "😱 **¡Te lo perdiste!**\n\nÚltimos días **{missed} pronósticos nuestros ganaron**.\n¡No pierdas el próximo — mira ahora!",
+        "id": "😱 **Anda melewatkan!**\n\nBeberapa hari terakhir **{missed} prediksi kami menang**.\nJangan lewatkan lagi — cek sekarang!",
+    },
+    "big_odds_win": {
+        "ru": "💰 **КРУПНЫЙ ВЫИГРЫШ!**\n\nТолько что сыграл прогноз с коэффициентом **{odds}**!\nТакие возможности нельзя упускать!",
+        "en": "💰 **BIG WIN!**\n\nJust hit a prediction with odds **{odds}**!\nDon't miss opportunities like this!",
+        "pt": "💰 **GRANDE VITÓRIA!**\n\nAcabamos de acertar odds de **{odds}**!\nNão perca oportunidades assim!",
+        "es": "💰 **¡GRAN VICTORIA!**\n\n¡Acertamos pronóstico con cuota **{odds}**!\n¡No pierdas oportunidades así!",
+        "id": "💰 **KEMENANGAN BESAR!**\n\nBaru saja menang dengan odds **{odds}**!\nJangan lewatkan kesempatan ini!",
+    },
+    "comeback": {
+        "ru": "🚀 **Мы вернулись в форму!**\n\nПосле небольшой паузы снова побеждаем!\nПоследние **{wins} из {total}** прогнозов сыграли.",
+        "en": "🚀 **We're back on track!**\n\nAfter a short pause, winning again!\nLast **{wins} of {total}** predictions hit.",
+        "pt": "🚀 **Voltamos à forma!**\n\nApós pausa curta, ganhando novamente!\nÚltimas **{wins} de {total}** previsões acertaram.",
+        "es": "🚀 **¡Volvimos a la forma!**\n\nDespués de una pausa, ¡ganando de nuevo!\nÚltimos **{wins} de {total}** pronósticos acertaron.",
+        "id": "🚀 **Kami kembali!**\n\nSetelah jeda singkat, menang lagi!\n**{wins} dari {total}** prediksi terakhir menang.",
+    },
+}
+
+
+def get_recent_prediction_stats() -> dict:
+    """Get recent prediction statistics for trigger calculations."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Today's stats
+        c.execute("""
+            SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            AND date(predicted_at) = date('now')
+        """)
+        row = c.fetchone()
+        today_total = row[0] or 0
+        today_wins = row[1] or 0
+
+        # Last 3 days stats (for missed wins)
+        c.execute("""
+            SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+            FROM predictions
+            WHERE is_correct IS NOT NULL
+            AND predicted_at >= datetime('now', '-3 days')
+        """)
+        row = c.fetchone()
+        recent_total = row[0] or 0
+        recent_wins = row[1] or 0
+
+        # Current win streak
+        c.execute("""
+            SELECT is_correct FROM predictions
+            WHERE is_correct IS NOT NULL
+            ORDER BY predicted_at DESC
+            LIMIT 20
+        """)
+        results = c.fetchall()
+        win_streak = 0
+        for r in results:
+            if r[0] == 1:
+                win_streak += 1
+            else:
+                break
+
+        # Last big odds win (>2.5)
+        c.execute("""
+            SELECT odds FROM predictions
+            WHERE is_correct = 1 AND odds >= 2.5
+            AND predicted_at >= datetime('now', '-24 hours')
+            ORDER BY odds DESC LIMIT 1
+        """)
+        big_odds_row = c.fetchone()
+        big_odds_win = big_odds_row[0] if big_odds_row else None
+
+        # Recent form (last 10)
+        c.execute("""
+            SELECT SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END), COUNT(*)
+            FROM (
+                SELECT is_correct FROM predictions
+                WHERE is_correct IS NOT NULL
+                ORDER BY predicted_at DESC
+                LIMIT 10
+            )
+        """)
+        row = c.fetchone()
+        last10_wins = row[0] or 0
+        last10_total = row[1] or 0
+
+        conn.close()
+
+        return {
+            "today_wins": today_wins,
+            "today_total": today_total,
+            "today_accuracy": round(today_wins / today_total * 100) if today_total > 0 else 0,
+            "recent_wins": recent_wins,
+            "recent_total": recent_total,
+            "win_streak": win_streak,
+            "big_odds_win": big_odds_win,
+            "last10_wins": last10_wins,
+            "last10_total": last10_total,
+        }
+    except Exception as e:
+        logger.error(f"Error getting prediction stats: {e}")
+        return {
+            "today_wins": 0, "today_total": 0, "today_accuracy": 0,
+            "recent_wins": 0, "recent_total": 0, "win_streak": 0,
+            "big_odds_win": None, "last10_wins": 0, "last10_total": 0
+        }
+
+
+def get_inactive_users_for_triggers(min_hours: int = 6, max_hours: int = 168) -> list:
+    """Get users who are inactive for trigger notifications.
+
+    Args:
+        min_hours: Minimum hours of inactivity (default 6 hours)
+        max_hours: Maximum hours of inactivity (default 7 days)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            SELECT user_id, language FROM users
+            WHERE last_active BETWEEN datetime('now', ? || ' hours')
+                                  AND datetime('now', ? || ' hours')
+            AND daily_requests > 0
+        """, (f"-{max_hours}", f"-{min_hours}"))
+        users = c.fetchall()
+        conn.close()
+        return users
+    except Exception as e:
+        logger.error(f"Error getting inactive users for triggers: {e}")
+        return []
+
+
+async def send_success_trigger_alerts(context: ContextTypes.DEFAULT_TYPE):
+    """Send success-based trigger alerts to inactive users.
+
+    Triggers:
+    1. Win Streak (3+ wins in a row) → Send to 6-48h inactive users
+    2. Hot Day (>60% accuracy today with 5+ predictions) → Send to 12-72h inactive
+    3. Big Odds Win (>2.5 odds won) → Send to 6-24h inactive users
+    4. Missed Wins (user inactive, we had wins) → Send to 24-168h inactive
+    5. Comeback (back to form after losses) → Send to 48-168h inactive
+    """
+    logger.info("Running success trigger alerts...")
+
+    stats = get_recent_prediction_stats()
+    total_sent = 0
+
+    # 1. WIN STREAK TRIGGER (3+ consecutive wins)
+    if stats["win_streak"] >= 3:
+        users = get_inactive_users_for_triggers(min_hours=6, max_hours=48)
+        for user_id, lang in users:
+            lang = lang or "ru"
+            if not should_send_notification(user_id, "trigger_win_streak", cooldown_hours=12):
+                continue
+
+            try:
+                text = SUCCESS_TRIGGER_MESSAGES["win_streak"].get(lang, SUCCESS_TRIGGER_MESSAGES["win_streak"]["en"])
+                text = text.format(streak=stats["win_streak"])
+
+                keyboard = [
+                    [InlineKeyboardButton("🎯 Получить прогноз" if lang == "ru" else "🎯 Get Prediction",
+                                          callback_data="cmd_recommend")],
+                    [InlineKeyboardButton("📊 Матчи сегодня" if lang == "ru" else "📊 Today's Matches",
+                                          callback_data="cmd_today")]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, "trigger_win_streak")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Failed to send win streak trigger to {user_id}: {e}")
+
+    # 2. HOT DAY TRIGGER (>60% accuracy today with 5+ predictions)
+    if stats["today_total"] >= 5 and stats["today_accuracy"] >= 60:
+        users = get_inactive_users_for_triggers(min_hours=12, max_hours=72)
+        for user_id, lang in users:
+            lang = lang or "ru"
+            if not should_send_notification(user_id, "trigger_hot_day", cooldown_hours=24):
+                continue
+
+            try:
+                text = SUCCESS_TRIGGER_MESSAGES["hot_day"].get(lang, SUCCESS_TRIGGER_MESSAGES["hot_day"]["en"])
+                text = text.format(
+                    wins=stats["today_wins"],
+                    total=stats["today_total"],
+                    accuracy=stats["today_accuracy"]
+                )
+
+                keyboard = [
+                    [InlineKeyboardButton("🔥 Не пропусти!" if lang == "ru" else "🔥 Don't Miss!",
+                                          callback_data="cmd_recommend")]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, "trigger_hot_day")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Failed to send hot day trigger to {user_id}: {e}")
+
+    # 3. BIG ODDS WIN TRIGGER (odds >= 2.5 won in last 24h)
+    if stats["big_odds_win"] and stats["big_odds_win"] >= 2.5:
+        users = get_inactive_users_for_triggers(min_hours=6, max_hours=24)
+        for user_id, lang in users:
+            lang = lang or "ru"
+            if not should_send_notification(user_id, "trigger_big_odds", cooldown_hours=24):
+                continue
+
+            try:
+                text = SUCCESS_TRIGGER_MESSAGES["big_odds_win"].get(lang, SUCCESS_TRIGGER_MESSAGES["big_odds_win"]["en"])
+                text = text.format(odds=round(stats["big_odds_win"], 2))
+
+                keyboard = [
+                    [InlineKeyboardButton("💰 Хочу такой!" if lang == "ru" else "💰 I Want That!",
+                                          callback_data="cmd_recommend")]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, "trigger_big_odds")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Failed to send big odds trigger to {user_id}: {e}")
+
+    # 4. MISSED WINS TRIGGER (for longer inactive users)
+    if stats["recent_wins"] >= 3:
+        users = get_inactive_users_for_triggers(min_hours=24, max_hours=168)
+        for user_id, lang in users:
+            lang = lang or "ru"
+            if not should_send_notification(user_id, "trigger_missed_wins", cooldown_hours=48):
+                continue
+
+            try:
+                text = SUCCESS_TRIGGER_MESSAGES["missed_wins"].get(lang, SUCCESS_TRIGGER_MESSAGES["missed_wins"]["en"])
+                text = text.format(missed=stats["recent_wins"])
+
+                keyboard = [
+                    [InlineKeyboardButton("😤 Больше не пропущу!" if lang == "ru" else "😤 Won't Miss Again!",
+                                          callback_data="cmd_recommend")],
+                    [InlineKeyboardButton("📅 Матчи сегодня" if lang == "ru" else "📅 Today's Matches",
+                                          callback_data="cmd_today")]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, "trigger_missed_wins")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Failed to send missed wins trigger to {user_id}: {e}")
+
+    # 5. COMEBACK TRIGGER (good recent form after slump)
+    if stats["last10_total"] >= 8 and stats["last10_wins"] >= 6:
+        users = get_inactive_users_for_triggers(min_hours=48, max_hours=168)
+        for user_id, lang in users:
+            lang = lang or "ru"
+            if not should_send_notification(user_id, "trigger_comeback", cooldown_hours=72):
+                continue
+
+            try:
+                text = SUCCESS_TRIGGER_MESSAGES["comeback"].get(lang, SUCCESS_TRIGGER_MESSAGES["comeback"]["en"])
+                text = text.format(wins=stats["last10_wins"], total=stats["last10_total"])
+
+                keyboard = [
+                    [InlineKeyboardButton("🚀 Вернуться!" if lang == "ru" else "🚀 Come Back!",
+                                          callback_data="cmd_recommend")]
+                ]
+
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+                mark_notification_sent(user_id, "trigger_comeback")
+                total_sent += 1
+
+                if total_sent % 30 == 0:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Failed to send comeback trigger to {user_id}: {e}")
+
+    logger.info(f"Success trigger alerts sent: {total_sent}")
+    return total_sent
+
+
 async def send_marketing_notifications(context: ContextTypes.DEFAULT_TYPE):
     """Send periodic marketing notifications (referral reminders, social proof, friend wins)."""
     import random
@@ -13281,6 +13614,7 @@ def main():
     job_queue.run_repeating(send_morning_alert, interval=3600, first=300)   # Check hourly (10:00 MSK)
     job_queue.run_repeating(send_inactive_user_alerts, interval=21600, first=3600)  # Every 6 hours
     job_queue.run_repeating(send_reengagement_alerts, interval=14400, first=2700)  # Every 4 hours (12h+ inactive)
+    job_queue.run_repeating(send_success_trigger_alerts, interval=7200, first=3600)  # Every 2 hours (success triggers)
     job_queue.run_repeating(send_weekly_report, interval=3600, first=300)   # Check hourly (Sunday 20:00)
     job_queue.run_repeating(send_hot_match_alerts, interval=1800, first=600)  # Every 30 min
 
