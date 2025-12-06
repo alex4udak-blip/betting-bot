@@ -12296,27 +12296,39 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
     pending = get_pending_predictions()
 
     if not pending:
+        logger.info("No pending predictions to check")
         return
+
+    logger.info(f"Found {len(pending)} pending predictions to check")
 
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
 
     # Group predictions by (user_id, match_id) for combined notifications
     from collections import defaultdict
     grouped = defaultdict(list)
+    no_match_id = 0
     for pred in pending:
-        if pred.get("match_id") and pred.get("user_id", 0) > 0:  # Skip bot alerts (user_id=0)
+        if not pred.get("match_id"):
+            no_match_id += 1
+            continue
+        if pred.get("user_id", 0) > 0:  # Skip bot alerts (user_id=0)
             key = (pred["user_id"], pred["match_id"])
             grouped[key].append(pred)
+
+    if no_match_id > 0:
+        logger.warning(f"{no_match_id} predictions have no match_id - cannot check results")
 
     # Also process bot alerts (user_id=0) separately - no notification needed
     bot_alerts = [p for p in pending if p.get("user_id", 0) == 0 and p.get("match_id")]
 
+    logger.info(f"Grouped into {len(grouped)} user matches + {len(bot_alerts)} bot alerts")
+
     # Track checked matches to avoid duplicate API calls
     match_results = {}
 
-    # Process grouped user predictions (max 20 matches)
+    # Process grouped user predictions (max 40 matches per check)
     processed = 0
-    for (user_id, match_id), preds in list(grouped.items())[:20]:
+    for (user_id, match_id), preds in list(grouped.items())[:40]:
         try:
             # Get match result (use cache if already fetched)
             if match_id not in match_results:
@@ -12325,10 +12337,22 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                 async with session.get(url, headers=headers) as r:
                     if r.status == 200:
                         match_results[match_id] = await r.json()
+                    elif r.status == 429:
+                        logger.warning(f"Rate limited fetching match {match_id}, will retry later")
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        logger.warning(f"API error {r.status} for match {match_id}")
                 await asyncio.sleep(0.3)
 
             match = match_results.get(match_id)
-            if not match or match.get("status") != "FINISHED":
+            if not match:
+                logger.debug(f"No data for match {match_id}")
+                continue
+
+            match_status = match.get("status", "UNKNOWN")
+            if match_status != "FINISHED":
+                logger.debug(f"Match {match_id} status: {match_status} (waiting)")
                 continue
 
             score = match.get("score", {}).get("fullTime", {})
@@ -12414,7 +12438,7 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error checking match {match_id}: {e}")
 
     # Process bot alerts (user_id=0) - update DB only, no notification
-    for pred in bot_alerts[:20]:
+    for pred in bot_alerts[:40]:
         match_id = pred.get("match_id")
         try:
             if match_id not in match_results:
@@ -12423,6 +12447,8 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                 async with session.get(url, headers=headers) as r:
                     if r.status == 200:
                         match_results[match_id] = await r.json()
+                    elif r.status != 200:
+                        logger.warning(f"API error {r.status} for bot alert match {match_id}")
                 await asyncio.sleep(0.3)
 
             match = match_results.get(match_id)
@@ -13993,7 +14019,7 @@ def main():
     job_queue = app.job_queue
     job_queue.run_repeating(check_live_matches, interval=600, first=120)
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
-    job_queue.run_repeating(check_predictions_results, interval=3600, first=600)
+    job_queue.run_repeating(check_predictions_results, interval=1200, first=300)  # Every 20 min
     # Marketing jobs
     job_queue.run_repeating(send_marketing_notifications, interval=14400, first=1800)  # Every 4 hours
     job_queue.run_repeating(check_streak_milestones, interval=3600, first=900)  # Every hour
