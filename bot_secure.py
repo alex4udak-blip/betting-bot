@@ -1963,24 +1963,36 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     Args:
         bet_rank: 1 = main bet, 2+ = alternatives
 
-    Prevents duplicates - checks for same match + bet_type + bet_rank combination.
+    Duplicate rules:
+    - Main bet (rank=1): Only ONE main bet per match allowed (regardless of bet_type)
+    - Alternative (rank>1): One per bet_type per match
     """
     category = categorize_bet(bet_type)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Check for existing prediction with same match, bet_type and rank
-    c.execute("""SELECT id, bet_type FROM predictions
-                 WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank = ?
-                 LIMIT 1""", (user_id, match_id, bet_type, bet_rank))
+    # For MAIN bets: check if ANY main bet exists for this match
+    if bet_rank == 1:
+        c.execute("""SELECT id, bet_type FROM predictions
+                     WHERE user_id = ? AND match_id = ? AND bet_rank = 1
+                     LIMIT 1""", (user_id, match_id))
+    else:
+        # For alternatives: check by bet_type (allow different types)
+        c.execute("""SELECT id, bet_type FROM predictions
+                     WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank > 1
+                     LIMIT 1""", (user_id, match_id, bet_type))
     existing = c.fetchone()
 
     if existing:
-        # Already have this exact prediction - but check if ML data exists
+        # Already have this prediction
         existing_id = existing[0]
+        existing_type = existing[1]
         conn.close()
-        logger.info(f"Skipping duplicate: match {match_id}, {bet_type}, rank {bet_rank}")
+        if bet_rank == 1:
+            logger.info(f"Skipping duplicate MAIN: match {match_id} already has main bet {existing_type}")
+        else:
+            logger.info(f"Skipping duplicate ALT: match {match_id}, {bet_type}")
 
         # IMPORTANT: Still save ML data if features provided but not saved before
         if ml_features and category:
@@ -2049,33 +2061,48 @@ def update_prediction_result(pred_id, result, is_correct):
 
 
 def clean_duplicate_predictions() -> dict:
-    """Remove duplicate predictions, keeping only the first one per unique combination.
+    """Remove duplicate predictions based on these rules:
 
-    A duplicate is defined as same: user_id + match_id + bet_type + bet_rank
-    This preserves:
-    - Different bet types for same match (e.g., П1 and ТБ 2.5)
-    - Main bets (rank=1) and alternative bets (rank=2+) separately
+    - Main bet (rank=1): Only ONE per (user_id, match_id) - keep oldest
+    - Alternative (rank>1): Only ONE per (user_id, match_id, bet_type) - keep oldest
     """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Find TRUE duplicates (same user_id + match_id + bet_type + bet_rank, keep oldest)
-    c.execute("""
-        SELECT user_id, match_id, bet_type, bet_rank, COUNT(*) as cnt, MIN(id) as keep_id
-        FROM predictions
-        GROUP BY user_id, match_id, bet_type, bet_rank
-        HAVING cnt > 1
-    """)
-    duplicates = c.fetchall()
-
     deleted_count = 0
     affected_matches = 0
 
-    for user_id, match_id, bet_type, bet_rank, count, keep_id in duplicates:
-        # Delete all except the first one
+    # Step 1: Clean duplicate MAIN bets (keep oldest per user_id + match_id)
+    c.execute("""
+        SELECT user_id, match_id, COUNT(*) as cnt, MIN(id) as keep_id
+        FROM predictions
+        WHERE bet_rank = 1
+        GROUP BY user_id, match_id
+        HAVING cnt > 1
+    """)
+    main_duplicates = c.fetchall()
+
+    for user_id, match_id, count, keep_id in main_duplicates:
         c.execute("""DELETE FROM predictions
-                     WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank = ? AND id != ?""",
-                  (user_id, match_id, bet_type, bet_rank, keep_id))
+                     WHERE user_id = ? AND match_id = ? AND bet_rank = 1 AND id != ?""",
+                  (user_id, match_id, keep_id))
+        deleted_count += c.rowcount
+        affected_matches += 1
+
+    # Step 2: Clean duplicate ALT bets (keep oldest per user_id + match_id + bet_type)
+    c.execute("""
+        SELECT user_id, match_id, bet_type, COUNT(*) as cnt, MIN(id) as keep_id
+        FROM predictions
+        WHERE bet_rank > 1
+        GROUP BY user_id, match_id, bet_type
+        HAVING cnt > 1
+    """)
+    alt_duplicates = c.fetchall()
+
+    for user_id, match_id, bet_type, count, keep_id in alt_duplicates:
+        c.execute("""DELETE FROM predictions
+                     WHERE user_id = ? AND match_id = ? AND bet_type = ? AND bet_rank > 1 AND id != ?""",
+                  (user_id, match_id, bet_type, keep_id))
         deleted_count += c.rowcount
         affected_matches += 1
 
@@ -2097,14 +2124,21 @@ def clean_duplicate_predictions() -> dict:
 
 
 def get_clean_stats() -> dict:
-    """Get accuracy stats counting only FIRST prediction per match (no duplicates)."""
+    """Get accuracy stats and detect TRUE duplicates.
+
+    A duplicate is: same (user_id, match_id, bet_type, bet_rank).
+    Different bet types or ranks (main vs alt) are NOT duplicates.
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # Get unique predictions (first per user+match)
+    # Count unique predictions (first per user+match+bet_type+bet_rank)
     c.execute("""
         WITH unique_preds AS (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id, match_id ORDER BY predicted_at ASC) as rn
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY user_id, match_id, bet_type, bet_rank
+                ORDER BY predicted_at ASC
+            ) as rn
             FROM predictions
             WHERE is_correct IS NOT NULL
         )
@@ -7141,11 +7175,12 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                             parse_mode="Markdown"
                         )
 
-                        # Save prediction to database for statistics tracking (with ML features)
+                        # Save prediction to BOT stats (user_id=0 for alerts - not personal stats)
+                        # Live alerts are bot's recommendations, not user's personal requests
                         if match_id:
-                            save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_val,
+                            save_prediction(0, match_id, home, away, bet_type, confidence, odds_val,
                                             ml_features=ml_features, bet_rank=1)
-                            logger.info(f"Live alert prediction saved: {home} vs {away}, {bet_type} for user {user_id}, features={'yes' if ml_features else 'no'}")
+                            logger.info(f"Live alert saved to BOT stats: {home} vs {away}, {bet_type}, features={'yes' if ml_features else 'no'}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
             else:
