@@ -4,11 +4,12 @@ import json
 import sqlite3
 import asyncio
 import re
+import hmac
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 import aiohttp
-import requests  # Keep for sync fallback in non-async contexts
 from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
@@ -26,55 +27,17 @@ except ImportError:
     ML_AVAILABLE = False
     np = None
 
-# ===== CONFIGURATION =====
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-# Standard plan key: 2e13bc51a3474c29b6a513feee9dd805
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
-# 20K plan key: 84f7ca372aaea9b824f191d11462e393
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+# ===== CONFIGURATION (from config.py) =====
+from config import (
+    TELEGRAM_TOKEN, FOOTBALL_API_KEY, ODDS_API_KEY, CLAUDE_API_KEY,
+    FOOTBALL_API_URL, ODDS_API_URL, AFFILIATE_LINK, CRYPTO_WALLETS,
+    CRYPTOBOT_TOKEN, CRYPTO_PRICES, FREE_DAILY_LIMIT, ADMIN_IDS,
+    SUPPORT_USERNAME, WEBHOOK_SECRET_1WIN, WEBHOOK_SECRET_CRYPTO,
+    HTTP_TIMEOUT, WEB_SERVER_PORT, DB_PATH, ML_MODELS_DIR, ML_MIN_SAMPLES,
+    LOG_LEVEL, LOG_FORMAT, is_admin, validate_config
+)
 
-FOOTBALL_API_URL = "https://api.football-data.org/v4"
-ODDS_API_URL = "https://api.the-odds-api.com/v4"
-
-# 1WIN Affiliate Link (Universal Router - auto GEO redirect)
-AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
-
-# Crypto wallets for manual payment
-CRYPTO_WALLETS = {
-    "USDT_TRC20": "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC",
-    "TON": "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL"
-}
-
-# CryptoBot API token (get from @CryptoBot -> Crypto Pay -> My Apps)
-CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
-
-# Crypto prices (in USD)
-CRYPTO_PRICES = {
-    7: 15,      # 7 days = $15
-    30: 40,     # 30 days = $40
-    365: 100    # 1 year = $100
-}
-
-# Daily free limit for predictions
-FREE_DAILY_LIMIT = 3
-
-# Admin user IDs (add your Telegram user ID here)
-# Get your ID by messaging @userinfobot on Telegram
-ADMIN_IDS: set[int] = {
-    int(admin_id.strip())
-    for admin_id in os.getenv("ADMIN_IDS", "").split(",")
-    if admin_id.strip().isdigit()
-}
-
-def is_admin(user_id: int) -> bool:
-    """Check if user is an admin"""
-    return user_id in ADMIN_IDS
-
-# Support username for manual payment/help (without @)
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "alex4udak")
-
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL))
 logger = logging.getLogger(__name__)
 
 claude_client = None
@@ -88,7 +51,7 @@ async def get_http_session() -> aiohttp.ClientSession:
     """Get or create global aiohttp session"""
     global _http_session
     if _http_session is None or _http_session.closed:
-        timeout = aiohttp.ClientTimeout(total=15)
+        timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
         _http_session = aiohttp.ClientSession(timeout=timeout)
     return _http_session
 
@@ -985,12 +948,6 @@ def get_tz_offset_str(user_tz="Europe/Moscow"):
 
 
 # ===== DATABASE =====
-
-DB_PATH = "/data/betting_bot.db" if os.path.exists("/data") else "betting_bot.db"
-
-# ML Models directory
-ML_MODELS_DIR = "/data/ml_models" if os.path.exists("/data") else "ml_models"
-ML_MIN_SAMPLES = 50  # Minimum predictions to train model (lowered for faster start)
 
 def init_db():
     """Initialize SQLite database"""
@@ -8670,13 +8627,13 @@ async def check_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         try:
             url = f"{FOOTBALL_API_URL}/matches/{match_id}"
-            r = requests.get(url, headers=headers, timeout=10)
-            
-            if r.status_code != 200:
-                text += f"   ⚠️ API error\n\n"
-                continue
-            
-            match_data = r.json()
+            session = await get_http_session()
+            async with session.get(url, headers=headers) as r:
+                if r.status != 200:
+                    text += f"   ⚠️ API error\n\n"
+                    continue
+
+                match_data = await r.json()
             status = match_data.get("status")
             
             if status == "FINISHED":
@@ -9001,9 +8958,10 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
             # Get match result (use cache if already fetched)
             if match_id not in match_results:
                 url = f"{FOOTBALL_API_URL}/matches/{match_id}"
-                r = requests.get(url, headers=headers, timeout=10)
-                if r.status_code == 200:
-                    match_results[match_id] = r.json()
+                session = await get_http_session()
+                async with session.get(url, headers=headers) as r:
+                    if r.status == 200:
+                        match_results[match_id] = await r.json()
                 await asyncio.sleep(0.3)
 
             match = match_results.get(match_id)
@@ -9077,9 +9035,10 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
         try:
             if match_id not in match_results:
                 url = f"{FOOTBALL_API_URL}/matches/{match_id}"
-                r = requests.get(url, headers=headers, timeout=10)
-                if r.status_code == 200:
-                    match_results[match_id] = r.json()
+                session = await get_http_session()
+                async with session.get(url, headers=headers) as r:
+                    if r.status == 200:
+                        match_results[match_id] = await r.json()
                 await asyncio.sleep(0.3)
 
             match = match_results.get(match_id)
@@ -9273,9 +9232,41 @@ async def check_streak_milestones(context: ContextTypes.DEFAULT_TYPE):
 
 from aiohttp import web
 
+
+def verify_webhook_signature(payload: str, signature: str, secret: str) -> bool:
+    """Verify webhook signature using HMAC-SHA256."""
+    if not secret:
+        # If no secret configured, skip verification (but log warning)
+        logger.warning("Webhook secret not configured - skipping signature verification")
+        return True
+
+    if not signature:
+        logger.warning("No signature provided in webhook request")
+        return False
+
+    # Calculate expected signature
+    expected = hmac.new(
+        secret.encode('utf-8'),
+        payload.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    # Compare signatures (constant-time comparison to prevent timing attacks)
+    return hmac.compare_digest(expected, signature)
+
+
 async def handle_postback(request):
     """Handle 1win postback webhook."""
     try:
+        # Verify signature if secret is configured
+        if WEBHOOK_SECRET_1WIN:
+            raw_body = await request.text()
+            signature = request.headers.get("X-Signature", "") or request.query.get("signature", "")
+
+            if not verify_webhook_signature(raw_body, signature, WEBHOOK_SECRET_1WIN):
+                logger.warning(f"Invalid signature for 1win postback from {request.remote}")
+                return web.json_response({"status": "error", "reason": "invalid signature"}, status=401)
+
         # Get data from query params or POST body
         if request.method == "POST":
             try:
@@ -9303,7 +9294,20 @@ async def handle_health(request):
 async def handle_crypto_webhook(request):
     """Handle CryptoBot payment webhook."""
     try:
-        data = await request.json()
+        # Verify signature if secret is configured
+        if WEBHOOK_SECRET_CRYPTO:
+            raw_body = await request.text()
+            signature = request.headers.get("X-Signature", "") or request.headers.get("Crypto-Pay-Api-Signature", "")
+
+            if not verify_webhook_signature(raw_body, signature, WEBHOOK_SECRET_CRYPTO):
+                logger.warning(f"Invalid signature for crypto webhook from {request.remote}")
+                return web.json_response({"status": "error", "reason": "invalid signature"}, status=401)
+
+            # Re-parse the body since we read it
+            data = json.loads(raw_body)
+        else:
+            data = await request.json()
+
         logger.info(f"Received crypto webhook: {data}")
 
         result = process_crypto_webhook(data)
@@ -9331,20 +9335,27 @@ async def start_web_server():
     app.router.add_post("/api/1win/postback", handle_postback)
     app.router.add_post("/api/crypto/webhook", handle_crypto_webhook)
 
-    port = int(os.getenv("PORT", 8080))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", WEB_SERVER_PORT)
     await site.start()
-    logger.info(f"Web server started on port {port}")
-    print(f"   🌐 1win postback: http://0.0.0.0:{port}/api/1win/postback")
-    print(f"   🌐 Crypto webhook: http://0.0.0.0:{port}/api/crypto/webhook")
+    logger.info(f"Web server started on port {WEB_SERVER_PORT}")
+    print(f"   🌐 1win postback: http://0.0.0.0:{WEB_SERVER_PORT}/api/1win/postback")
+    print(f"   🌐 Crypto webhook: http://0.0.0.0:{WEB_SERVER_PORT}/api/crypto/webhook")
 
 
 # ===== MAIN =====
 
 def main():
     global live_subscribers
+
+    # Validate configuration
+    config_errors = validate_config()
+    if config_errors:
+        print("⚠️ Configuration warnings:")
+        for error in config_errors:
+            print(f"   - {error}")
+
     init_db()
 
     # Load persistent subscribers from DB
@@ -9353,7 +9364,7 @@ def main():
     print("🚀 Starting AI Betting Bot v14 (Refactored)...")
     print(f"   💾 Database: {DB_PATH}")
     print(f"   👥 Live subscribers: {len(live_subscribers)}")
-    
+
     if not TELEGRAM_TOKEN:
         print("❌ TELEGRAM_TOKEN not set!")
         return
