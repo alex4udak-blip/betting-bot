@@ -6976,7 +6976,7 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     if not matches:
         return
 
-    now = datetime.now()
+    now = datetime.utcnow()  # Use UTC to match API times
     upcoming = []
 
     # Clean up old sent_alerts (matches that started more than 4 hours ago)
@@ -6996,7 +6996,10 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
             continue
 
     if not upcoming:
+        logger.info("No matches in 0.5-3h window")
         return
+
+    logger.info(f"Found {len(upcoming)} matches in 0.5-3h window")
 
     logger.info(f"Found {len(upcoming)} upcoming matches, already alerted: {len(sent_alerts)}")
 
@@ -7338,13 +7341,13 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
-    """Send daily digest at 10:00"""
+    """Send daily digest at 10:00 UTC"""
 
     if not live_subscribers:
         return
 
-    current_hour = datetime.now().hour
-    if current_hour != 10:
+    current_hour = datetime.utcnow().hour
+    if current_hour != 10:  # 10:00 UTC = 13:00 Moscow
         return
 
     logger.info("Sending daily digest...")
