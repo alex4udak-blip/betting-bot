@@ -8165,7 +8165,11 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             else:
                 text += f"\n✅ Достаточно данных для обучения ML моделей!"
 
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+            keyboard = [
+                [InlineKeyboardButton("🔄 Обучить модели", callback_data="ml_train"),
+                 InlineKeyboardButton("🤖 ML система", callback_data="cmd_mlstatus")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]
+            ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Admin ML stats error: {e}")
@@ -10407,6 +10411,7 @@ def main():
     app.add_handler(CommandHandler("userinfo", userinfo_cmd))
     app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
     app.add_handler(CommandHandler("mltrain", mltrain_cmd))
+    app.add_handler(CommandHandler("train", mltrain_cmd))  # Alias for /mltrain
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
