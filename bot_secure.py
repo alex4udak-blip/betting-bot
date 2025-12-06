@@ -2445,11 +2445,13 @@ def parse_alternative_bets(analysis: str) -> list:
             alt_text = alt_match.group(1).strip()
             bet_type, confidence, odds = parse_bet_from_text(alt_text)
             if bet_type:
-                alternatives.append((bet_type, confidence, odds))
-                logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
+                # Avoid duplicates
+                if not any(alt[0] == bet_type for alt in alternatives):
+                    alternatives.append((bet_type, confidence, odds))
+                    logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
 
     # Method 2: Look for "ДОПОЛНИТЕЛЬНЫЕ" section with better regex
-    if not alternatives:
+    if len(alternatives) < 3:
         # Try multiple section header variations
         section_patterns = [
             r'📈\s*\**ДОПОЛНИТЕЛЬНЫЕ[^:]*:\**\s*\n(.*?)(?=\n⚠️|\n✅|\nРИСКИ|\nВЕРДИКТ|$)',
@@ -2471,16 +2473,18 @@ def parse_alternative_bets(analysis: str) -> list:
                 # Skip empty lines and header lines
                 if not line or 'ДОПОЛНИТЕЛЬНЫЕ' in line.upper() or line.startswith('📈'):
                     continue
-                # Skip lines that are just markers
-                if line in ['[ALT1]', '[ALT2]', '[ALT3]', '-', '•', '*']:
+                # Skip lines that are just markers or instructions
+                if line in ['[ALT1]', '[ALT2]', '[ALT3]', '-', '•', '*'] or 'ОБЯЗАТЕЛЬНО' in line or 'ВСЕГДА' in line:
                     continue
                 bet_type, confidence, odds = parse_bet_from_text(line)
                 if bet_type and len(alternatives) < 3:
-                    alternatives.append((bet_type, confidence, odds))
-                    logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
+                    # Avoid duplicates
+                    if not any(alt[0] == bet_type for alt in alternatives):
+                        alternatives.append((bet_type, confidence, odds))
+                        logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
 
     # Method 3: Fallback - bullet/numbered list after ДОПОЛНИТЕЛЬНЫЕ
-    if not alternatives:
+    if len(alternatives) < 3:
         lines = analysis.split('\n')
         in_alt_section = False
         for line in lines:
@@ -2494,6 +2498,9 @@ def parse_alternative_bets(analysis: str) -> list:
                 break
             # Parse lines in section
             if in_alt_section and line_stripped:
+                # Skip instruction lines
+                if 'ОБЯЗАТЕЛЬНО' in line_stripped or 'ВСЕГДА' in line_stripped:
+                    continue
                 # Match numbered (1. 2. 3.), bullet (• - *) or [ALT] formats
                 if re.match(r'^[\d•\-\*\[\]]+\.?\s*', line_stripped) or '@' in line_stripped:
                     bet_type, confidence, odds = parse_bet_from_text(line_stripped)
@@ -2503,8 +2510,42 @@ def parse_alternative_bets(analysis: str) -> list:
                             alternatives.append((bet_type, confidence, odds))
                             logger.info(f"Parsed ALT (method 3): {bet_type} @ {odds} ({confidence}%)")
 
+    # Method 4: Direct bet type search in alternatives section (most aggressive)
+    if len(alternatives) < 3:
+        bet_patterns = [
+            (r'(?:1X|1Х)\s*[@|]\s*[\d.]+', '1X'),
+            (r'(?:X2|Х2)\s*[@|]\s*[\d.]+', 'X2'),
+            (r'(?:12)\s*[@|]\s*[\d.]+', '12'),
+            (r'(?:BTTS|ОЗ|Обе забьют)\s*[@|]\s*[\d.]+', 'BTTS'),
+            (r'(?:ТБ|Over)\s*2\.?5\s*[@|]\s*[\d.]+', 'ТБ 2.5'),
+            (r'(?:ТМ|Under)\s*2\.?5\s*[@|]\s*[\d.]+', 'ТМ 2.5'),
+            (r'(?:П1|P1|Home)\s*[@|]\s*[\d.]+', 'П1'),
+            (r'(?:П2|P2|Away)\s*[@|]\s*[\d.]+', 'П2'),
+            (r'(?:Ничья|Draw|X)\s*[@|]\s*[\d.]+', 'X'),
+        ]
+
+        # Only search in the alternatives section
+        alt_section_match = re.search(r'ДОПОЛНИТЕЛЬНЫЕ.*?(⚠️|✅|РИСКИ|$)', analysis, re.IGNORECASE | re.DOTALL)
+        if alt_section_match:
+            alt_section = alt_section_match.group(0)
+            for pattern, bet_name in bet_patterns:
+                if len(alternatives) >= 3:
+                    break
+                match = re.search(pattern, alt_section, re.IGNORECASE)
+                if match and not any(alt[0] == bet_name for alt in alternatives):
+                    # Try to extract odds
+                    odds_match = re.search(r'[@|]\s*([\d.]+)', match.group(0))
+                    odds = float(odds_match.group(1)) if odds_match else 1.8
+                    # Try to extract confidence
+                    conf_match = re.search(r'(\d+)\s*%', alt_section[match.end():match.end()+50])
+                    confidence = int(conf_match.group(1)) if conf_match else 65
+                    alternatives.append((bet_name, confidence, odds))
+                    logger.info(f"Parsed ALT (method 4): {bet_name} @ {odds} ({confidence}%)")
+
     if alternatives:
         logger.info(f"✅ Total alternatives found: {len(alternatives)}")
+        if len(alternatives) < 3:
+            logger.warning(f"⚠️ Only {len(alternatives)}/3 alternatives parsed - Claude may have generated fewer")
     else:
         logger.warning("⚠️ No alternatives found in analysis")
 
@@ -4114,21 +4155,62 @@ def get_personalized_advice(user_id: int, bet_category: str, lang: str = "ru") -
             "btts": "BTTS",
             "double_chance": "Double Chance",
             "handicap": "Handicap"
+        },
+        "pt": {
+            "totals_over": "Mais 2.5",
+            "totals_under": "Menos 2.5",
+            "outcomes_home": "Vitória Casa",
+            "outcomes_away": "Vitória Fora",
+            "outcomes_draw": "Empate",
+            "btts": "Ambas Marcam",
+            "double_chance": "Dupla Chance",
+            "handicap": "Handicap"
+        },
+        "es": {
+            "totals_over": "Más 2.5",
+            "totals_under": "Menos 2.5",
+            "outcomes_home": "Victoria Local",
+            "outcomes_away": "Victoria Visitante",
+            "outcomes_draw": "Empate",
+            "btts": "Ambos Marcan",
+            "double_chance": "Doble Oportunidad",
+            "handicap": "Hándicap"
+        },
+        "id": {
+            "totals_over": "Over 2.5",
+            "totals_under": "Under 2.5",
+            "outcomes_home": "Tuan Rumah",
+            "outcomes_away": "Tim Tamu",
+            "outcomes_draw": "Seri",
+            "btts": "Kedua Tim Cetak Gol",
+            "double_chance": "Peluang Ganda",
+            "handicap": "Voor"
         }
     }
 
     cat_name = category_names.get(lang, category_names["en"]).get(bet_category, bet_category)
 
+    # Translations for personalized advice
+    strength_texts = {
+        "ru": f"🎯 **Твой конёк!** {cat_name}: {win_rate:.0f}% побед ({wins}/{total})",
+        "en": f"🎯 **Your strength!** {cat_name}: {win_rate:.0f}% wins ({wins}/{total})",
+        "pt": f"🎯 **Seu ponto forte!** {cat_name}: {win_rate:.0f}% vitórias ({wins}/{total})",
+        "es": f"🎯 **Tu fuerte!** {cat_name}: {win_rate:.0f}% victorias ({wins}/{total})",
+        "id": f"🎯 **Keunggulanmu!** {cat_name}: {win_rate:.0f}% kemenangan ({wins}/{total})"
+    }
+
+    careful_texts = {
+        "ru": f"⚠️ **Осторожно!** {cat_name}: только {win_rate:.0f}% побед ({wins}/{total})",
+        "en": f"⚠️ **Be careful!** {cat_name}: only {win_rate:.0f}% wins ({wins}/{total})",
+        "pt": f"⚠️ **Cuidado!** {cat_name}: apenas {win_rate:.0f}% vitórias ({wins}/{total})",
+        "es": f"⚠️ **¡Cuidado!** {cat_name}: solo {win_rate:.0f}% victorias ({wins}/{total})",
+        "id": f"⚠️ **Hati-hati!** {cat_name}: hanya {win_rate:.0f}% kemenangan ({wins}/{total})"
+    }
+
     if win_rate >= 65:
-        if lang == "ru":
-            return f"🎯 **Твой конёк!** {cat_name}: {win_rate:.0f}% побед ({wins}/{total})"
-        else:
-            return f"🎯 **Your strength!** {cat_name}: {win_rate:.0f}% wins ({wins}/{total})"
+        return strength_texts.get(lang, strength_texts["en"])
     elif win_rate <= 40:
-        if lang == "ru":
-            return f"⚠️ **Осторожно!** {cat_name}: только {win_rate:.0f}% побед ({wins}/{total})"
-        else:
-            return f"⚠️ **Be careful!** {cat_name}: only {win_rate:.0f}% wins ({wins}/{total})"
+        return careful_texts.get(lang, careful_texts["en"])
 
     return None
 
@@ -5508,10 +5590,11 @@ RESPONSE FORMAT:
 💰 Банк: X%
 📝 Почему: [основано на конкретных данных выше]
 
-📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ:**
+📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ (ОБЯЗАТЕЛЬНО 3 шт!):**
 [ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
 [ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
 [ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
+(ВСЕГДА давай ровно 3 альтернативы - выбирай из: П1, П2, X, 1X, X2, 12, ТБ2.5, ТМ2.5, BTTS)
 
 ⚠️ **РИСКИ:**
 [Конкретные риски на основе данных]
@@ -8359,32 +8442,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ml_features:
             confidence, ml_status, ml_conf = apply_ml_correction(bet_type, confidence, ml_features)
 
-            # Add ML status to analysis
-            if ml_status == "confirmed":
-                analysis = analysis + f"\n\n🤖 **ML:** Подтверждено ({ml_conf:.0f}%)"
-            elif ml_status == "warning":
-                analysis = analysis + f"\n\n⚠️ **ML:** Риск! Модель даёт только {ml_conf:.0f}%"
-            elif ml_status == "adjusted":
-                analysis = analysis + f"\n\n📊 **ML:** Скорректировано {original_confidence}% → {confidence}%"
-            # no_model - не показываем ничего
+            # Add ML status to analysis (localized)
+            ml_texts = {
+                "confirmed": {
+                    "ru": f"🤖 **ML:** Подтверждено ({ml_conf:.0f}%)",
+                    "en": f"🤖 **ML:** Confirmed ({ml_conf:.0f}%)",
+                    "pt": f"🤖 **ML:** Confirmado ({ml_conf:.0f}%)",
+                    "es": f"🤖 **ML:** Confirmado ({ml_conf:.0f}%)",
+                    "id": f"🤖 **ML:** Dikonfirmasi ({ml_conf:.0f}%)"
+                },
+                "warning": {
+                    "ru": f"⚠️ **ML:** Риск! Модель даёт только {ml_conf:.0f}%",
+                    "en": f"⚠️ **ML:** Risk! Model gives only {ml_conf:.0f}%",
+                    "pt": f"⚠️ **ML:** Risco! Modelo dá apenas {ml_conf:.0f}%",
+                    "es": f"⚠️ **ML:** ¡Riesgo! Modelo da solo {ml_conf:.0f}%",
+                    "id": f"⚠️ **ML:** Risiko! Model hanya {ml_conf:.0f}%"
+                },
+                "adjusted": {
+                    "ru": f"📊 **ML:** Скорректировано {original_confidence}% → {confidence}%",
+                    "en": f"📊 **ML:** Adjusted {original_confidence}% → {confidence}%",
+                    "pt": f"📊 **ML:** Ajustado {original_confidence}% → {confidence}%",
+                    "es": f"📊 **ML:** Ajustado {original_confidence}% → {confidence}%",
+                    "id": f"📊 **ML:** Disesuaikan {original_confidence}% → {confidence}%"
+                }
+            }
 
-        # Add Kelly Criterion recommendation
+            if ml_status in ml_texts:
+                ml_text = ml_texts[ml_status].get(lang, ml_texts[ml_status]["en"])
+                analysis = analysis + f"\n\n{ml_text}"
+            # no_model - don't show anything
+
+        # Add Kelly Criterion recommendation (localized)
         if confidence > 0 and odds_value > 1:
             kelly_stake = calculate_kelly(confidence / 100, odds_value)
             if kelly_stake > 0:
                 kelly_percent = kelly_stake * 100
+
+                kelly_labels = {
+                    "aggressive": {"ru": "АГРЕССИВНО", "en": "AGGRESSIVE", "pt": "AGRESSIVO", "es": "AGRESIVO", "id": "AGRESIF"},
+                    "moderate": {"ru": "УМЕРЕННО", "en": "MODERATE", "pt": "MODERADO", "es": "MODERADO", "id": "MODERAT"},
+                    "careful": {"ru": "ОСТОРОЖНО", "en": "CAREFUL", "pt": "CUIDADO", "es": "CUIDADO", "id": "HATI-HATI"},
+                    "bankroll": {"ru": "банкролла", "en": "bankroll", "pt": "banca", "es": "bankroll", "id": "bankroll"}
+                }
+
                 if kelly_percent >= 5:
                     stake_emoji = "🔥"
-                    stake_text = "АГРЕССИВНО"
+                    stake_key = "aggressive"
                 elif kelly_percent >= 2:
                     stake_emoji = "✅"
-                    stake_text = "УМЕРЕННО"
+                    stake_key = "moderate"
                 else:
                     stake_emoji = "⚠️"
-                    stake_text = "ОСТОРОЖНО"
-                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% банкролла ({stake_text})"
+                    stake_key = "careful"
+
+                stake_text = kelly_labels[stake_key].get(lang, kelly_labels[stake_key]["en"])
+                bankroll_text = kelly_labels["bankroll"].get(lang, kelly_labels["bankroll"]["en"])
+                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% {bankroll_text} ({stake_text})"
             else:
-                analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
+                no_value_texts = {
+                    "ru": "⛔ **KELLY:** Нет ценности (VALUE отрицательный)",
+                    "en": "⛔ **KELLY:** No value (negative VALUE)",
+                    "pt": "⛔ **KELLY:** Sem valor (VALUE negativo)",
+                    "es": "⛔ **KELLY:** Sin valor (VALUE negativo)",
+                    "id": "⛔ **KELLY:** Tidak ada nilai (VALUE negatif)"
+                }
+                analysis = analysis + f"\n\n{no_value_texts.get(lang, no_value_texts['en'])}"
 
         # Add personalized advice based on user's history
         bet_category = categorize_bet(bet_type)
@@ -8400,11 +8522,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4) with same ML features
         alternatives = parse_alternative_bets(analysis)
-        for idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives, start=2):
-            if alt_type and alt_type != bet_type:  # Don't duplicate main bet
-                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
-                                ml_features=ml_features, bet_rank=idx)
-                logger.info(f"Saved ALT{idx-1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
+        original_alt_count = len(alternatives)
+
+        # Filter out any alternatives that match the main bet type
+        alternatives = [(t, c, o) for t, c, o in alternatives if t and t != bet_type]
+
+        if len(alternatives) < original_alt_count:
+            logger.warning(f"Filtered out {original_alt_count - len(alternatives)} alt(s) that matched main bet {bet_type}")
+
+        if len(alternatives) < 3:
+            logger.warning(f"Only {len(alternatives)}/3 unique alternatives for {home} vs {away}")
+
+        # Save each alternative with correct sequential bet_rank
+        for alt_idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives[:3]):
+            bet_rank = alt_idx + 2  # bet_rank 2, 3, 4
+            save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
+                            ml_features=ml_features, bet_rank=bet_rank)
+            logger.info(f"Saved ALT{alt_idx+1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
