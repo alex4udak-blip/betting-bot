@@ -9080,12 +9080,14 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         short_league = league[:20] + "..." if len(league) > 20 else league
         text += f"├ {emoji} {short_league}: **{acc}%** ({cnt})\n"
 
-    # ROI calculation (simplified)
-    text += f"\n💰 **ROI (упрощённый):**\n"
+    # Advanced ROI analysis (TARGET: 50%+)
+    text += f"\n💰 **ROI АНАЛИЗ (ЦЕЛЬ: 50%+):**\n"
     c.execute("""
         SELECT
             SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END) as profit,
-            COUNT(*) as bets
+            COUNT(*) as bets,
+            AVG(odds) as avg_odds,
+            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins
         FROM predictions
         WHERE is_correct IS NOT NULL AND odds IS NOT NULL
     """)
@@ -9093,23 +9095,83 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row and row[1] and row[1] > 0:
         profit = row[0] or 0
         bets = row[1]
+        avg_odds = row[2] or 1.5
+        wins = row[3] or 0
         roi = round(profit / bets * 100, 1)
-        emoji = "✅" if roi > 0 else "❌"
-        text += f"├ {emoji} ROI: **{roi}%**\n"
-        text += f"└ (При ставке 1 на каждый прогноз)\n"
+        win_rate = round(wins / bets * 100, 1)
+
+        # ROI status
+        if roi >= 50:
+            roi_status = "🏆 ЦЕЛЬ ДОСТИГНУТА!"
+        elif roi >= 20:
+            roi_status = "🔥 Отличный результат"
+        elif roi >= 5:
+            roi_status = "✅ В плюсе"
+        elif roi >= 0:
+            roi_status = "⚠️ Около нуля"
+        else:
+            roi_status = "❌ В минусе"
+
+        text += f"├ **ROI: {roi}%** {roi_status}\n"
+        text += f"├ Средний коэфф: {round(avg_odds, 2)}\n"
+        text += f"├ Точность: {win_rate}%\n"
+
+        # Calculate what's needed for 50% ROI
+        # ROI = (avg_odds * win_rate - 1) * 100
+        # 50 = (avg_odds * win_rate - 1) * 100
+        # 0.5 = avg_odds * win_rate - 1
+        # win_rate_needed = 1.5 / avg_odds
+        win_rate_needed = round(1.5 / avg_odds * 100, 1)
+        odds_needed = round(1.5 / (wins / bets) if wins > 0 else 3.0, 2)
+
+        text += f"├ 📊 Для ROI 50%:\n"
+        text += f"│  • При коэфф {round(avg_odds, 2)} нужна точность: **{win_rate_needed}%**\n"
+        text += f"│  • При точности {win_rate}% нужен коэфф: **{odds_needed}**\n"
+
+        # Progress bar to 50% ROI
+        progress = min(100, max(0, (roi / 50) * 100))
+        bar_filled = int(progress / 10)
+        bar_empty = 10 - bar_filled
+        progress_bar = "█" * bar_filled + "░" * bar_empty
+        text += f"└ Прогресс к 50%: [{progress_bar}] {round(progress)}%\n"
     else:
         text += f"└ Недостаточно данных\n"
+
+    # ROI by confidence level
+    text += f"\n📈 **ROI ПО УВЕРЕННОСТИ:**\n"
+    c.execute("""
+        SELECT
+            CASE
+                WHEN confidence >= 80 THEN '80%+'
+                WHEN confidence >= 70 THEN '70-79%'
+                ELSE '<70%'
+            END as conf_range,
+            SUM(CASE WHEN is_correct = 1 THEN odds - 1 ELSE -1 END) as profit,
+            COUNT(*) as bets,
+            AVG(odds) as avg_odds
+        FROM predictions
+        WHERE is_correct IS NOT NULL AND odds IS NOT NULL AND confidence IS NOT NULL
+        GROUP BY conf_range
+        ORDER BY conf_range DESC
+    """)
+    roi_by_conf = c.fetchall()
+    for row in roi_by_conf:
+        conf_range, profit, bets, avg_o = row
+        if bets and bets > 0:
+            roi_val = round((profit or 0) / bets * 100, 1)
+            emoji = "🔥" if roi_val >= 50 else "✅" if roi_val > 0 else "❌"
+            text += f"├ {emoji} {conf_range}: ROI **{roi_val}%** (коэфф ~{round(avg_o or 1.5, 2)})\n"
 
     conn.close()
 
     # Add recommendations
-    text += f"\n💡 **РЕКОМЕНДАЦИИ:**\n"
+    text += f"\n💡 **РЕКОМЕНДАЦИИ ДЛЯ ROI 50%+:**\n"
     if total < 100:
         text += "• Мало данных — нужно минимум 100-200 прогнозов\n"
     if conf_rows:
         # Find best confidence range
         best_conf = max(conf_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
-        text += f"• Лучший диапазон уверенности: {best_conf[0]}\n"
+        text += f"• Лучший диапазон: {best_conf[0]}\n"
     if cat_rows:
         # Find worst category
         worst_cat = min(cat_rows, key=lambda x: (x[2] or 0) / x[1] if x[1] > 0 else 0)
@@ -9117,6 +9179,11 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         worst_acc = round((worst_cat[2] or 0) / worst_cat[1] * 100, 1) if worst_cat[1] > 0 else 0
         if worst_acc < 50:
             text += f"• ⚠️ Проблемный тип: {worst_name} ({worst_acc}%)\n"
+
+    # Tips for 50%+ ROI
+    text += "• 🎯 Фокус на ставках с VALUE >10%\n"
+    text += "• 📊 Ставить только при 3+ факторов (Edge Stacking)\n"
+    text += "• 🚫 Пропускать матчи без явного преимущества\n"
 
     # Split message if too long
     if len(text) > 4000:
