@@ -4155,21 +4155,62 @@ def get_personalized_advice(user_id: int, bet_category: str, lang: str = "ru") -
             "btts": "BTTS",
             "double_chance": "Double Chance",
             "handicap": "Handicap"
+        },
+        "pt": {
+            "totals_over": "Mais 2.5",
+            "totals_under": "Menos 2.5",
+            "outcomes_home": "Vitória Casa",
+            "outcomes_away": "Vitória Fora",
+            "outcomes_draw": "Empate",
+            "btts": "Ambas Marcam",
+            "double_chance": "Dupla Chance",
+            "handicap": "Handicap"
+        },
+        "es": {
+            "totals_over": "Más 2.5",
+            "totals_under": "Menos 2.5",
+            "outcomes_home": "Victoria Local",
+            "outcomes_away": "Victoria Visitante",
+            "outcomes_draw": "Empate",
+            "btts": "Ambos Marcan",
+            "double_chance": "Doble Oportunidad",
+            "handicap": "Hándicap"
+        },
+        "id": {
+            "totals_over": "Over 2.5",
+            "totals_under": "Under 2.5",
+            "outcomes_home": "Tuan Rumah",
+            "outcomes_away": "Tim Tamu",
+            "outcomes_draw": "Seri",
+            "btts": "Kedua Tim Cetak Gol",
+            "double_chance": "Peluang Ganda",
+            "handicap": "Voor"
         }
     }
 
     cat_name = category_names.get(lang, category_names["en"]).get(bet_category, bet_category)
 
+    # Translations for personalized advice
+    strength_texts = {
+        "ru": f"🎯 **Твой конёк!** {cat_name}: {win_rate:.0f}% побед ({wins}/{total})",
+        "en": f"🎯 **Your strength!** {cat_name}: {win_rate:.0f}% wins ({wins}/{total})",
+        "pt": f"🎯 **Seu ponto forte!** {cat_name}: {win_rate:.0f}% vitórias ({wins}/{total})",
+        "es": f"🎯 **Tu fuerte!** {cat_name}: {win_rate:.0f}% victorias ({wins}/{total})",
+        "id": f"🎯 **Keunggulanmu!** {cat_name}: {win_rate:.0f}% kemenangan ({wins}/{total})"
+    }
+
+    careful_texts = {
+        "ru": f"⚠️ **Осторожно!** {cat_name}: только {win_rate:.0f}% побед ({wins}/{total})",
+        "en": f"⚠️ **Be careful!** {cat_name}: only {win_rate:.0f}% wins ({wins}/{total})",
+        "pt": f"⚠️ **Cuidado!** {cat_name}: apenas {win_rate:.0f}% vitórias ({wins}/{total})",
+        "es": f"⚠️ **¡Cuidado!** {cat_name}: solo {win_rate:.0f}% victorias ({wins}/{total})",
+        "id": f"⚠️ **Hati-hati!** {cat_name}: hanya {win_rate:.0f}% kemenangan ({wins}/{total})"
+    }
+
     if win_rate >= 65:
-        if lang == "ru":
-            return f"🎯 **Твой конёк!** {cat_name}: {win_rate:.0f}% побед ({wins}/{total})"
-        else:
-            return f"🎯 **Your strength!** {cat_name}: {win_rate:.0f}% wins ({wins}/{total})"
+        return strength_texts.get(lang, strength_texts["en"])
     elif win_rate <= 40:
-        if lang == "ru":
-            return f"⚠️ **Осторожно!** {cat_name}: только {win_rate:.0f}% побед ({wins}/{total})"
-        else:
-            return f"⚠️ **Be careful!** {cat_name}: only {win_rate:.0f}% wins ({wins}/{total})"
+        return careful_texts.get(lang, careful_texts["en"])
 
     return None
 
@@ -8401,32 +8442,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ml_features:
             confidence, ml_status, ml_conf = apply_ml_correction(bet_type, confidence, ml_features)
 
-            # Add ML status to analysis
-            if ml_status == "confirmed":
-                analysis = analysis + f"\n\n🤖 **ML:** Подтверждено ({ml_conf:.0f}%)"
-            elif ml_status == "warning":
-                analysis = analysis + f"\n\n⚠️ **ML:** Риск! Модель даёт только {ml_conf:.0f}%"
-            elif ml_status == "adjusted":
-                analysis = analysis + f"\n\n📊 **ML:** Скорректировано {original_confidence}% → {confidence}%"
-            # no_model - не показываем ничего
+            # Add ML status to analysis (localized)
+            ml_texts = {
+                "confirmed": {
+                    "ru": f"🤖 **ML:** Подтверждено ({ml_conf:.0f}%)",
+                    "en": f"🤖 **ML:** Confirmed ({ml_conf:.0f}%)",
+                    "pt": f"🤖 **ML:** Confirmado ({ml_conf:.0f}%)",
+                    "es": f"🤖 **ML:** Confirmado ({ml_conf:.0f}%)",
+                    "id": f"🤖 **ML:** Dikonfirmasi ({ml_conf:.0f}%)"
+                },
+                "warning": {
+                    "ru": f"⚠️ **ML:** Риск! Модель даёт только {ml_conf:.0f}%",
+                    "en": f"⚠️ **ML:** Risk! Model gives only {ml_conf:.0f}%",
+                    "pt": f"⚠️ **ML:** Risco! Modelo dá apenas {ml_conf:.0f}%",
+                    "es": f"⚠️ **ML:** ¡Riesgo! Modelo da solo {ml_conf:.0f}%",
+                    "id": f"⚠️ **ML:** Risiko! Model hanya {ml_conf:.0f}%"
+                },
+                "adjusted": {
+                    "ru": f"📊 **ML:** Скорректировано {original_confidence}% → {confidence}%",
+                    "en": f"📊 **ML:** Adjusted {original_confidence}% → {confidence}%",
+                    "pt": f"📊 **ML:** Ajustado {original_confidence}% → {confidence}%",
+                    "es": f"📊 **ML:** Ajustado {original_confidence}% → {confidence}%",
+                    "id": f"📊 **ML:** Disesuaikan {original_confidence}% → {confidence}%"
+                }
+            }
 
-        # Add Kelly Criterion recommendation
+            if ml_status in ml_texts:
+                ml_text = ml_texts[ml_status].get(lang, ml_texts[ml_status]["en"])
+                analysis = analysis + f"\n\n{ml_text}"
+            # no_model - don't show anything
+
+        # Add Kelly Criterion recommendation (localized)
         if confidence > 0 and odds_value > 1:
             kelly_stake = calculate_kelly(confidence / 100, odds_value)
             if kelly_stake > 0:
                 kelly_percent = kelly_stake * 100
+
+                kelly_labels = {
+                    "aggressive": {"ru": "АГРЕССИВНО", "en": "AGGRESSIVE", "pt": "AGRESSIVO", "es": "AGRESIVO", "id": "AGRESIF"},
+                    "moderate": {"ru": "УМЕРЕННО", "en": "MODERATE", "pt": "MODERADO", "es": "MODERADO", "id": "MODERAT"},
+                    "careful": {"ru": "ОСТОРОЖНО", "en": "CAREFUL", "pt": "CUIDADO", "es": "CUIDADO", "id": "HATI-HATI"},
+                    "bankroll": {"ru": "банкролла", "en": "bankroll", "pt": "banca", "es": "bankroll", "id": "bankroll"}
+                }
+
                 if kelly_percent >= 5:
                     stake_emoji = "🔥"
-                    stake_text = "АГРЕССИВНО"
+                    stake_key = "aggressive"
                 elif kelly_percent >= 2:
                     stake_emoji = "✅"
-                    stake_text = "УМЕРЕННО"
+                    stake_key = "moderate"
                 else:
                     stake_emoji = "⚠️"
-                    stake_text = "ОСТОРОЖНО"
-                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% банкролла ({stake_text})"
+                    stake_key = "careful"
+
+                stake_text = kelly_labels[stake_key].get(lang, kelly_labels[stake_key]["en"])
+                bankroll_text = kelly_labels["bankroll"].get(lang, kelly_labels["bankroll"]["en"])
+                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% {bankroll_text} ({stake_text})"
             else:
-                analysis = analysis + f"\n\n⛔ **KELLY:** Нет ценности (VALUE отрицательный)"
+                no_value_texts = {
+                    "ru": "⛔ **KELLY:** Нет ценности (VALUE отрицательный)",
+                    "en": "⛔ **KELLY:** No value (negative VALUE)",
+                    "pt": "⛔ **KELLY:** Sem valor (VALUE negativo)",
+                    "es": "⛔ **KELLY:** Sin valor (VALUE negativo)",
+                    "id": "⛔ **KELLY:** Tidak ada nilai (VALUE negatif)"
+                }
+                analysis = analysis + f"\n\n{no_value_texts.get(lang, no_value_texts['en'])}"
 
         # Add personalized advice based on user's history
         bet_category = categorize_bet(bet_type)
