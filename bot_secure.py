@@ -1587,6 +1587,11 @@ GEO_PRICE_DISPLAY = {
 def get_user_geo(user_id: int) -> str:
     """Detect user's geo based on source field in database.
 
+    Supports formats:
+    - richads_ng_13563 → NG (with publisher ID)
+    - richads_ng → NG (without publisher ID)
+    - nigeria → NG (legacy)
+
     Returns:
         'NG' for Nigeria
         'RU' for Russia
@@ -1605,16 +1610,21 @@ def get_user_geo(user_id: int) -> str:
 
         source = row[0].lower()
 
-        # Check for Nigeria
-        if "_ng" in source or "nigeria" in source:
+        # Split by underscore to check geo segments
+        # e.g., "richads_ng_13563" → ["richads", "ng", "13563"]
+        segments = source.split("_")
+
+        # Check for Nigeria (ng segment or contains "nigeria")
+        if "ng" in segments or "nigeria" in source:
             return "NG"
 
-        # Check for Russia
-        if "_ru" in source or "russia" in source:
+        # Check for Russia (ru segment or contains "russia")
+        if "ru" in segments or "russia" in source:
             return "RU"
 
-        # Check for Indonesia
-        if "_id" in source or "indonesia" in source:
+        # Check for Indonesia (id segment or contains "indonesia")
+        # Note: checking segment to avoid false positives like "paid_user"
+        if "id" in segments or "indonesia" in source:
             return "ID"
 
         return "DEFAULT"
