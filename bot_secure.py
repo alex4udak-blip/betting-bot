@@ -7633,7 +7633,9 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
                 text += f"📈 **По типам ставок:**\n"
                 for cat, total, correct in category_stats:
                     acc = round(correct / total * 100, 1) if total > 0 else 0
-                    text += f"• {cat}: {acc}% ({correct}/{total})\n"
+                    # Escape underscores to prevent Markdown parsing errors
+                    cat_escaped = str(cat).replace("_", "\\_") if cat else "unknown"
+                    text += f"• {cat_escaped}: {acc}% ({correct}/{total})\n"
 
             if total_samples == 0:
                 text += "\n⚠️ Данных пока нет. ML начнёт собирать после новых прогнозов."
