@@ -7679,50 +7679,92 @@ CRITICAL ANALYSIS RULES:
    - Exception: Elite in relegation zone or crisis → class drops to 3 (still strong)
    - YOUR BARÇA EXAMPLE: Elite team (class 4) beats weak team regardless of form!
 
-11. CONFIDENCE CALCULATION:
-   - Base on statistical data, not feelings
-   - 80%+: Strong statistical edge + good value
-   - 70-79%: Clear favorite + decent value
-   - 60-69%: Slight edge, moderate risk
-   - <60%: High risk, only if excellent value
+11. 🎯 EDGE STACKING (KEY TO 70%+ ACCURACY!):
+   - Single factor = 55% confidence MAX
+   - 2 aligned factors = 65% confidence
+   - 3+ aligned factors = 75%+ confidence
+   - EXAMPLE: Elite team (factor 1) + home (factor 2) + opponent tired (factor 3) = STRONG bet
+   - NEVER high confidence on single factor alone!
+   - Count your edges before setting confidence!
 
-12. DIVERSIFY BET TYPES based on data:
+12. 🧠 TRAP GAME DETECTION (AVOID THESE!):
+   - Big team before Champions League/Cup final → They might rest players
+   - Team that just won big game → Emotional letdown risk
+   - Team on long winning streak vs desperate team → Upset risk
+   - Season-ending matches with nothing to play for → Low motivation
+   - If trap detected → Lower confidence by 10-15% or SKIP!
+
+13. 📉 REGRESSION TO MEAN:
+   - Team on 5+ game winning streak → Regression risk!
+   - Team on 5+ game losing streak → Bounce-back likely
+   - Unusual high scoring run → Will normalize
+   - Apply this to recent form, not overall stats
+
+14. 🔮 PATTERN RECOGNITION (DATA-DRIVEN!):
+   - Check: Does this team always score first half? → 1st half bets
+   - Check: Do they concede late? → Consider live over
+   - Check: Clean sheet trend? → Consider BTTS No
+   - Look for REPEATING PATTERNS in form data!
+
+15. CONFIDENCE CALCULATION (STRICT!):
+   - Base ONLY on data alignment, not feelings
+   - 85%+: 4+ factors aligned + excellent value → RARE
+   - 75-84%: 3 factors aligned + good value → STRONG
+   - 65-74%: 2 factors aligned + value → GOOD
+   - 55-64%: Single factor + value → MODERATE
+   - <55%: Skip or very small stake
+
+16. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
    - Close match → X2 or 1X (double chance)
+
+17. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
+   - No clear statistical edge → SKIP
+   - Too many unknowns (injuries, rotation) → SKIP
+   - Odds don't offer value → SKIP
+   - Trap game detected → SKIP or very low stake
+   - Better NO BET than forced losing bet!
 
 RESPONSE FORMAT:
 
 📊 **АНАЛИЗ ДАННЫХ:**
 • Форма {home} ДОМА: [конкретные цифры]
 • Форма {away} В ГОСТЯХ: [конкретные цифры]
-• Ожидаемые голы: [расчёт]
+• Ожидаемые голы: [расчёт по формуле]
 • H2H тренд: [если есть]
-• 🌐 Актуальные новости: [травмы/составы/другое - если есть]
-• 👨‍⚖️ Судья: [имя, стиль, влияние на ставки - если есть]
-• 📅 Загруженность: [дни отдыха, кто свежее - если есть]
-• 🔥 Мотивация: [дерби/борьба за титул/вылет - если есть]
-• 👑 Класс команд: [элита/сильная/середняк - если есть разница]
+• 🌐 Новости: [травмы/составы - если есть]
+• 👨‍⚖️ Судья: [стиль, влияние]
+• 📅 Усталость: [дни отдыха, преимущество]
+• 🔥 Мотивация: [дерби/титул/вылет]
+• 👑 Класс: [elite/strong/mid/weak]
+
+🎯 **EDGE STACKING (подсчёт факторов):**
+✓ Фактор 1: [описание] → в пользу [ставки]
+✓ Фактор 2: [описание] → в пользу [ставки]
+✓ Фактор 3: [описание] → в пользу [ставки]
+✗ Против: [что может помешать]
+**ИТОГО: X факторов ЗА, Y факторов ПРОТИВ**
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
-📊 Value: [ваша вероятность]% - [implied]% = [+X% VALUE или NO VALUE]
+📊 Value: [твоя вероятность]% - [implied]% = [+X% VALUE]
 💰 Банк: X%
-📝 Почему: [основано на конкретных данных выше]
+📝 Почему: [основано на edge stacking выше]
 
-📈 **ДОПОЛНИТЕЛЬНЫЕ СТАВКИ (ОБЯЗАТЕЛЬНО 3 шт!):**
-[ALT1] [Тип ставки] @ [коэфф] | [X]% уверенность
-[ALT2] [Тип ставки] @ [коэфф] | [X]% уверенность
-[ALT3] [Тип ставки] @ [коэфф] | [X]% уверенность
-(ВСЕГДА давай ровно 3 альтернативы - выбирай из: П1, П2, X, 1X, X2, 12, ТБ2.5, ТМ2.5, BTTS)
+📈 **АЛЬТЕРНАТИВЫ (3 шт):**
+[ALT1] [Ставка] @ [коэфф] | [X]%
+[ALT2] [Ставка] @ [коэфф] | [X]%
+[ALT3] [Ставка] @ [коэфф] | [X]%
 
-⚠️ **РИСКИ:**
-[Конкретные риски на основе данных]
+⚠️ **РИСКИ / TRAP GAMES:**
+[Конкретные риски + есть ли признаки trap game]
 
-✅ **ВЕРДИКТ:** [СИЛЬНАЯ СТАВКА / СРЕДНИЙ РИСК / ВЫСОКИЙ РИСК / ПРОПУСТИТЬ]
+✅ **ВЕРДИКТ:**
+[🔥 СИЛЬНАЯ (3+ факторов) / ⚡ ХОРОШАЯ (2 фактора) / ⚠️ РИСКОВАННАЯ (1 фактор) / 🚫 ПРОПУСТИТЬ]
 
-Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"""
+Bank: 85%+=5%, 75-84%=4%, 65-74%=3%, 55-64%=2%, <55%=skip"""
 
     try:
         message = claude_client.messages.create(
