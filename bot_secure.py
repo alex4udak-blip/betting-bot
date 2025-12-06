@@ -6,7 +6,9 @@ import asyncio
 import re
 import hmac
 import hashlib
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, quote_plus
 from typing import Optional, Any
 
 import aiohttp
@@ -5620,6 +5622,171 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict
     return None
 
 
+# ===== WEB SEARCH FOR MATCH CONTEXT =====
+
+async def search_match_news(home_team: str, away_team: str, competition: str = "") -> dict:
+    """Search for real-time news about the match: injuries, lineups, team news.
+
+    Uses Google News RSS (free, no API key required).
+
+    Returns dict with:
+    - injuries: list of injury news
+    - lineups: lineup information
+    - news: general team news
+    - raw_articles: raw article titles for Claude context
+    """
+    result = {
+        "injuries": [],
+        "lineups": [],
+        "news": [],
+        "raw_articles": [],
+        "searched": False,
+        "error": None
+    }
+
+    session = await get_http_session()
+
+    # Queries to search
+    queries = [
+        f"{home_team} vs {away_team} preview",
+        f"{home_team} injury news",
+        f"{away_team} injury news",
+        f"{home_team} lineup",
+        f"{away_team} lineup",
+    ]
+
+    all_articles = []
+
+    for query in queries:
+        try:
+            # Google News RSS feed (free, no API key)
+            encoded_query = quote_plus(query)
+            url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en&gl=US&ceid=US:en"
+
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    # Parse RSS XML
+                    root = ET.fromstring(text)
+
+                    # Find all items (articles)
+                    for item in root.findall('.//item')[:3]:  # Take top 3 per query
+                        title = item.find('title')
+                        pub_date = item.find('pubDate')
+
+                        if title is not None:
+                            title_text = title.text or ""
+                            # Check if article is from last 48 hours
+                            is_recent = True
+                            if pub_date is not None and pub_date.text:
+                                try:
+                                    # Parse date like "Sat, 07 Dec 2024 10:00:00 GMT"
+                                    from email.utils import parsedate_to_datetime
+                                    article_date = parsedate_to_datetime(pub_date.text)
+                                    if datetime.now(timezone.utc) - article_date > timedelta(hours=48):
+                                        is_recent = False
+                                except:
+                                    pass
+
+                            if is_recent and title_text:
+                                all_articles.append({
+                                    "title": title_text,
+                                    "query": query
+                                })
+
+                                # Categorize
+                                title_lower = title_text.lower()
+                                if any(kw in title_lower for kw in ['injur', 'doubt', 'miss', 'out', 'ruled out', 'sidelined', 'absent']):
+                                    result["injuries"].append(title_text)
+                                elif any(kw in title_lower for kw in ['lineup', 'line-up', 'starting', 'team news', 'squad']):
+                                    result["lineups"].append(title_text)
+                                else:
+                                    result["news"].append(title_text)
+        except asyncio.TimeoutError:
+            logger.warning(f"Web search timeout for: {query}")
+        except Exception as e:
+            logger.warning(f"Web search error for '{query}': {e}")
+
+    # Deduplicate
+    result["injuries"] = list(dict.fromkeys(result["injuries"]))[:5]
+    result["lineups"] = list(dict.fromkeys(result["lineups"]))[:4]
+    result["news"] = list(dict.fromkeys(result["news"]))[:6]
+    result["raw_articles"] = [a["title"] for a in all_articles][:15]
+    result["searched"] = len(all_articles) > 0
+
+    logger.info(f"🔍 Web search for {home_team} vs {away_team}: {len(all_articles)} articles found")
+
+    return result
+
+
+async def get_weather_for_match(venue: str, match_date: datetime = None) -> Optional[dict]:
+    """Get weather for match venue (basic implementation using wttr.in - free, no key)"""
+    if not venue:
+        return None
+
+    try:
+        session = await get_http_session()
+        # wttr.in is a free weather service
+        # Extract city from venue name (rough heuristic)
+        city = venue.split(',')[0].strip() if ',' in venue else venue.split()[0]
+        url = f"https://wttr.in/{quote(city)}?format=j1"
+
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                current = data.get("current_condition", [{}])[0]
+                return {
+                    "temp_c": current.get("temp_C", "?"),
+                    "feels_like": current.get("FeelsLikeC", "?"),
+                    "weather": current.get("weatherDesc", [{}])[0].get("value", "Unknown"),
+                    "humidity": current.get("humidity", "?"),
+                    "wind_kmph": current.get("windspeedKmph", "?"),
+                    "precipitation": current.get("precipMM", "0"),
+                }
+    except Exception as e:
+        logger.warning(f"Weather fetch error for {venue}: {e}")
+
+    return None
+
+
+def format_web_context_for_claude(web_news: dict, weather: dict = None, lang: str = "ru") -> str:
+    """Format web search results for Claude's context"""
+    if not web_news.get("searched"):
+        return ""
+
+    context = "\n🌐 АКТУАЛЬНЫЕ НОВОСТИ (веб-поиск):\n"
+
+    if web_news.get("injuries"):
+        context += "\n⚠️ ТРАВМЫ И ПРОПУСКИ:\n"
+        for inj in web_news["injuries"][:5]:
+            context += f"  • {inj}\n"
+
+    if web_news.get("lineups"):
+        context += "\n📋 СОСТАВЫ И ЗАЯВКИ:\n"
+        for lineup in web_news["lineups"][:4]:
+            context += f"  • {lineup}\n"
+
+    if web_news.get("news"):
+        context += "\n📰 НОВОСТИ:\n"
+        for news in web_news["news"][:5]:
+            context += f"  • {news}\n"
+
+    if weather:
+        context += f"\n🌤️ ПОГОДА НА СТАДИОНЕ:\n"
+        context += f"  • Температура: {weather['temp_c']}°C (ощущается {weather['feels_like']}°C)\n"
+        context += f"  • Условия: {weather['weather']}\n"
+        if float(weather.get('precipitation', 0)) > 0:
+            context += f"  • ⚠️ Осадки: {weather['precipitation']}mm\n"
+        if float(weather.get('wind_kmph', 0)) > 30:
+            context += f"  • ⚠️ Сильный ветер: {weather['wind_kmph']} км/ч\n"
+
+    if context.strip() == "🌐 АКТУАЛЬНЫЕ НОВОСТИ (веб-поиск):":
+        return ""  # Nothing found
+
+    context += "\n"
+    return context
+
+
 async def get_top_scorers(competition: str = "PL", limit: int = 10) -> Optional[list]:
     """Get top scorers of the competition (Standard plan feature)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -6157,6 +6324,12 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     lineups = await get_lineups(match_id) if match_id else None
     top_scorers = await get_top_scorers(comp_code, 15)
 
+    # 🌐 WEB SEARCH: Get real-time news about injuries, lineups, team news
+    web_news = await search_match_news(home, away, comp)
+    # Get weather if we have venue
+    venue = lineups.get('venue') if lineups else None
+    weather = await get_weather_for_match(venue) if venue else None
+
     # Get bot's historical accuracy stats
     bot_stats = get_bot_accuracy_stats()
 
@@ -6243,6 +6416,11 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         if h2h_matches_count < 5:
             analysis_data += f"  ⚠️ ВНИМАНИЕ: Малая выборка ({h2h_matches_count} матчей) - H2H ненадёжен! Приоритет → текущая форма.\n"
         analysis_data += "\n"
+
+    # 🌐 WEB SEARCH RESULTS - Real-time news (injuries, lineups, team news)
+    web_context = format_web_context_for_claude(web_news, weather, lang)
+    if web_context:
+        analysis_data += web_context
 
     # TOP SCORERS in this match
     if top_scorers:
@@ -6422,14 +6600,22 @@ CRITICAL ANALYSIS RULES:
    - If team has top-3 league scorer → +10% goal probability
    - Factor this into BTTS and totals
 
-6. CONFIDENCE CALCULATION:
+6. 🌐 REAL-TIME NEWS (CRITICAL!):
+   - If injury news mentions key player OUT → ADJUST confidence significantly!
+   - Star striker injured → Lower totals confidence, lower team win confidence
+   - Key defender out → Higher opponent goal probability
+   - "Rotation" news before big game → Team may rest players, lower win confidence
+   - Bad weather (rain, wind) → Lower totals expected
+   - Always mention significant news in your analysis!
+
+7. CONFIDENCE CALCULATION:
    - Base on statistical data, not feelings
    - 80%+: Strong statistical edge + good value
    - 70-79%: Clear favorite + decent value
    - 60-69%: Slight edge, moderate risk
    - <60%: High risk, only if excellent value
 
-7. DIVERSIFY BET TYPES based on data:
+8. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
@@ -6442,6 +6628,7 @@ RESPONSE FORMAT:
 • Форма {away} В ГОСТЯХ: [конкретные цифры]
 • Ожидаемые голы: [расчёт]
 • H2H тренд: [если есть]
+• 🌐 Актуальные новости: [травмы/составы/другое - если есть]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
