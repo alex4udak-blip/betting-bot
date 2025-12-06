@@ -3717,14 +3717,23 @@ ML_FEATURE_COLUMNS = {
     "home_title_race": 0,          # 1 if in top 3
     "away_title_race": 0,
     "motivation_diff": 0,          # home_motivation - away_motivation
+    # Team class (elite factor)
+    "home_is_elite": 0,            # 1 if in TOP_CLUBS list (Real, Barca, Bayern, etc.)
+    "away_is_elite": 0,
+    "home_team_class": 2,          # 4=elite, 3=strong, 2=midtable, 1=weak, 0=relegation
+    "away_team_class": 2,
+    "class_diff": 0,               # Positive = home is higher class
+    "elite_vs_underdog": 0,        # 1 if elite plays weak/relegation team
+    "class_mismatch": 0,           # Absolute class difference (for upset detection)
 }
 
 
 def extract_features(home_form: dict, away_form: dict, standings: dict,
                      odds: dict, h2h: list, home_team: str, away_team: str,
                      referee_stats: dict = None, has_web_news: bool = False,
-                     congestion: dict = None, motivation: dict = None) -> dict:
-    """Extract numerical features for ML model including congestion and motivation"""
+                     congestion: dict = None, motivation: dict = None,
+                     team_class: dict = None) -> dict:
+    """Extract numerical features for ML model including congestion, motivation, and team class"""
     features = {}
 
     # Home team form features
@@ -3886,6 +3895,24 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["away_relegation_battle"] = 0
         features["home_title_race"] = 0
         features["away_title_race"] = 0
+
+    # Team class features (elite factor)
+    if team_class:
+        features["home_is_elite"] = 1 if team_class.get("home_is_elite") else 0
+        features["away_is_elite"] = 1 if team_class.get("away_is_elite") else 0
+        features["home_team_class"] = team_class.get("home_class", 2)
+        features["away_team_class"] = team_class.get("away_class", 2)
+        features["class_diff"] = team_class.get("class_diff", 0)
+        features["elite_vs_underdog"] = team_class.get("elite_vs_underdog", 0)
+        features["class_mismatch"] = team_class.get("class_mismatch", 0)
+    else:
+        features["home_is_elite"] = 0
+        features["away_is_elite"] = 0
+        features["home_team_class"] = 2
+        features["away_team_class"] = 2
+        features["class_diff"] = 0
+        features["elite_vs_underdog"] = 0
+        features["class_mismatch"] = 0
 
     return features
 
@@ -6435,6 +6462,186 @@ def format_motivation_context(motivation: dict, home_team: str, away_team: str, 
     return context
 
 
+# ===== TEAM CLASS (ELITE FACTOR) =====
+
+def is_elite_team(team_name: str) -> bool:
+    """Check if team is in TOP_CLUBS (elite tier)"""
+    if not team_name:
+        return False
+    team_lower = team_name.lower()
+    return any(club.lower() in team_lower or team_lower in club.lower() for club in TOP_CLUBS)
+
+
+def calculate_team_class(team_name: str, position: int, total_teams: int = 20) -> int:
+    """Calculate team class based on elite status and position.
+
+    Returns:
+        4 = Elite (TOP_CLUBS regardless of position)
+        3 = Strong (top 4 or champions league spots)
+        2 = Midtable (5-13)
+        1 = Weak (14-17)
+        0 = Relegation zone (bottom 3)
+    """
+    # Elite teams always class 4 (unless in relegation - then still 3)
+    if is_elite_team(team_name):
+        if position and position > total_teams - 3:  # In relegation zone
+            return 3  # Even elite in trouble is strong
+        return 4
+
+    # Position-based class for non-elite
+    if not position or position == 0:
+        return 2  # Unknown = midtable
+
+    relegation_zone = total_teams - 3  # Bottom 3
+
+    if position <= 4:
+        return 3  # Strong (CL spots)
+    elif position <= 7:
+        return 3  # Europa/Conference spots = still strong
+    elif position <= 13:
+        return 2  # Midtable
+    elif position <= relegation_zone:
+        return 1  # Weak
+    else:
+        return 0  # Relegation zone
+
+
+def get_team_class_analysis(home_team: str, away_team: str,
+                            home_position: int, away_position: int,
+                            total_teams: int = 20) -> dict:
+    """Full team class analysis for both teams."""
+
+    home_elite = is_elite_team(home_team)
+    away_elite = is_elite_team(away_team)
+
+    home_class = calculate_team_class(home_team, home_position, total_teams)
+    away_class = calculate_team_class(away_team, away_position, total_teams)
+
+    class_diff = home_class - away_class
+    class_mismatch = abs(class_diff)
+
+    # Elite vs underdog: elite (4) playing weak (1) or relegation (0)
+    elite_vs_underdog = 0
+    if home_elite and away_class <= 1:
+        elite_vs_underdog = 1
+    elif away_elite and home_class <= 1:
+        elite_vs_underdog = 1
+
+    return {
+        "home_is_elite": home_elite,
+        "away_is_elite": away_elite,
+        "home_class": home_class,
+        "away_class": away_class,
+        "class_diff": class_diff,
+        "elite_vs_underdog": elite_vs_underdog,
+        "class_mismatch": class_mismatch,
+    }
+
+
+def format_team_class_context(class_analysis: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format team class analysis for Claude (multilingual)"""
+
+    labels = {
+        "ru": {
+            "title": "КЛАСС КОМАНД",
+            "elite": "элита 👑",
+            "strong": "сильная",
+            "midtable": "середняк",
+            "weak": "слабая",
+            "relegation": "аутсайдер ⚠️",
+            "class": "Класс",
+            "advantage": "Преимущество в классе",
+            "elite_warning": "👑 ЭЛИТНЫЙ КЛУБ — не недооценивай!",
+            "mismatch_warning": "⚡ Большая разница в классе — фаворит может доминировать!",
+        },
+        "en": {
+            "title": "TEAM CLASS",
+            "elite": "elite 👑",
+            "strong": "strong",
+            "midtable": "midtable",
+            "weak": "weak",
+            "relegation": "relegation ⚠️",
+            "class": "Class",
+            "advantage": "Class advantage",
+            "elite_warning": "👑 ELITE CLUB — don't underestimate!",
+            "mismatch_warning": "⚡ Big class difference — favorite may dominate!",
+        },
+        "es": {
+            "title": "CLASE DE EQUIPOS",
+            "elite": "élite 👑",
+            "strong": "fuerte",
+            "midtable": "media tabla",
+            "weak": "débil",
+            "relegation": "descenso ⚠️",
+            "class": "Clase",
+            "advantage": "Ventaja de clase",
+            "elite_warning": "👑 CLUB DE ÉLITE — ¡no subestimes!",
+            "mismatch_warning": "⚡ Gran diferencia de clase — ¡el favorito puede dominar!",
+        },
+        "pt": {
+            "title": "CLASSE DAS EQUIPES",
+            "elite": "elite 👑",
+            "strong": "forte",
+            "midtable": "meio da tabela",
+            "weak": "fraca",
+            "relegation": "rebaixamento ⚠️",
+            "class": "Classe",
+            "advantage": "Vantagem de classe",
+            "elite_warning": "👑 CLUBE DE ELITE — não subestime!",
+            "mismatch_warning": "⚡ Grande diferença de classe — favorito pode dominar!",
+        },
+        "id": {
+            "title": "KELAS TIM",
+            "elite": "elit 👑",
+            "strong": "kuat",
+            "midtable": "papan tengah",
+            "weak": "lemah",
+            "relegation": "degradasi ⚠️",
+            "class": "Kelas",
+            "advantage": "Keunggulan kelas",
+            "elite_warning": "👑 KLUB ELIT — jangan remehkan!",
+            "mismatch_warning": "⚡ Perbedaan kelas besar — favorit bisa mendominasi!",
+        }
+    }
+
+    l = labels.get(lang, labels["en"])
+
+    class_names = {
+        4: l["elite"],
+        3: l["strong"],
+        2: l["midtable"],
+        1: l["weak"],
+        0: l["relegation"],
+    }
+
+    home_class_name = class_names.get(class_analysis["home_class"], l["midtable"])
+    away_class_name = class_names.get(class_analysis["away_class"], l["midtable"])
+
+    # Only show context if there's something notable
+    if not class_analysis["home_is_elite"] and not class_analysis["away_is_elite"] and \
+       class_analysis["class_mismatch"] < 2:
+        return ""  # Skip if both midtable-ish
+
+    context = f"\n👑 {l['title']}:\n"
+
+    # Show team classes
+    context += f"  • {home_team}: {l['class']} — {home_class_name}\n"
+    context += f"  • {away_team}: {l['class']} — {away_class_name}\n"
+
+    # Elite warning
+    if class_analysis["home_is_elite"] or class_analysis["away_is_elite"]:
+        elite_team = home_team if class_analysis["home_is_elite"] else away_team
+        context += f"  {l['elite_warning']} ({elite_team})\n"
+
+    # Class mismatch warning (2+ levels)
+    if class_analysis["class_mismatch"] >= 2:
+        better_team = home_team if class_analysis["class_diff"] > 0 else away_team
+        context += f"  {l['mismatch_warning']} ({better_team})\n"
+
+    context += "\n"
+    return context
+
+
 async def get_top_scorers(competition: str = "PL", limit: int = 10) -> Optional[list]:
     """Get top scorers of the competition (Standard plan feature)"""
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -7117,6 +7324,12 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     if motivation_context:
         analysis_data += motivation_context
 
+    # 👑 TEAM CLASS - elite factor analysis
+    team_class = get_team_class_analysis(home, away, home_pos, away_pos, total_teams)
+    team_class_context = format_team_class_context(team_class, home, away, lang)
+    if team_class_context:
+        analysis_data += team_class_context
+
     # TOP SCORERS in this match
     if top_scorers:
         home_scorers = [s for s in top_scorers if s['team'].lower() in home.lower() or home.lower() in s['team'].lower()]
@@ -7208,7 +7421,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         referee_stats=referee_stats,
         has_web_news=web_news.get("searched", False) if web_news else False,
         congestion=congestion,
-        motivation=motivation
+        motivation=motivation,
+        team_class=team_class
     )
 
     # Get ML predictions if models are trained
@@ -7332,14 +7546,24 @@ CRITICAL ANALYSIS RULES:
    - Motivation mismatch (high vs low) → Advantage for motivated team!
    - Always factor motivation into confidence calculation!
 
-10. CONFIDENCE CALCULATION:
+10. 👑 TEAM CLASS (ELITE FACTOR - CRITICAL!):
+   - ELITE CLUBS (Real Madrid, Barcelona, Bayern, Man City, etc.) → NEVER bet against them!
+   - Elite teams often WIN despite bad recent form — individual class decides!
+   - Elite vs weak team → Stats of weak team are LESS relevant, elite will dominate
+   - Big class mismatch (2+ levels) → Favorite will likely dominate, consider handicaps
+   - Class levels: 4=Elite, 3=Strong (CL spots), 2=Midtable, 1=Weak, 0=Relegation
+   - When elite plays away at weak team → Elite still favorite despite away stats!
+   - Exception: Elite in relegation zone or crisis → class drops to 3 (still strong)
+   - YOUR BARÇA EXAMPLE: Elite team (class 4) beats weak team regardless of form!
+
+11. CONFIDENCE CALCULATION:
    - Base on statistical data, not feelings
    - 80%+: Strong statistical edge + good value
    - 70-79%: Clear favorite + decent value
    - 60-69%: Slight edge, moderate risk
    - <60%: High risk, only if excellent value
 
-11. DIVERSIFY BET TYPES based on data:
+12. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
@@ -7356,6 +7580,7 @@ RESPONSE FORMAT:
 • 👨‍⚖️ Судья: [имя, стиль, влияние на ставки - если есть]
 • 📅 Загруженность: [дни отдыха, кто свежее - если есть]
 • 🔥 Мотивация: [дерби/борьба за титул/вылет - если есть]
+• 👑 Класс команд: [элита/сильная/середняк - если есть разница]
 
 🎯 **ОСНОВНАЯ СТАВКА** (Уверенность: X%):
 [Тип ставки] @ [коэфф]
@@ -10681,6 +10906,7 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
 
         is_cup = "cup" in comp.lower() or "copa" in comp.lower() or "coupe" in comp.lower()
         motivation = get_motivation_analysis(home, away, home_pos, away_pos, is_cup, total_teams)
+        team_class = get_team_class_analysis(home, away, home_pos, away_pos, total_teams)
 
         # Extract ML features for training
         ml_features = extract_features(
@@ -10692,7 +10918,8 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
             home_team=home,
             away_team=away,
             congestion=congestion,
-            motivation=motivation
+            motivation=motivation,
+            team_class=team_class
         )
 
         # Convert enhanced form to simple form for text generation
