@@ -3650,6 +3650,64 @@ def check_bet_result(bet_type, home_score, away_score):
 
 # ===== MACHINE LEARNING SYSTEM =====
 
+# All ML features with default values - EASY TO EXTEND!
+# When adding new features: just add them here and in extract_features()
+ML_FEATURE_COLUMNS = {
+    # Form features
+    "home_wins": 0,
+    "home_draws": 0,
+    "home_losses": 0,
+    "home_goals_scored": 1.5,
+    "home_goals_conceded": 1.0,
+    "home_home_win_rate": 50,
+    "home_btts_pct": 50,
+    "home_over25_pct": 50,
+    "away_wins": 0,
+    "away_draws": 0,
+    "away_losses": 0,
+    "away_goals_scored": 1.0,
+    "away_goals_conceded": 1.5,
+    "away_away_win_rate": 30,
+    "away_btts_pct": 50,
+    "away_over25_pct": 50,
+    # Standings
+    "home_position": 10,
+    "away_position": 10,
+    "position_diff": 0,
+    # Odds
+    "odds_home": 2.5,
+    "odds_draw": 3.5,
+    "odds_away": 3.0,
+    "implied_home": 0.4,
+    "implied_draw": 0.25,
+    "implied_away": 0.35,
+    # H2H
+    "h2h_home_wins": 0,
+    "h2h_draws": 0,
+    "h2h_away_wins": 0,
+    "h2h_total": 0,
+    # Expected goals (improved calculation)
+    "expected_goals": 2.5,
+    "expected_home_goals": 1.3,
+    "expected_away_goals": 1.0,
+    "expected_goals_method": 0,  # 1 = home/away specific, 0 = overall
+    # Aggregates
+    "avg_btts_pct": 50,
+    "avg_over25_pct": 50,
+    # Referee features (NEW)
+    "referee_cards_per_game": 4.0,
+    "referee_penalties_per_game": 0.32,
+    "referee_reds_per_game": 0.12,
+    "referee_style": 2,  # 4=very_strict, 3=strict, 2=balanced, 1=lenient
+    "referee_cards_vs_avg": 0,
+    # Web news indicator (NEW)
+    "has_web_news": 0,
+    # === ADD NEW FEATURES HERE ===
+    # Example: "fixture_congestion": 0,
+    # Example: "motivation_score": 5,
+}
+
+
 def extract_features(home_form: dict, away_form: dict, standings: dict,
                      odds: dict, h2h: list, home_team: str, away_team: str,
                      referee_stats: dict = None, has_web_news: bool = False) -> dict:
@@ -3809,7 +3867,11 @@ def update_ml_training_target(prediction_id: int, target: int):
 
 
 def get_ml_training_data(bet_category: str) -> tuple:
-    """Get training data for specific bet category"""
+    """Get training data for specific bet category.
+
+    Uses ML_FEATURE_COLUMNS for consistent feature ordering.
+    Automatically uses all defined features - just add to ML_FEATURE_COLUMNS!
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""SELECT features_json, target FROM ml_training_data
@@ -3822,45 +3884,36 @@ def get_ml_training_data(bet_category: str) -> tuple:
 
     X = []
     y = []
+
+    # Get feature names in consistent order
+    feature_names = list(ML_FEATURE_COLUMNS.keys())
+
     for features_json, target in rows:
         try:
             features = json.loads(features_json)
-            # Convert to list in consistent order
+            # Convert to list using ML_FEATURE_COLUMNS order and defaults
             feature_values = [
-                features.get("home_wins", 0),
-                features.get("home_draws", 0),
-                features.get("home_losses", 0),
-                features.get("home_goals_scored", 1.5),
-                features.get("home_goals_conceded", 1.0),
-                features.get("home_home_win_rate", 50),
-                features.get("away_wins", 0),
-                features.get("away_draws", 0),
-                features.get("away_losses", 0),
-                features.get("away_goals_scored", 1.0),
-                features.get("away_goals_conceded", 1.5),
-                features.get("away_away_win_rate", 30),
-                features.get("home_position", 10),
-                features.get("away_position", 10),
-                features.get("position_diff", 0),
-                features.get("odds_home", 2.5),
-                features.get("odds_draw", 3.5),
-                features.get("odds_away", 3.0),
-                features.get("implied_home", 0.4),
-                features.get("implied_draw", 0.25),
-                features.get("implied_away", 0.35),
-                features.get("h2h_home_wins", 0),
-                features.get("h2h_draws", 0),
-                features.get("h2h_away_wins", 0),
-                features.get("expected_goals", 2.5),
-                features.get("avg_btts_pct", 50),
-                features.get("avg_over25_pct", 50),
+                features.get(name, default)
+                for name, default in ML_FEATURE_COLUMNS.items()
             ]
             X.append(feature_values)
             y.append(target)
         except:
             continue
 
+    logger.info(f"ML training data for {bet_category}: {len(X)} samples, {len(feature_names)} features")
     return X, y
+
+
+def features_to_vector(features: dict) -> list:
+    """Convert features dict to vector using ML_FEATURE_COLUMNS order.
+
+    Used for predictions - ensures same order as training.
+    """
+    return [
+        features.get(name, default)
+        for name, default in ML_FEATURE_COLUMNS.items()
+    ]
 
 
 def train_ml_model(bet_category: str) -> Optional[dict]:
@@ -3934,7 +3987,10 @@ def train_all_models():
 
 
 def ml_predict(features: dict, bet_category: str) -> Optional[dict]:
-    """Get ML prediction for a bet category"""
+    """Get ML prediction for a bet category.
+
+    Uses features_to_vector() for consistent feature ordering with training.
+    """
     if not ML_AVAILABLE:
         return None
 
@@ -3946,37 +4002,8 @@ def ml_predict(features: dict, bet_category: str) -> Optional[dict]:
     try:
         model = joblib.load(model_path)
 
-        # Convert features to array
-        feature_values = [
-            features.get("home_wins", 0),
-            features.get("home_draws", 0),
-            features.get("home_losses", 0),
-            features.get("home_goals_scored", 1.5),
-            features.get("home_goals_conceded", 1.0),
-            features.get("home_home_win_rate", 50),
-            features.get("away_wins", 0),
-            features.get("away_draws", 0),
-            features.get("away_losses", 0),
-            features.get("away_goals_scored", 1.0),
-            features.get("away_goals_conceded", 1.5),
-            features.get("away_away_win_rate", 30),
-            features.get("home_position", 10),
-            features.get("away_position", 10),
-            features.get("position_diff", 0),
-            features.get("odds_home", 2.5),
-            features.get("odds_draw", 3.5),
-            features.get("odds_away", 3.0),
-            features.get("implied_home", 0.4),
-            features.get("implied_draw", 0.25),
-            features.get("implied_away", 0.35),
-            features.get("h2h_home_wins", 0),
-            features.get("h2h_draws", 0),
-            features.get("h2h_away_wins", 0),
-            features.get("expected_goals", 2.5),
-            features.get("avg_btts_pct", 50),
-            features.get("avg_over25_pct", 50),
-        ]
-
+        # Convert features to array using consistent ML_FEATURE_COLUMNS order
+        feature_values = features_to_vector(features)
         X = np.array([feature_values])
 
         # Get probability
