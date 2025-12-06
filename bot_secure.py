@@ -3651,7 +3651,8 @@ def check_bet_result(bet_type, home_score, away_score):
 # ===== MACHINE LEARNING SYSTEM =====
 
 def extract_features(home_form: dict, away_form: dict, standings: dict,
-                     odds: dict, h2h: list, home_team: str, away_team: str) -> dict:
+                     odds: dict, h2h: list, home_team: str, away_team: str,
+                     referee_stats: dict = None, has_web_news: bool = False) -> dict:
     """Extract numerical features for ML model"""
     features = {}
 
@@ -3759,6 +3760,25 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
 
     features["avg_btts_pct"] = (features["home_btts_pct"] + features["away_btts_pct"]) / 2
     features["avg_over25_pct"] = (features["home_over25_pct"] + features["away_over25_pct"]) / 2
+
+    # Referee features (for card/penalty predictions)
+    if referee_stats:
+        features["referee_cards_per_game"] = referee_stats.get("cards_per_game", 4.0)
+        features["referee_penalties_per_game"] = referee_stats.get("penalties_per_game", 0.32)
+        features["referee_reds_per_game"] = referee_stats.get("reds_per_game", 0.12)
+        # Style as numeric: very_strict=4, strict=3, balanced=2, lenient=1
+        style_map = {"very_strict": 4, "strict": 3, "balanced": 2, "lenient": 1}
+        features["referee_style"] = style_map.get(referee_stats.get("style", "balanced"), 2)
+        features["referee_cards_vs_avg"] = referee_stats.get("cards_vs_avg", 0)
+    else:
+        features["referee_cards_per_game"] = 4.0  # Default
+        features["referee_penalties_per_game"] = 0.32
+        features["referee_reds_per_game"] = 0.12
+        features["referee_style"] = 2  # Balanced
+        features["referee_cards_vs_avg"] = 0
+
+    # Web news indicator (1 if we have fresh news)
+    features["has_web_news"] = 1 if has_web_news else 0
 
     return features
 
@@ -5900,50 +5920,114 @@ def get_referee_stats(referee_name: str, league_code: str = None) -> Optional[di
 
 
 def format_referee_context(referee_stats: dict, lang: str = "ru") -> str:
-    """Format referee stats for Claude's context"""
+    """Format referee stats for Claude's context (multilingual)"""
     if not referee_stats:
         return ""
 
     r = referee_stats
-    style_map = {
-        "very_strict": "очень строгий 🔴",
-        "strict": "строгий 🟡",
-        "balanced": "сбалансированный ⚖️",
-        "lenient": "мягкий 🟢"
-    }
-    style_text = style_map.get(r["style"], r["style"])
 
-    context = f"\n👨‍⚖️ СУДЬЯ: {r['name']}\n"
-    context += f"  • Стиль: {style_text}\n"
-    context += f"  • Карточек за игру: {r['cards_per_game']} "
+    # Multilingual style names
+    style_map = {
+        "ru": {
+            "very_strict": "очень строгий 🔴",
+            "strict": "строгий 🟡",
+            "balanced": "сбалансированный ⚖️",
+            "lenient": "мягкий 🟢"
+        },
+        "en": {
+            "very_strict": "very strict 🔴",
+            "strict": "strict 🟡",
+            "balanced": "balanced ⚖️",
+            "lenient": "lenient 🟢"
+        },
+        "es": {
+            "very_strict": "muy estricto 🔴",
+            "strict": "estricto 🟡",
+            "balanced": "equilibrado ⚖️",
+            "lenient": "permisivo 🟢"
+        }
+    }
+
+    # Multilingual labels
+    labels = {
+        "ru": {
+            "referee": "СУДЬЯ",
+            "style": "Стиль",
+            "cards_per_game": "Карточек за игру",
+            "penalties_per_game": "Пенальти за игру",
+            "vs_league_avg": "vs среднее по лиге",
+            "normal": "в норме",
+            "betting_impact": "Влияние на ставки",
+            "over_cards": "ТБ карточек - ВЫСОКАЯ вероятность",
+            "under_cards": "ТМ карточек - рассмотреть",
+            "penalties_likely": "Пенальти вероятны - учитывать в тоталах",
+            "red_cards_risk": "Возможны удаления - осторожно с исходами"
+        },
+        "en": {
+            "referee": "REFEREE",
+            "style": "Style",
+            "cards_per_game": "Cards per game",
+            "penalties_per_game": "Penalties per game",
+            "vs_league_avg": "vs league avg",
+            "normal": "normal",
+            "betting_impact": "Betting impact",
+            "over_cards": "Over cards - HIGH probability",
+            "under_cards": "Under cards - consider",
+            "penalties_likely": "Penalties likely - factor into totals",
+            "red_cards_risk": "Red cards possible - beware of outcomes"
+        },
+        "es": {
+            "referee": "ÁRBITRO",
+            "style": "Estilo",
+            "cards_per_game": "Tarjetas por partido",
+            "penalties_per_game": "Penales por partido",
+            "vs_league_avg": "vs promedio de liga",
+            "normal": "normal",
+            "betting_impact": "Impacto en apuestas",
+            "over_cards": "Más tarjetas - ALTA probabilidad",
+            "under_cards": "Menos tarjetas - considerar",
+            "penalties_likely": "Penales probables - considerar en totales",
+            "red_cards_risk": "Posibles expulsiones - cuidado con resultados"
+        }
+    }
+
+    # Use English as fallback
+    styles = style_map.get(lang, style_map["en"])
+    l = labels.get(lang, labels["en"])
+
+    style_text = styles.get(r["style"], r["style"])
+
+    context = f"\n👨‍⚖️ {l['referee']}: {r['name']}\n"
+    context += f"  • {l['style']}: {style_text}\n"
+    context += f"  • {l['cards_per_game']}: {r['cards_per_game']} "
 
     if r["cards_vs_avg"] > 0.3:
-        context += f"(+{r['cards_vs_avg']} vs среднее по лиге ⚠️)\n"
+        context += f"(+{r['cards_vs_avg']} {l['vs_league_avg']} ⚠️)\n"
     elif r["cards_vs_avg"] < -0.3:
-        context += f"({r['cards_vs_avg']} vs среднее по лиге ✅)\n"
+        context += f"({r['cards_vs_avg']} {l['vs_league_avg']} ✅)\n"
     else:
-        context += f"(в норме)\n"
+        context += f"({l['normal']})\n"
 
-    context += f"  • Пенальти за игру: {r['penalties_per_game']} "
+    context += f"  • {l['penalties_per_game']}: {r['penalties_per_game']} "
     if r["penalties_vs_avg"] > 0.05:
-        context += f"(+{r['penalties_vs_avg']} vs среднее ⚠️)\n"
+        context += f"(+{r['penalties_vs_avg']} {l['vs_league_avg']} ⚠️)\n"
     elif r["penalties_vs_avg"] < -0.05:
-        context += f"({r['penalties_vs_avg']} vs среднее)\n"
+        context += f"({r['penalties_vs_avg']} {l['vs_league_avg']})\n"
     else:
-        context += f"(в норме)\n"
+        context += f"({l['normal']})\n"
 
     # Betting implications
-    context += f"  💡 Влияние на ставки:\n"
+    context += f"  💡 {l['betting_impact']}:\n"
     if r["cards_per_game"] >= 4.3:
-        context += f"     • ТБ карточек - ВЫСОКАЯ вероятность\n"
+        context += f"     • {l['over_cards']}\n"
     elif r["cards_per_game"] <= 3.6:
-        context += f"     • ТМ карточек - рассмотреть\n"
+        context += f"     • {l['under_cards']}\n"
 
     if r["penalties_per_game"] >= 0.38:
-        context += f"     • Пенальти вероятны - учитывать в тоталах\n"
+        context += f"     • {l['penalties_likely']}\n"
 
     if r["style"] in ["very_strict", "strict"]:
-        context += f"     • Возможны удаления - осторожно с исходами\n"
+        context += f"     • {l['red_cards_risk']}\n"
 
     context += "\n"
     return context
@@ -6684,7 +6768,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML
+    # Extract features for ML (including referee and web news data)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -6692,7 +6776,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         odds=odds,
         h2h=h2h.get("matches", []) if h2h else [],
         home_team=home,
-        away_team=away
+        away_team=away,
+        referee_stats=referee_stats,
+        has_web_news=web_news.get("searched", False) if web_news else False
     )
 
     # Get ML predictions if models are trained
