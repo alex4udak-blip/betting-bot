@@ -1351,6 +1351,10 @@ def init_db():
     except:
         pass
     try:
+        c.execute("ALTER TABLE predictions ADD COLUMN league_code TEXT")
+    except:
+        pass
+    try:
         c.execute("ALTER TABLE users ADD COLUMN premium_expires TEXT")
     except:
         pass
@@ -1439,6 +1443,35 @@ def init_db():
         utm_source TEXT,
         referrer_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # Prediction errors analysis - stores WHY predictions failed for learning
+    c.execute('''CREATE TABLE IF NOT EXISTS prediction_errors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prediction_id INTEGER,
+        league_code TEXT,
+        bet_category TEXT,
+        error_type TEXT,
+        expected_value REAL,
+        actual_value REAL,
+        error_description TEXT,
+        features_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (prediction_id) REFERENCES predictions(id)
+    )''')
+
+    # League learning stats - tracks accuracy and lessons per league
+    c.execute('''CREATE TABLE IF NOT EXISTS league_learning (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        league_code TEXT,
+        bet_category TEXT,
+        total_predictions INTEGER DEFAULT 0,
+        correct_predictions INTEGER DEFAULT 0,
+        common_error_type TEXT,
+        adjustment_factor REAL DEFAULT 1.0,
+        lessons_json TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(league_code, bet_category)
     )''')
 
     conn.commit()
@@ -2940,11 +2973,12 @@ def parse_alternative_bets(analysis: str) -> list:
     return alternatives[:3]  # Max 3 alternatives
 
 
-def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1):
+def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1, league_code=None):
     """Save prediction to database with category and ML features.
 
     Args:
         bet_rank: 1 = main bet, 2+ = alternatives
+        league_code: League code for learning system (e.g. "PL", "SA", "BL1")
 
     Duplicate rules:
     - Main bet (rank=1): Only ONE main bet per match allowed (regardless of bet_type)
@@ -3003,9 +3037,9 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
         return existing_id  # Return existing prediction ID
 
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -3060,17 +3094,19 @@ def update_prediction_result(pred_id, result, is_correct):
         # Trigger self-learning system
         if pred_row:
             bet_category, confidence, bet_type = pred_row
-            # Get ML features and user_id, odds if available
+            # Get ML features, user_id, odds, and league_code
             conn2 = sqlite3.connect(DB_PATH)
             c2 = conn2.cursor()
             c2.execute("SELECT features_json FROM ml_training_data WHERE prediction_id = ?", (pred_id,))
             features_row = c2.fetchone()
-            c2.execute("SELECT user_id, odds FROM predictions WHERE id = ?", (pred_id,))
+            c2.execute("SELECT user_id, odds, league_code FROM predictions WHERE id = ?", (pred_id,))
             pred_info = c2.fetchone()
             conn2.close()
 
             features = json.loads(features_row[0]) if features_row and features_row[0] else None
-            learn_from_result(pred_id, bet_category, confidence or 70, is_correct, features, bet_type or "")
+            league_code = pred_info[2] if pred_info and len(pred_info) > 2 else None
+            learn_from_result(pred_id, bet_category, confidence or 70, is_correct, features, bet_type or "",
+                              league_code=league_code, actual_result=result)
 
             # Update user personalization stats
             if pred_info and pred_info[0] and pred_info[0] > 0:  # user_id > 0 (not bot alerts)
@@ -3973,6 +4009,295 @@ def get_ml_status() -> dict:
     }
 
 
+# ===== ERROR ANALYSIS & LEARNING SYSTEM =====
+# Analyzes WHY predictions fail and teaches Claude to improve
+
+def analyze_prediction_error(prediction: dict, actual_result: str, features: dict) -> dict:
+    """Analyze why a prediction failed and categorize the error.
+
+    Returns error analysis with type, description, and lessons learned.
+    """
+    bet_type = prediction.get("bet_type", "").lower()
+    bet_category = prediction.get("bet_category", "")
+    confidence = prediction.get("confidence", 70)
+
+    # Parse actual result (e.g., "2:1", "0:0")
+    try:
+        if ":" in actual_result:
+            home_goals, away_goals = map(int, actual_result.split(":"))
+            total_goals = home_goals + away_goals
+        else:
+            home_goals, away_goals, total_goals = 0, 0, 0
+    except:
+        home_goals, away_goals, total_goals = 0, 0, 0
+
+    error_analysis = {
+        "error_type": "unknown",
+        "expected_value": None,
+        "actual_value": None,
+        "description": "",
+        "lesson": ""
+    }
+
+    # Get expected values from features
+    expected_goals = features.get("expected_goals", 2.5) if features else 2.5
+
+    # Analyze by bet category
+    if "totals_over" in bet_category or "тб" in bet_type or "over" in bet_type:
+        error_analysis["error_type"] = "totals_overestimate"
+        error_analysis["expected_value"] = expected_goals
+        error_analysis["actual_value"] = total_goals
+        diff = expected_goals - total_goals
+        if diff > 1.5:
+            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Overestimated by {diff:.1f}"
+            error_analysis["lesson"] = "xG was significantly overestimated. Teams played more defensively than form suggested."
+        elif diff > 0.5:
+            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Close miss."
+            error_analysis["lesson"] = "Slight xG overestimate. Consider lowering threshold for this league."
+        else:
+            error_analysis["description"] = f"Unlucky - expected {expected_goals:.1f}, got {total_goals}"
+            error_analysis["lesson"] = "Variance - prediction was reasonable but result was on the edge."
+
+    elif "totals_under" in bet_category or "тм" in bet_type or "under" in bet_type:
+        error_analysis["error_type"] = "totals_underestimate"
+        error_analysis["expected_value"] = expected_goals
+        error_analysis["actual_value"] = total_goals
+        diff = total_goals - expected_goals
+        if diff > 1.5:
+            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Underestimated by {diff:.1f}"
+            error_analysis["lesson"] = "xG was significantly underestimated. Teams were more attacking than expected."
+        else:
+            error_analysis["description"] = f"Expected {expected_goals:.1f} goals, got {total_goals}. Close miss."
+            error_analysis["lesson"] = "Slight underestimate. Match was more open than form suggested."
+
+    elif "outcomes_home" in bet_category or "п1" in bet_type:
+        error_analysis["error_type"] = "home_overestimate"
+        error_analysis["expected_value"] = confidence
+        if home_goals < away_goals:
+            error_analysis["actual_value"] = 0
+            error_analysis["description"] = f"Home team lost {home_goals}:{away_goals} despite {confidence}% confidence"
+            error_analysis["lesson"] = "Home advantage overestimated. Away team stronger than form indicated."
+        else:
+            error_analysis["actual_value"] = 50
+            error_analysis["description"] = f"Draw {home_goals}:{away_goals} instead of home win"
+            error_analysis["lesson"] = "Home team couldn't convert dominance. Consider double chance next time."
+
+    elif "outcomes_away" in bet_category or "п2" in bet_type:
+        error_analysis["error_type"] = "away_overestimate"
+        error_analysis["expected_value"] = confidence
+        if away_goals < home_goals:
+            error_analysis["actual_value"] = 0
+            error_analysis["description"] = f"Away team lost {home_goals}:{away_goals} despite {confidence}% confidence"
+            error_analysis["lesson"] = "Away form didn't translate. Home advantage was stronger."
+        else:
+            error_analysis["actual_value"] = 50
+            error_analysis["description"] = f"Draw {home_goals}:{away_goals} instead of away win"
+            error_analysis["lesson"] = "Away team couldn't win despite chances. Consider double chance."
+
+    elif "btts" in bet_category:
+        both_scored = home_goals > 0 and away_goals > 0
+        if not both_scored:
+            error_analysis["error_type"] = "btts_overestimate"
+            error_analysis["expected_value"] = confidence
+            error_analysis["actual_value"] = 0
+            if home_goals == 0 and away_goals == 0:
+                error_analysis["description"] = f"0:0 draw - neither team scored"
+                error_analysis["lesson"] = "Both teams more defensive than expected. Check recent clean sheets."
+            else:
+                error_analysis["description"] = f"Result {home_goals}:{away_goals} - one team failed to score"
+                error_analysis["lesson"] = "One team's attack failed. Check goal-scoring consistency, not just average."
+
+    return error_analysis
+
+
+def save_prediction_error(prediction_id: int, league_code: str, bet_category: str,
+                          error_analysis: dict, features: dict):
+    """Save error analysis to database for learning."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    features_json = json.dumps(features) if features else "{}"
+
+    c.execute("""INSERT INTO prediction_errors
+                 (prediction_id, league_code, bet_category, error_type,
+                  expected_value, actual_value, error_description, features_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+              (prediction_id, league_code, bet_category,
+               error_analysis.get("error_type"),
+               error_analysis.get("expected_value"),
+               error_analysis.get("actual_value"),
+               error_analysis.get("description", "") + " | " + error_analysis.get("lesson", ""),
+               features_json))
+
+    conn.commit()
+    conn.close()
+    logger.info(f"Saved error analysis for prediction {prediction_id}: {error_analysis.get('error_type')}")
+
+
+def update_league_learning(league_code: str, bet_category: str, is_correct: bool, error_type: str = None):
+    """Update league learning stats after each result."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get or create record
+    c.execute("""SELECT id, total_predictions, correct_predictions, lessons_json
+                 FROM league_learning WHERE league_code = ? AND bet_category = ?""",
+              (league_code, bet_category))
+    row = c.fetchone()
+
+    if row:
+        total = row[1] + 1
+        correct = row[2] + (1 if is_correct else 0)
+        lessons = json.loads(row[3]) if row[3] else {}
+
+        # Track error types
+        if not is_correct and error_type:
+            lessons[error_type] = lessons.get(error_type, 0) + 1
+
+        # Find most common error
+        common_error = max(lessons.keys(), key=lambda k: lessons[k]) if lessons else None
+
+        c.execute("""UPDATE league_learning
+                     SET total_predictions = ?, correct_predictions = ?,
+                         common_error_type = ?, lessons_json = ?, updated_at = datetime('now')
+                     WHERE id = ?""",
+                  (total, correct, common_error, json.dumps(lessons), row[0]))
+    else:
+        lessons = {error_type: 1} if error_type and not is_correct else {}
+        c.execute("""INSERT INTO league_learning
+                     (league_code, bet_category, total_predictions, correct_predictions,
+                      common_error_type, lessons_json)
+                     VALUES (?, ?, 1, ?, ?, ?)""",
+                  (league_code, bet_category, 1 if is_correct else 0,
+                   error_type if not is_correct else None, json.dumps(lessons)))
+
+    conn.commit()
+    conn.close()
+
+
+def get_learning_context(league_code: str, bet_category: str = None) -> str:
+    """Get learning context for Claude prompt - what we learned from past errors."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    context_parts = []
+
+    # Get league-specific learning
+    if bet_category:
+        c.execute("""SELECT total_predictions, correct_predictions, common_error_type, lessons_json
+                     FROM league_learning WHERE league_code = ? AND bet_category = ?""",
+                  (league_code, bet_category))
+    else:
+        c.execute("""SELECT bet_category, total_predictions, correct_predictions, common_error_type, lessons_json
+                     FROM league_learning WHERE league_code = ?""",
+                  (league_code,))
+
+    rows = c.fetchall()
+
+    if rows:
+        context_parts.append(f"📚 LEARNING FROM PAST ERRORS IN {league_code}:")
+
+        for row in rows:
+            if bet_category:
+                total, correct, common_error, lessons_json = row
+                cat = bet_category
+            else:
+                cat, total, correct, common_error, lessons_json = row
+
+            if total >= 5:  # Only show if enough data
+                accuracy = correct / total * 100 if total > 0 else 0
+                lessons = json.loads(lessons_json) if lessons_json else {}
+
+                context_parts.append(f"\n• {cat}: {accuracy:.0f}% accuracy ({correct}/{total})")
+
+                if accuracy < 50 and common_error:
+                    context_parts.append(f"  ⚠️ Common error: {common_error}")
+
+                    # Add specific lessons based on error type
+                    if "overestimate" in common_error:
+                        context_parts.append(f"  💡 Lesson: You tend to OVERESTIMATE in this category. Be more conservative.")
+                    elif "underestimate" in common_error:
+                        context_parts.append(f"  💡 Lesson: You tend to UNDERESTIMATE. Consider higher values.")
+
+    # Get recent errors for this league (last 10)
+    c.execute("""SELECT bet_category, error_type, error_description
+                 FROM prediction_errors
+                 WHERE league_code = ?
+                 ORDER BY created_at DESC LIMIT 10""",
+              (league_code,))
+    recent_errors = c.fetchall()
+
+    if recent_errors:
+        context_parts.append(f"\n📋 RECENT ERRORS IN {league_code}:")
+        error_summary = {}
+        for cat, err_type, desc in recent_errors:
+            key = f"{cat}:{err_type}"
+            if key not in error_summary:
+                error_summary[key] = {"count": 0, "desc": desc}
+            error_summary[key]["count"] += 1
+
+        for key, data in sorted(error_summary.items(), key=lambda x: -x[1]["count"])[:3]:
+            cat, err_type = key.split(":")
+            context_parts.append(f"  • {cat}: {err_type} (x{data['count']})")
+
+    conn.close()
+
+    return "\n".join(context_parts) if context_parts else ""
+
+
+def get_category_learning_context(bet_category: str) -> str:
+    """Get learning context for a specific bet category across all leagues."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Overall stats for this category
+    c.execute("""SELECT SUM(total_predictions), SUM(correct_predictions),
+                        GROUP_CONCAT(DISTINCT common_error_type)
+                 FROM league_learning WHERE bet_category = ?""",
+              (bet_category,))
+    row = c.fetchone()
+
+    context_parts = []
+
+    if row and row[0] and row[0] >= 10:
+        total, correct, common_errors = row
+        accuracy = correct / total * 100 if total > 0 else 0
+
+        context_parts.append(f"📊 YOUR {bet_category.upper()} PERFORMANCE:")
+        context_parts.append(f"• Overall accuracy: {accuracy:.0f}% ({correct}/{total})")
+
+        if accuracy < 50:
+            context_parts.append(f"• ⚠️ BELOW 50% - Be extra careful with this bet type!")
+            if common_errors:
+                context_parts.append(f"• Common errors: {common_errors}")
+        elif accuracy < 55:
+            context_parts.append(f"• ⚡ Close to random (50%). Need stronger signals.")
+        elif accuracy >= 60:
+            context_parts.append(f"• ✅ Good performance! Trust your analysis here.")
+
+    # Best and worst leagues for this category
+    c.execute("""SELECT league_code, total_predictions, correct_predictions
+                 FROM league_learning
+                 WHERE bet_category = ? AND total_predictions >= 5
+                 ORDER BY (correct_predictions * 1.0 / total_predictions) DESC""",
+              (bet_category,))
+    leagues = c.fetchall()
+
+    if len(leagues) >= 2:
+        best = leagues[0]
+        worst = leagues[-1]
+        best_acc = best[2] / best[1] * 100 if best[1] > 0 else 0
+        worst_acc = worst[2] / worst[1] * 100 if worst[1] > 0 else 0
+
+        if best_acc > worst_acc + 15:  # Significant difference
+            context_parts.append(f"\n• Best league: {best[0]} ({best_acc:.0f}%)")
+            context_parts.append(f"• Worst league: {worst[0]} ({worst_acc:.0f}%)")
+
+    conn.close()
+
+    return "\n".join(context_parts) if context_parts else ""
+
+
 # ===== SELF-LEARNING SYSTEM =====
 # System that improves predictions over time by learning from results
 
@@ -4175,13 +4500,16 @@ def get_pattern_adjustment(pattern_key: str) -> int:
 
 
 def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
-                      is_correct: bool, features: dict, bet_type: str):
+                      is_correct: bool, features: dict, bet_type: str,
+                      league_code: str = None, actual_result: str = None):
     """Main learning function - called after each verified result.
 
     Updates:
     1. Confidence calibration
     2. Pattern learning
-    3. Triggers model retraining if needed
+    3. Error analysis (NEW) - learns WHY predictions fail
+    4. League learning (NEW) - tracks accuracy per league/category
+    5. Triggers model retraining if needed
     """
     is_win = is_correct == True  # Handle 0, 1, 2 (push)
 
@@ -4217,7 +4545,26 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
                         {"pattern": pattern_key, "wins": wins, "losses": losses}
                     )
 
-    # 3. Check if model needs retraining
+    # 3. NEW: Error analysis - learn WHY predictions fail
+    error_type = None
+    if not is_win and actual_result and features:
+        prediction = {
+            "bet_type": bet_type,
+            "bet_category": bet_category,
+            "confidence": confidence
+        }
+        error_analysis = analyze_prediction_error(prediction, actual_result, features)
+        error_type = error_analysis.get("error_type")
+
+        if league_code and error_type != "unknown":
+            save_prediction_error(prediction_id, league_code, bet_category, error_analysis, features)
+            logger.info(f"📚 Error analyzed: {error_type} | {error_analysis.get('lesson', '')[:50]}")
+
+    # 4. NEW: Update league learning
+    if league_code and bet_category:
+        update_league_learning(league_code, bet_category, is_win, error_type)
+
+    # 5. Check if model needs retraining
     if bet_category and should_retrain_model(bet_category):
         logger.info(f"🔄 Triggering model retrain for {bet_category}")
         result = train_ml_model(bet_category)
@@ -5892,6 +6239,13 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     # Store features for future ML training (will be linked to prediction later)
     # Features are stored in match context for saving after Claude response
 
+    # ===== LEARNING FROM PAST ERRORS =====
+    # Get lessons from past prediction errors for this league
+    learning_context = get_learning_context(comp_code)
+    if learning_context:
+        analysis_data += f"\n{learning_context}\n\n"
+        analysis_data += "⚠️ ВАЖНО: Учти эти уроки при анализе! Не повторяй прошлые ошибки.\n\n"
+
     # User settings for filtering
     filter_info = ""
     if user_settings:
@@ -5997,6 +6351,9 @@ Bank allocation: 80%+=5%, 75-79%=4%, 70-74%=3%, 65-69%=2%, 60-64%=1%, <60%=skip"
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}]
         )
+        # Add league_code to features for learning system
+        if ml_features:
+            ml_features["league_code"] = comp_code
         return message.content[0].text, ml_features
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -9018,11 +9375,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if personal_advice:
             analysis = analysis + f"\n\n{personal_advice}"
 
+        # Extract league_code from features for learning system
+        league_code = ml_features.get("league_code") if ml_features else None
+
         # Save MAIN prediction (bet_rank=1) with ML features
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
-                        ml_features=ml_features, bet_rank=1)
+                        ml_features=ml_features, bet_rank=1, league_code=league_code)
         increment_daily_usage(user_id)
-        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}, features={'yes' if ml_features else 'no'}")
+        logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}, league={league_code}")
 
         # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4) with same ML features
         alternatives = parse_alternative_bets(analysis)
@@ -9041,7 +9401,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for alt_idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives[:3]):
             bet_rank = alt_idx + 2  # bet_rank 2, 3, 4
             save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
-                            ml_features=ml_features, bet_rank=bet_rank)
+                            ml_features=ml_features, bet_rank=bet_rank, league_code=league_code)
             logger.info(f"Saved ALT{alt_idx+1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
@@ -9458,9 +9818,10 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                         # Save prediction to BOT stats (user_id=0 for alerts - not personal stats)
                         # Live alerts are bot's recommendations, not user's personal requests
                         if match_id:
+                            league_code = ml_features.get("league_code") if ml_features else None
                             save_prediction(0, match_id, home, away, bet_type, confidence, odds_val,
-                                            ml_features=ml_features, bet_rank=1)
-                            logger.info(f"Live alert saved to BOT stats: {home} vs {away}, {bet_type}, features={'yes' if ml_features else 'no'}")
+                                            ml_features=ml_features, bet_rank=1, league_code=league_code)
+                            logger.info(f"Live alert saved to BOT stats: {home} vs {away}, {bet_type}, league={league_code}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
             else:
