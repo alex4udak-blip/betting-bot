@@ -7194,81 +7194,137 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
 
 
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
-    """Check results of past predictions"""
+    """Check results of past predictions - grouped by match for combined notifications"""
     logger.info("Checking prediction results...")
-    
+
     pending = get_pending_predictions()
-    
+
     if not pending:
         return
-    
+
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
-    for pred in pending[:20]:
-        match_id = pred.get("match_id")
-        
-        if not match_id:
-            continue
-        
+
+    # Group predictions by (user_id, match_id) for combined notifications
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    for pred in pending:
+        if pred.get("match_id") and pred.get("user_id", 0) > 0:  # Skip bot alerts (user_id=0)
+            key = (pred["user_id"], pred["match_id"])
+            grouped[key].append(pred)
+
+    # Also process bot alerts (user_id=0) separately - no notification needed
+    bot_alerts = [p for p in pending if p.get("user_id", 0) == 0 and p.get("match_id")]
+
+    # Track checked matches to avoid duplicate API calls
+    match_results = {}
+
+    # Process grouped user predictions (max 20 matches)
+    processed = 0
+    for (user_id, match_id), preds in list(grouped.items())[:20]:
         try:
-            url = f"{FOOTBALL_API_URL}/matches/{match_id}"
-            r = requests.get(url, headers=headers, timeout=10)
-            
-            if r.status_code == 200:
-                match = r.json()
-                if match.get("status") == "FINISHED":
-                    score = match.get("score", {}).get("fullTime", {})
-                    home_score = score.get("home", 0) or 0
-                    away_score = score.get("away", 0) or 0
-                    
-                    is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
-                    result = f"{home_score}-{away_score}"
-                    
-                    # Handle three outcomes: win (1), lose (0), push/void (2)
-                    if is_correct is True:
-                        db_value = 1
-                        emoji = "✅"
-                        status_key = "pred_correct"
-                    elif is_correct is False:
-                        db_value = 0
-                        emoji = "❌"
-                        status_key = "pred_incorrect"
-                    else:  # is_correct is None = push/void
-                        db_value = 2
-                        emoji = "🔄"
-                        status_key = "pred_push"
+            # Get match result (use cache if already fetched)
+            if match_id not in match_results:
+                url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+                r = requests.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    match_results[match_id] = r.json()
+                await asyncio.sleep(0.3)
 
-                    update_prediction_result(pred["id"], result, db_value)
-                    logger.info(f"Updated prediction {pred['id']}: {result} -> {emoji}")
+            match = match_results.get(match_id)
+            if not match or match.get("status") != "FINISHED":
+                continue
 
-                    # Notify user in their language
-                    try:
-                        user_data = get_user(pred["user_id"])
-                        lang = user_data.get("language", "ru") if user_data else "ru"
+            score = match.get("score", {}).get("fullTime", {})
+            home_score = score.get("home", 0) or 0
+            away_score = score.get("away", 0) or 0
+            result = f"{home_score}-{away_score}"
 
-                        # Show bet rank (MAIN vs ALT) - localized
-                        bet_rank = pred.get("bet_rank", 1)
-                        if bet_rank == 1:
-                            rank_label = get_text("bet_main", lang)
-                        else:
-                            rank_label = get_text("bet_alt", lang)
+            # Sort predictions: main first (rank=1), then alternatives
+            preds.sort(key=lambda x: x.get("bet_rank", 1))
 
-                        await context.bot.send_message(
-                            chat_id=pred["user_id"],
-                            text=f"{get_text('pred_result_title', lang)}\n\n"
-                                 f"⚽ {pred['home']} vs {pred['away']}\n"
-                                 f"🎯 {rank_label}: {pred['bet_type']}\n"
-                                 f"📈 {result}\n"
-                                 f"{emoji} {get_text(status_key, lang)}",
-                            parse_mode="Markdown"
-                        )
-                    except:
-                        pass
-            
-            await asyncio.sleep(0.5)
-            
+            # Update all predictions and build combined message
+            user_data = get_user(user_id)
+            lang = user_data.get("language", "ru") if user_data else "ru"
+
+            main_line = ""
+            alt_lines = []
+
+            for pred in preds:
+                is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
+
+                if is_correct is True:
+                    db_value = 1
+                    emoji = "✅"
+                elif is_correct is False:
+                    db_value = 0
+                    emoji = "❌"
+                else:
+                    db_value = 2
+                    emoji = "🔄"
+
+                update_prediction_result(pred["id"], result, db_value)
+                logger.info(f"Updated prediction {pred['id']}: {result} -> {emoji}")
+
+                bet_rank = pred.get("bet_rank", 1)
+                if bet_rank == 1:
+                    main_line = f"⚡ {get_text('bet_main', lang)}: {pred['bet_type']} {emoji}"
+                else:
+                    alt_lines.append(f"📌 {get_text('bet_alt', lang)}: {pred['bet_type']} {emoji}")
+
+            # Send ONE combined notification
+            try:
+                msg = f"{get_text('pred_result_title', lang)}\n\n"
+                msg += f"⚽ **{preds[0]['home']}** vs **{preds[0]['away']}**\n"
+                msg += f"📈 {result}\n\n"
+
+                if main_line:
+                    msg += f"{main_line}\n"
+                if alt_lines:
+                    msg += "\n".join(alt_lines)
+
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=msg,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user {user_id}: {e}")
+
+            processed += 1
+
         except Exception as e:
-            logger.error(f"Error checking {pred['id']}: {e}")
+            logger.error(f"Error checking match {match_id}: {e}")
+
+    # Process bot alerts (user_id=0) - update DB only, no notification
+    for pred in bot_alerts[:20]:
+        match_id = pred.get("match_id")
+        try:
+            if match_id not in match_results:
+                url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+                r = requests.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    match_results[match_id] = r.json()
+                await asyncio.sleep(0.3)
+
+            match = match_results.get(match_id)
+            if not match or match.get("status") != "FINISHED":
+                continue
+
+            score = match.get("score", {}).get("fullTime", {})
+            home_score = score.get("home", 0) or 0
+            away_score = score.get("away", 0) or 0
+            result = f"{home_score}-{away_score}"
+
+            is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
+            db_value = 1 if is_correct is True else (0 if is_correct is False else 2)
+
+            update_prediction_result(pred["id"], result, db_value)
+            logger.info(f"Updated BOT alert {pred['id']}: {result} -> {'✅' if db_value == 1 else '❌' if db_value == 0 else '🔄'}")
+
+        except Exception as e:
+            logger.error(f"Error checking bot alert {pred['id']}: {e}")
+
+    logger.info(f"Results check complete: {processed} user matches, {len(bot_alerts)} bot alerts")
 
 
 async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
