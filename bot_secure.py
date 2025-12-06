@@ -2844,6 +2844,68 @@ def get_all_ml_predictions(features: dict) -> dict:
     return predictions
 
 
+def apply_ml_correction(bet_type: str, claude_confidence: int, ml_features: dict) -> tuple:
+    """Apply ML correction to Claude's confidence.
+
+    Returns: (adjusted_confidence, ml_status, ml_confidence)
+    - ml_status: 'confirmed' | 'warning' | 'no_model' | None
+    - ml_confidence: ML model's confidence or None
+    """
+    if not ML_AVAILABLE or not ml_features:
+        return claude_confidence, None, None
+
+    # Map bet_type to ML category
+    bet_type_lower = bet_type.lower()
+    ml_category = None
+
+    if "п1" in bet_type_lower or bet_type_lower == "1x" or "победа хозя" in bet_type_lower:
+        ml_category = "outcomes_home"
+    elif "п2" in bet_type_lower or bet_type_lower == "x2" or "победа гост" in bet_type_lower:
+        ml_category = "outcomes_away"
+    elif bet_type_lower == "х" or "ничья" in bet_type_lower:
+        ml_category = "outcomes_draw"
+    elif "тб" in bet_type_lower or "over" in bet_type_lower:
+        ml_category = "totals_over"
+    elif "тм" in bet_type_lower or "under" in bet_type_lower:
+        ml_category = "totals_under"
+    elif "btts" in bet_type_lower or "обе забьют" in bet_type_lower:
+        ml_category = "btts"
+
+    if not ml_category:
+        return claude_confidence, None, None
+
+    # Get ML prediction
+    ml_pred = ml_predict(ml_features, ml_category)
+
+    if not ml_pred:
+        return claude_confidence, "no_model", None
+
+    ml_confidence = ml_pred["confidence"]
+
+    # Calculate adjustment (half of the difference)
+    diff = ml_confidence - claude_confidence
+    adjustment = diff * 0.5
+
+    # Apply adjustment (max ±15%)
+    adjustment = max(-15, min(15, adjustment))
+    adjusted_confidence = int(claude_confidence + adjustment)
+
+    # Ensure bounds
+    adjusted_confidence = max(30, min(95, adjusted_confidence))
+
+    # Determine status
+    if abs(diff) <= 10:
+        ml_status = "confirmed"  # ML agrees
+    elif diff < -15:
+        ml_status = "warning"  # ML disagrees strongly
+    else:
+        ml_status = "adjusted"  # ML adjusted up
+
+    logger.info(f"ML correction: {bet_type} | Claude {claude_confidence}% + ML {ml_confidence:.0f}% → {adjusted_confidence}% ({ml_status})")
+
+    return adjusted_confidence, ml_status, ml_confidence
+
+
 def check_and_train_models():
     """Check if we have enough data and train models"""
     conn = sqlite3.connect(DB_PATH)
@@ -6763,6 +6825,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # Add warning to analysis
                     analysis = analysis + f"\n\n{totals_warning}"
 
+        # Apply ML correction to confidence
+        original_confidence = confidence
+        ml_status = None
+        ml_conf = None
+
+        if ml_features:
+            confidence, ml_status, ml_conf = apply_ml_correction(bet_type, confidence, ml_features)
+
+            # Add ML status to analysis
+            if ml_status == "confirmed":
+                analysis = analysis + f"\n\n🤖 **ML:** Подтверждено ({ml_conf:.0f}%)"
+            elif ml_status == "warning":
+                analysis = analysis + f"\n\n⚠️ **ML:** Риск! Модель даёт только {ml_conf:.0f}%"
+            elif ml_status == "adjusted":
+                analysis = analysis + f"\n\n📊 **ML:** Скорректировано {original_confidence}% → {confidence}%"
+            # no_model - не показываем ничего
+
         # Add Kelly Criterion recommendation
         if confidence > 0 and odds_value > 1:
             kelly_stake = calculate_kelly(confidence / 100, odds_value)
@@ -7152,10 +7231,21 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                 confidence = alert_data.get("confidence", 70)
                 odds_val = alert_data.get("odds", 1.5)
 
+                # Apply ML correction
+                original_conf = confidence
+                ml_status = None
+                if ml_features:
+                    confidence, ml_status, ml_conf = apply_ml_correction(bet_type, confidence, ml_features)
+
+                    # If ML strongly disagrees, skip this alert
+                    if ml_status == "warning" and ml_conf and ml_conf < 50:
+                        logger.info(f"⚠️ Alert skipped due to ML warning: {home} vs {away}, ML only {ml_conf:.0f}%")
+                        continue
+
                 # Mark this match as alerted to prevent duplicates
                 if match_id:
                     sent_alerts[match_id] = datetime.now()
-                    logger.info(f"✅ Alert triggered for match {match_id}: {home} vs {away}, {bet_type} ({confidence}%), ml_features={'yes' if ml_features else 'no'}")
+                    logger.info(f"✅ Alert triggered for match {match_id}: {home} vs {away}, {bet_type} ({confidence}%), ml_status={ml_status}")
 
                 # Send to each subscriber in their language
                 for user_id in live_subscribers:
@@ -7167,6 +7257,13 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                         reason_key = f"reason_{lang}"
                         reason = alert_data.get(reason_key, alert_data.get("reason_en", "Good value bet"))
 
+                        # ML status indicator
+                        ml_indicator = ""
+                        if ml_status == "confirmed":
+                            ml_indicator = "\n🤖 ML: ✅ Подтверждено"
+                        elif ml_status == "adjusted":
+                            ml_indicator = f"\n📊 ML: {original_conf}% → {confidence}%"
+
                         # Build localized alert message
                         alert_msg = f"""{get_text("live_alert_title", lang)}
 
@@ -7175,7 +7272,7 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
 ⏰ {get_text("in_hours", lang).format(hours="1-3")}
 
 {get_text("bet", lang)} {bet_type}
-{get_text("confidence", lang)} {confidence}%
+{get_text("confidence", lang)} {confidence}%{ml_indicator}
 {get_text("odds", lang)} ~{odds_val}
 {get_text("reason", lang)} {reason}"""
 
