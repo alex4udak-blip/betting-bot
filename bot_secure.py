@@ -1936,7 +1936,7 @@ def parse_alternative_bets(analysis: str) -> list:
     """
     alternatives = []
 
-    # Look for [ALT1], [ALT2], [ALT3] format
+    # Method 1: Look for [ALT1], [ALT2], [ALT3] format
     for i in range(1, 4):
         alt_match = re.search(rf'\[ALT{i}\]\s*(.+?)(?=\[ALT|\n⚠️|\n✅|$)', analysis, re.IGNORECASE | re.DOTALL)
         if alt_match:
@@ -1946,13 +1946,65 @@ def parse_alternative_bets(analysis: str) -> list:
                 alternatives.append((bet_type, confidence, odds))
                 logger.info(f"Parsed ALT{i}: {bet_type} @ {odds} ({confidence}%)")
 
-    # Fallback: try numbered list format (1. 2. 3.)
+    # Method 2: Look for "ДОПОЛНИТЕЛЬНЫЕ" section with better regex
     if not alternatives:
-        for line in analysis.split('\n'):
-            if re.match(r'^\s*[123]\.\s', line):
+        # Try multiple section header variations
+        section_patterns = [
+            r'📈\s*\**ДОПОЛНИТЕЛЬНЫЕ[^:]*:\**\s*\n(.*?)(?=\n⚠️|\n✅|\nРИСКИ|\nВЕРДИКТ|$)',
+            r'ДОПОЛНИТЕЛЬНЫЕ[^:]*:\s*\n(.*?)(?=\n⚠️|\n✅|\nРИСКИ|\nВЕРДИКТ|$)',
+            r'ДОПОЛНИТЕЛЬНЫЕ.*?\n((?:.*?\n)*?)(?=⚠️|✅|РИСКИ|ВЕРДИКТ|$)',
+        ]
+
+        dop_section = None
+        for pattern in section_patterns:
+            dop_match = re.search(pattern, analysis, re.IGNORECASE | re.DOTALL)
+            if dop_match:
+                dop_section = dop_match.group(1) if dop_match.lastindex else dop_match.group(0)
+                break
+
+        if dop_section:
+            # Parse each line in alternatives section
+            for line in dop_section.split('\n'):
+                line = line.strip()
+                # Skip empty lines and header lines
+                if not line or 'ДОПОЛНИТЕЛЬНЫЕ' in line.upper() or line.startswith('📈'):
+                    continue
+                # Skip lines that are just markers
+                if line in ['[ALT1]', '[ALT2]', '[ALT3]', '-', '•', '*']:
+                    continue
                 bet_type, confidence, odds = parse_bet_from_text(line)
-                if bet_type:
+                if bet_type and len(alternatives) < 3:
                     alternatives.append((bet_type, confidence, odds))
+                    logger.info(f"Parsed ALT from section: {bet_type} @ {odds} ({confidence}%)")
+
+    # Method 3: Fallback - bullet/numbered list after ДОПОЛНИТЕЛЬНЫЕ
+    if not alternatives:
+        lines = analysis.split('\n')
+        in_alt_section = False
+        for line in lines:
+            line_stripped = line.strip()
+            # Start of alternatives section
+            if 'ДОПОЛНИТЕЛЬНЫЕ' in line_stripped.upper():
+                in_alt_section = True
+                continue
+            # End of section
+            if in_alt_section and ('РИСКИ' in line_stripped.upper() or '⚠️' in line_stripped or '✅' in line_stripped):
+                break
+            # Parse lines in section
+            if in_alt_section and line_stripped:
+                # Match numbered (1. 2. 3.), bullet (• - *) or [ALT] formats
+                if re.match(r'^[\d•\-\*\[\]]+\.?\s*', line_stripped) or '@' in line_stripped:
+                    bet_type, confidence, odds = parse_bet_from_text(line_stripped)
+                    if bet_type and len(alternatives) < 3:
+                        # Avoid duplicating already found alternatives
+                        if not any(alt[0] == bet_type for alt in alternatives):
+                            alternatives.append((bet_type, confidence, odds))
+                            logger.info(f"Parsed ALT (method 3): {bet_type} @ {odds} ({confidence}%)")
+
+    if alternatives:
+        logger.info(f"✅ Total alternatives found: {len(alternatives)}")
+    else:
+        logger.warning("⚠️ No alternatives found in analysis")
 
     return alternatives[:3]  # Max 3 alternatives
 
@@ -4640,12 +4692,20 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, page: in
 
     main_display = ""
     alt_display = ""
+
+    # Show main stats if there are any results
     if main_s.get("decided", 0) > 0:
         main_emoji = "🎯" if main_s["rate"] >= 50 else "📊"
         main_display = f"{main_emoji} Основные: {main_s['correct']}/{main_s['decided']} ({main_s['rate']:.1f}%)"
+
+    # Show alternatives: either with results or pending count
     if alt_s.get("decided", 0) > 0:
         alt_emoji = "📈" if alt_s["rate"] >= 50 else "📉"
         alt_display = f"{alt_emoji} Альтернативы: {alt_s['correct']}/{alt_s['decided']} ({alt_s['rate']:.1f}%)"
+    elif alt_s.get("total", 0) > 0:
+        # Show pending alternatives count if no results yet
+        pending_alts = alt_s["total"] - alt_s.get("decided", 0)
+        alt_display = f"📈 Альтернативы: ⏳ {pending_alts} ожидают"
 
     stats_by_rank = ""
     if main_display or alt_display:
