@@ -8442,11 +8442,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Parse and save ALTERNATIVE predictions (bet_rank=2,3,4) with same ML features
         alternatives = parse_alternative_bets(analysis)
-        for idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives, start=2):
-            if alt_type and alt_type != bet_type:  # Don't duplicate main bet
-                save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
-                                ml_features=ml_features, bet_rank=idx)
-                logger.info(f"Saved ALT{idx-1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
+        original_alt_count = len(alternatives)
+
+        # Filter out any alternatives that match the main bet type
+        alternatives = [(t, c, o) for t, c, o in alternatives if t and t != bet_type]
+
+        if len(alternatives) < original_alt_count:
+            logger.warning(f"Filtered out {original_alt_count - len(alternatives)} alt(s) that matched main bet {bet_type}")
+
+        if len(alternatives) < 3:
+            logger.warning(f"Only {len(alternatives)}/3 unique alternatives for {home} vs {away}")
+
+        # Save each alternative with correct sequential bet_rank
+        for alt_idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives[:3]):
+            bet_rank = alt_idx + 2  # bet_rank 2, 3, 4
+            save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
+                            ml_features=ml_features, bet_rank=bet_rank)
+            logger.info(f"Saved ALT{alt_idx+1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
         logger.error(f"Error saving prediction: {e}")
