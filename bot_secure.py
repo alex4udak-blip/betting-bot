@@ -174,7 +174,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум доступ:**\n• R$200+ → 7 дней\n• R$500+ → 30 дней\n• R$1000+ → Навсегда\n\n👇 Сделай депозит по ссылке:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум доступ:**\n• $10+ (~900₽/R$50) → +5 прогнозов\n• $40+ (~3,600₽/R$200) → 7 дней\n• $100+ (~9,000₽/R$500) → 30 дней\n• $200+ (~18,000₽/R$1000) → Навсегда\n\n👇 Сделай депозит по ссылке:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -311,7 +311,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium access:**\n• R$200+ → 7 days\n• R$500+ → 30 days\n• R$1000+ → Lifetime\n\n👇 Make a deposit via link:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium access:**\n• $10+ (~₦15,000/R$50) → +5 predictions\n• $40+ (~₦60,000/R$200) → 7 days\n• $100+ (~₦150,000/R$500) → 30 days\n• $200+ (~₦300,000/R$1000) → Lifetime\n\n👇 Make a deposit via link:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -448,7 +448,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso premium:**\n• R$200+ → 7 dias\n• R$500+ → 30 dias\n• R$1000+ → Vitalício\n\n👇 Faça um depósito pelo link:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso premium:**\n• $10+ (~R$50) → +5 previsões\n• $40+ (~R$200) → 7 dias\n• $100+ (~R$500) → 30 dias\n• $200+ (~R$1000) → Vitalício\n\n👇 Faça um depósito pelo link:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -585,7 +585,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **Acceso premium:**\n• R$200+ → 7 días\n• R$500+ → 30 días\n• R$1000+ → De por vida\n\n👇 Haz un depósito por el enlace:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **Acceso premium:**\n• $10+ (~R$50) → +5 pronósticos\n• $40+ (~R$200) → 7 días\n• $100+ (~R$500) → 30 días\n• $200+ (~R$1000) → De por vida\n\n👇 Haz un depósito por el enlace:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -1277,25 +1277,80 @@ def get_favorite_leagues(user_id):
 
 # ===== 1WIN POSTBACK & PREMIUM SYSTEM =====
 
-# Deposit thresholds for premium (in BRL)
-PREMIUM_TIERS = {
-    200: 7,      # R$200+ = 7 days
-    500: 30,     # R$500+ = 30 days
-    1000: 36500  # R$1000+ = Lifetime (100 years)
+# Deposit thresholds for premium (in USD as base)
+# Will be converted from local currencies
+PREMIUM_TIERS_USD = {
+    10: "bonus_5",   # $10+ = +5 bonus predictions
+    40: 7,           # $40+ = 7 days premium
+    100: 30,         # $100+ = 30 days premium
+    200: 36500       # $200+ = Lifetime (100 years)
 }
 
-def calculate_premium_days(amount: float, currency: str = "BRL") -> int:
-    """Calculate premium days based on deposit amount."""
-    # Convert to BRL if needed (rough estimates)
-    if currency == "USD":
-        amount = amount * 5
-    elif currency == "EUR":
-        amount = amount * 5.5
+# Currency conversion rates to USD
+CURRENCY_TO_USD = {
+    "USD": 1.0,
+    "BRL": 0.20,      # 1 BRL = ~$0.20
+    "EUR": 1.10,      # 1 EUR = ~$1.10
+    "RUB": 0.011,     # 1 RUB = ~$0.011
+    "NGN": 0.00065,   # 1 NGN = ~$0.00065
+    "INR": 0.012,     # 1 INR = ~$0.012
+    "KZT": 0.0022,    # 1 KZT = ~$0.0022
+    "UAH": 0.027,     # 1 UAH = ~$0.027
+    "TRY": 0.031,     # 1 TRY = ~$0.031
+    "GBP": 1.27,      # 1 GBP = ~$1.27
+    "PLN": 0.25,      # 1 PLN = ~$0.25
+}
 
-    for threshold, days in sorted(PREMIUM_TIERS.items(), reverse=True):
-        if amount >= threshold:
-            return days
-    return 0
+# For backwards compatibility
+PREMIUM_TIERS = {
+    200: 7,      # R$200+ = 7 days (legacy BRL)
+    500: 30,     # R$500+ = 30 days
+    1000: 36500  # R$1000+ = Lifetime
+}
+
+def convert_to_usd(amount: float, currency: str) -> float:
+    """Convert amount from local currency to USD."""
+    currency = currency.upper()
+    rate = CURRENCY_TO_USD.get(currency, 0.20)  # Default to BRL rate if unknown
+    return amount * rate
+
+
+def calculate_premium_reward(amount: float, currency: str = "BRL") -> dict:
+    """Calculate premium reward based on deposit amount.
+
+    Returns dict with:
+    - type: 'premium' or 'bonus_predictions' or 'none'
+    - days: premium days (if premium)
+    - predictions: bonus predictions (if bonus)
+    - amount_usd: converted amount
+    """
+    amount_usd = convert_to_usd(amount, currency)
+
+    # Check tiers from highest to lowest
+    for threshold, reward in sorted(PREMIUM_TIERS_USD.items(), reverse=True):
+        if amount_usd >= threshold:
+            if reward == "bonus_5":
+                return {
+                    "type": "bonus_predictions",
+                    "predictions": 5,
+                    "days": 0,
+                    "amount_usd": amount_usd
+                }
+            else:
+                return {
+                    "type": "premium",
+                    "days": reward,
+                    "predictions": 0,
+                    "amount_usd": amount_usd
+                }
+
+    return {"type": "none", "days": 0, "predictions": 0, "amount_usd": amount_usd}
+
+
+def calculate_premium_days(amount: float, currency: str = "BRL") -> int:
+    """Calculate premium days based on deposit amount (legacy function)."""
+    reward = calculate_premium_reward(amount, currency)
+    return reward.get("days", 0)
 
 
 def grant_premium(user_id: int, days: int) -> bool:
@@ -1332,6 +1387,39 @@ def grant_premium(user_id: int, days: int) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error granting premium: {e}")
+        return False
+
+
+def grant_bonus_predictions(user_id: int, count: int = 5) -> bool:
+    """Grant bonus predictions to user (adds to daily limit).
+
+    Stored as negative daily_requests (e.g., -5 means 5 extra requests available).
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get current daily_requests
+        c.execute("SELECT daily_requests FROM users WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+
+        if row:
+            current = row[0] or 0
+            # Subtract count (negative means bonus available)
+            new_count = current - count
+            c.execute("UPDATE users SET daily_requests = ? WHERE user_id = ?", (new_count, user_id))
+        else:
+            # Create user with bonus
+            c.execute("""INSERT INTO users (user_id, daily_requests)
+                         VALUES (?, ?)""", (user_id, -count))
+
+        conn.commit()
+        conn.close()
+
+        logger.info(f"Granted {count} bonus predictions to user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error granting bonus predictions: {e}")
         return False
 
 
@@ -1681,12 +1769,15 @@ def process_1win_postback(data: dict) -> dict:
             conn.close()
             return {"status": "duplicate", "reason": "transaction already processed"}
 
-        # Calculate premium days
-        premium_days = calculate_premium_days(amount, currency)
+        # Calculate reward (premium days OR bonus predictions)
+        reward = calculate_premium_reward(amount, currency)
 
-        if premium_days == 0:
+        if reward["type"] == "none":
             conn.close()
-            return {"status": "ignored", "reason": f"deposit {amount} {currency} below minimum threshold"}
+            return {"status": "ignored", "reason": f"deposit {amount} {currency} (${reward['amount_usd']:.2f}) below minimum $10"}
+
+        premium_days = reward.get("days", 0)
+        bonus_predictions = reward.get("predictions", 0)
 
         # Save deposit record
         c.execute("""INSERT INTO deposits_1win
@@ -1696,8 +1787,13 @@ def process_1win_postback(data: dict) -> dict:
         conn.commit()
         conn.close()
 
-        # Grant premium
-        grant_premium(telegram_user_id, premium_days)
+        # Grant reward based on type
+        if reward["type"] == "premium":
+            grant_premium(telegram_user_id, premium_days)
+            logger.info(f"Granted {premium_days} days premium to user {telegram_user_id} for ${reward['amount_usd']:.2f} deposit")
+        elif reward["type"] == "bonus_predictions":
+            grant_bonus_predictions(telegram_user_id, bonus_predictions)
+            logger.info(f"Granted {bonus_predictions} bonus predictions to user {telegram_user_id} for ${reward['amount_usd']:.2f} deposit")
 
         # Grant referral bonus if user was referred
         referrer_id = grant_referral_bonus(telegram_user_id)
@@ -1708,7 +1804,10 @@ def process_1win_postback(data: dict) -> dict:
             "status": "success",
             "user_id": telegram_user_id,
             "amount": amount,
+            "amount_usd": reward["amount_usd"],
+            "reward_type": reward["type"],
             "premium_days": premium_days,
+            "bonus_predictions": bonus_predictions,
             "referrer_bonus": referrer_id
         }
 
@@ -5890,9 +5989,10 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {get_text("premium_option1_title", lang)}
 {get_text("premium_option1_desc", lang)}
 
-• R$200+ (~$40) → 7 days
-• R$500+ (~$100) → 30 days
-• R$1000+ (~$200) → Lifetime
+• $10+ (~R$50/900₽/₦15K) → +5 predictions
+• $40+ (~R$200/3,600₽/₦60K) → 7 days
+• $100+ (~R$500/9,000₽/₦150K) → 30 days
+• $200+ (~R$1000/18,000₽/₦300K) → Lifetime
 
 ━━━━━━━━━━━━━━━━━━━━
 
