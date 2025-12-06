@@ -6629,7 +6629,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("📈 Источники", callback_data="admin_sources")],
         [InlineKeyboardButton("🤖 ML статистика", callback_data="admin_ml_stats"),
          InlineKeyboardButton("🧠 Обучение", callback_data="admin_learning")],
-        [InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
+        [InlineKeyboardButton("🔔 Live-алерты", callback_data="admin_live_status"),
+         InlineKeyboardButton("🧹 Очистить дубликаты", callback_data="admin_clean_dups")],
         [InlineKeyboardButton("🔙 В меню", callback_data="cmd_start")]
     ]
 
@@ -7648,6 +7649,78 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Admin ML stats error: {e}")
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+
+    elif data == "admin_live_status":
+        if not is_admin(user_id):
+            await query.edit_message_text("⛔ Только для администраторов")
+            return
+
+        try:
+            # Get live alert diagnostics
+            text = "🔔 **LIVE ALERTS ДИАГНОСТИКА**\n\n"
+
+            # Subscribers count
+            text += f"👥 **Подписчики:** {len(live_subscribers)}\n"
+            if live_subscribers:
+                text += f"   IDs: {', '.join(str(x) for x in list(live_subscribers)[:5])}"
+                if len(live_subscribers) > 5:
+                    text += f"... (+{len(live_subscribers)-5})"
+                text += "\n\n"
+            else:
+                text += "   ⚠️ Нет подписчиков на live алерты!\n\n"
+
+            # Recent sent alerts
+            text += f"📤 **Отправленные алерты:** {len(sent_alerts)}\n"
+            if sent_alerts:
+                for match_id, sent_time in list(sent_alerts.items())[:5]:
+                    time_ago = (datetime.now() - sent_time).total_seconds() / 60
+                    text += f"   • Match {match_id}: {time_ago:.0f} мин назад\n"
+            else:
+                text += "   ⚠️ Нет алертов за последние 4 часа\n"
+            text += "\n"
+
+            # Check current matches in window
+            matches = await get_matches(days=1)
+            now = datetime.utcnow()
+            upcoming_count = 0
+            upcoming_matches = []
+
+            if matches:
+                for m in matches:
+                    try:
+                        match_time = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00")).replace(tzinfo=None)
+                        hours_until = (match_time - now).total_seconds() / 3600
+                        if 0.5 < hours_until < 3:
+                            upcoming_count += 1
+                            home = m.get("homeTeam", {}).get("name", "?")[:15]
+                            away = m.get("awayTeam", {}).get("name", "?")[:15]
+                            upcoming_matches.append(f"{home} vs {away} ({hours_until:.1f}h)")
+                    except:
+                        continue
+
+            text += f"⏰ **Матчи в окне 0.5-3ч:** {upcoming_count}\n"
+            if upcoming_matches:
+                for m in upcoming_matches[:5]:
+                    text += f"   • {m}\n"
+            else:
+                text += "   ⚠️ Нет матчей в окне для алертов\n"
+            text += "\n"
+
+            # Alert requirements reminder
+            text += "📋 **Требования для алерта:**\n"
+            text += "   • Confidence ≥ 70%\n"
+            text += "   • Odds ≥ 1.60\n"
+            text += "   • ML не блокирует (conf ≥ 50%)\n"
+            text += "   • Матч не был уже оповещён\n\n"
+
+            # Job status check
+            text += "⚙️ **Интервал проверки:** каждые 10 мин\n"
+
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Admin live status error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
 
     elif data == "admin_clean_dups":
