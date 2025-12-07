@@ -3061,6 +3061,11 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     - Main bet (rank=1): Only ONE main bet per match allowed (regardless of bet_type)
     - Alternative (rank>1): Max 3 per match, one per bet_type
     """
+    # Safety check: ensure confidence is not None
+    if confidence is None:
+        logger.warning(f"Confidence is None for {home} vs {away}, defaulting to 65")
+        confidence = 65
+
     category = categorize_bet(bet_type)
 
     conn = sqlite3.connect(DB_PATH)
@@ -11750,7 +11755,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 Ещё рекомендации", callback_data="cmd_recommend")]
     ]
 
-    await status.edit_text(header + analysis, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    # Try Markdown first, fallback to plain text if parsing fails
+    try:
+        await status.edit_text(header + analysis, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Markdown error in analysis, using plain text: {e}")
+        # Remove ** for plain text
+        plain_header = f"⚽ {home} vs {away}\n🏆 {comp}\n{'─'*30}\n\n"
+        plain_analysis = analysis.replace("**", "")
+        try:
+            await status.edit_text(plain_header + plain_analysis, reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e2:
+            logger.error(f"Plain text also failed: {e2}")
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
