@@ -5780,6 +5780,10 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10, upcoming_match_d
                 data = await r.json()
                 matches = data.get("matches", [])
 
+                # CRITICAL: Sort matches by date DESCENDING to get most recent first
+                # API doesn't guarantee order, so we must sort explicitly
+                matches.sort(key=lambda x: x.get("utcDate", ""), reverse=True)
+
                 # Overall stats
                 overall = {"w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "form": []}
                 # Home stats
@@ -5809,10 +5813,11 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10, upcoming_match_d
                                     else:
                                         upcoming_with_tz = upcoming_match_date
                                     rest_days = (upcoming_with_tz - last_match_date).days
+                                    logger.info(f"🔄 Team {team_id}: last match {last_match_date.date()}, upcoming {upcoming_with_tz.date()}, rest_days={rest_days}")
                                 else:
                                     # Fallback to now if upcoming date not provided
                                     rest_days = (datetime.now(last_match_date.tzinfo) - last_match_date).days
-                                logger.debug(f"Team {team_id}: last match {last_match_date.date()}, upcoming {upcoming_match_date.date() if upcoming_match_date else 'N/A'}, rest_days={rest_days}")
+                                    logger.warning(f"⚠️ Team {team_id}: no upcoming date provided, using now. last match {last_match_date.date()}, rest_days={rest_days}")
                             except Exception as e:
                                 logger.warning(f"Rest days calculation error: {e}")
                     home_id = m.get("homeTeam", {}).get("id")
@@ -7889,6 +7894,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     referee_context = format_referee_context(referee_stats, lang)
     if referee_context:
         analysis_data += referee_context
+    else:
+        analysis_data += "\n👨‍⚖️ СУДЬЯ: Назначение ещё не объявлено (обычно за 24-48ч до матча)\n"
 
     # 📅 FIXTURE CONGESTION - calendar load analysis
     congestion = get_congestion_analysis(home_form, away_form)
@@ -8003,6 +8010,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
             sharp_moves = [m for m in movements.values() if m.get("sharp")]
             if sharp_moves:
                 analysis_data += "  ⚡ SHARP MONEY DETECTED - линия упала значительно!\n"
+        else:
+            # Show stable lines message when no significant movement
+            analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ: Стабильно (нет значительных изменений)\n"
 
         # Value bets (our odds vs average)
         value_bets = odds.get("_value_bets", {})
