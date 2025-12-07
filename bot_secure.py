@@ -8927,7 +8927,12 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
         ]
         increment_daily_usage(user_id)
-        await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        try:
+            await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Markdown error in recommend: {e}")
+            # Fallback to plain text
+            await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         await status.edit_text(get_text("analysis_error", lang))
 
@@ -9673,11 +9678,20 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "• 🚫 Пропускать матчи без явного преимущества\n"
 
     # Split message if too long
-    if len(text) > 4000:
-        await update.message.reply_text(text[:4000], parse_mode="Markdown")
-        await update.message.reply_text(text[4000:], parse_mode="Markdown")
-    else:
-        await update.message.reply_text(text, parse_mode="Markdown")
+    try:
+        if len(text) > 4000:
+            await update.message.reply_text(text[:4000], parse_mode="Markdown")
+            await update.message.reply_text(text[4000:], parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Markdown error in accuracy: {e}")
+        # Fallback to plain text
+        if len(text) > 4000:
+            await update.message.reply_text(text[:4000])
+            await update.message.reply_text(text[4000:])
+        else:
+            await update.message.reply_text(text)
 
 
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -11865,13 +11879,13 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     unique_matches = len(by_match)
 
-    status_msg = f"""📊 **Найдено {len(pending)} pending predictions:**
+    status_msg = f"""📊 Найдено {len(pending)} pending predictions:
 ├ Уникальных матчей: {unique_matches}
 └ Без match_id: {without_match_id} (невозможно проверить)
 
 🔄 Проверяю (по {unique_matches} матчам)..."""
 
-    await update.message.reply_text(status_msg, parse_mode="Markdown")
+    await update.message.reply_text(status_msg)
 
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     matches_checked = 0
@@ -11959,7 +11973,11 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 💡 Теперь /stats покажет обновлённую статистику"""
 
-    await update.message.reply_text(result_text, parse_mode="Markdown")
+    try:
+        await update.message.reply_text(result_text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Markdown error in forcecheck: {e}")
+        await update.message.reply_text(result_text)
 
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
