@@ -12063,7 +12063,7 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to analyze ALL today's matches one by one with summary"""
+    """Admin command to analyze ALL today's matches - SAVES everything to DB with ML features"""
     user_id = update.effective_user.id
 
     if not is_admin(user_id):
@@ -12083,9 +12083,10 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     matches.sort(key=lambda x: x.get("utcDate", ""))
 
     total = len(matches)
-    await update.message.reply_text(f"""📊 **Массовый анализ матчей**
+    await update.message.reply_text(f"""📊 **Массовый анализ матчей (ПОЛНЫЙ)**
 
 ├ Всего матчей: {total}
+├ Сохранение: ✅ predictions + ML features + alternatives
 ├ Пауза между анализами: 3 сек
 └ Примерное время: {total * 25 // 60} минут
 
@@ -12094,7 +12095,9 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Track results
     results = {
         "analyzed": 0,
-        "good_bets": [],  # (match, bet_type, confidence)
+        "main_saved": 0,
+        "alts_saved": 0,
+        "good_bets": [],
         "errors": 0,
         "skipped": 0
     }
@@ -12104,64 +12107,127 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for i, match in enumerate(matches):
         home = match.get("homeTeam", {}).get("name", "?")
         away = match.get("awayTeam", {}).get("name", "?")
+        match_id = match.get("id")
         comp = match.get("competition", {}).get("name", "?")
+        comp_code = match.get("competition", {}).get("code", "")
         match_time = match.get("utcDate", "")[:16].replace("T", " ")
 
         try:
-            # Run analysis
+            # Run full analysis with ML features
             analysis, ml_features = await analyze_match_enhanced(match, None, "ru")
 
             if analysis and "AI unavailable" not in analysis:
                 results["analyzed"] += 1
 
-                # Extract main bet info
-                main_bet_match = re.search(r'ОСНОВНАЯ СТАВКА.*?[Уу]веренность[:\s]*(\d+)%', analysis, re.DOTALL | re.IGNORECASE)
+                # === PARSE MAIN BET (same logic as regular flow) ===
+                confidence = 65
+                bet_type = "П1"
+                odds_value = 1.5
+
+                # Extract main bet section
+                main_bet_match = re.search(r'ОСНОВНАЯ СТАВКА.*?(?=📈|АЛЬТЕРНАТИВ|ДОПОЛНИТЕЛЬНЫЕ|$)', analysis, re.DOTALL | re.IGNORECASE)
                 if main_bet_match:
-                    confidence = int(main_bet_match.group(1))
+                    main_bet_section = main_bet_match.group(0).lower()
+                else:
+                    main_bet_section = analysis[:500].lower()
 
-                    # Extract bet type
-                    bet_section = re.search(r'ОСНОВНАЯ СТАВКА.*?(?=📈|АЛЬТЕРНАТИВ|$)', analysis, re.DOTALL | re.IGNORECASE)
-                    bet_type = "?"
-                    if bet_section:
-                        section = bet_section.group(0).lower()
-                        if "тб 2.5" in section or "тотал больше" in section:
-                            bet_type = "ТБ 2.5"
-                        elif "тм 2.5" in section or "тотал меньше" in section:
-                            bet_type = "ТМ 2.5"
-                        elif "п1 или х" in section or "1x" in section:
-                            bet_type = "1X"
-                        elif "х или п2" in section or "x2" in section:
-                            bet_type = "X2"
-                        elif "btts" in section or "обе забьют" in section:
-                            bet_type = "BTTS"
-                        elif "п2" in section:
-                            bet_type = "П2"
-                        elif "п1" in section:
-                            bet_type = "П1"
-                        elif "ничья" in section:
-                            bet_type = "Х"
+                # Get confidence
+                conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', main_bet_section)
+                if conf_match:
+                    confidence = int(conf_match.group(1))
+                else:
+                    conf_match = re.search(r'[Уу]веренность[:\s]*(\d+)%', analysis)
+                    if conf_match:
+                        confidence = int(conf_match.group(1))
 
-                    # Track good bets (confidence >= 65)
-                    if confidence >= 65:
-                        results["good_bets"].append({
-                            "match": f"{home} vs {away}",
-                            "comp": comp,
-                            "time": match_time,
-                            "bet": bet_type,
-                            "conf": confidence
-                        })
+                # Detect bet type (SAME ORDER as regular flow - double chances first!)
+                if "п1 или х" in main_bet_section or "1x" in main_bet_section or "п1/х" in main_bet_section:
+                    bet_type = "1X"
+                elif "х или п2" in main_bet_section or "x2" in main_bet_section or "2x" in main_bet_section or "х/п2" in main_bet_section:
+                    bet_type = "X2"
+                elif "п1 или п2" in main_bet_section or " 12 " in main_bet_section or "не ничья" in main_bet_section:
+                    bet_type = "12"
+                elif "фора" in main_bet_section or "handicap" in main_bet_section:
+                    fora_match = re.search(r'фора\s*[12]?\s*\(?([-+]?\d+\.?\d*)\)?', main_bet_section)
+                    if fora_match:
+                        fora_value = fora_match.group(1)
+                        if "-1" in main_bet_section:
+                            bet_type = "Фора1(-1)"
+                        elif "+1" in main_bet_section:
+                            bet_type = "Фора2(+1)"
+                        else:
+                            bet_type = f"Фора({fora_value})"
+                    else:
+                        bet_type = "Фора1(-1)"
+                elif "тб 2.5" in main_bet_section or "тотал больше 2.5" in main_bet_section or "over 2.5" in main_bet_section:
+                    bet_type = "ТБ 2.5"
+                elif "тм 2.5" in main_bet_section or "тотал меньше 2.5" in main_bet_section or "under 2.5" in main_bet_section:
+                    bet_type = "ТМ 2.5"
+                elif "обе забьют" in main_bet_section or "btts" in main_bet_section:
+                    bet_type = "BTTS"
+                elif "п2" in main_bet_section or "победа гостей" in main_bet_section:
+                    bet_type = "П2"
+                elif "п1" in main_bet_section or "победа хозя" in main_bet_section:
+                    bet_type = "П1"
+                elif "ничья" in main_bet_section or " х " in main_bet_section:
+                    bet_type = "Х"
+
+                # Get odds
+                odds_match = re.search(r'@\s*~?(\d+\.?\d*)', main_bet_section)
+                if odds_match:
+                    odds_value = float(odds_match.group(1))
+                else:
+                    odds_match = re.search(r'@\s*~?(\d+\.?\d*)', analysis)
+                    if odds_match:
+                        odds_value = float(odds_match.group(1))
+
+                # Get league code from ML features
+                league_code = ml_features.get("league_code") if ml_features else comp_code
+
+                # === SAVE MAIN PREDICTION ===
+                try:
+                    save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
+                                    ml_features=ml_features, bet_rank=1, league_code=league_code)
+                    results["main_saved"] += 1
+                    logger.info(f"[BATCH] Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%")
+                except Exception as e:
+                    logger.error(f"[BATCH] Error saving main prediction: {e}")
+
+                # === PARSE AND SAVE ALTERNATIVES ===
+                alternatives = parse_alternative_bets(analysis)
+                alternatives = [(t, c, o) for t, c, o in alternatives if t and t != bet_type][:3]
+
+                for alt_idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives):
+                    try:
+                        bet_rank = alt_idx + 2
+                        save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
+                                        ml_features=ml_features, bet_rank=bet_rank, league_code=league_code)
+                        results["alts_saved"] += 1
+                    except Exception as e:
+                        logger.error(f"[BATCH] Error saving alt: {e}")
+
+                # Track good bets for summary
+                if confidence >= 65:
+                    results["good_bets"].append({
+                        "match": f"{home} vs {away}",
+                        "comp": comp,
+                        "time": match_time,
+                        "bet": bet_type,
+                        "conf": confidence,
+                        "alts": len(alternatives)
+                    })
             else:
                 results["skipped"] += 1
 
         except Exception as e:
-            logger.error(f"Error analyzing {home} vs {away}: {e}")
+            logger.error(f"[BATCH] Error analyzing {home} vs {away}: {e}")
             results["errors"] += 1
 
         # Update progress every 5 matches
         if (i + 1) % 5 == 0 or i == total - 1:
             pct = int((i + 1) / total * 100)
             try:
-                await progress_msg.edit_text(f"⏳ Прогресс: {pct}% ({i+1}/{total})\n└ Последний: {home} vs {away}")
+                await progress_msg.edit_text(f"⏳ Прогресс: {pct}% ({i+1}/{total})\n├ Сохранено: {results['main_saved']} main + {results['alts_saved']} alts\n└ Последний: {home} vs {away}")
             except:
                 pass
 
@@ -12174,24 +12240,34 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📊 **Статистика:**
 ├ Проанализировано: {results['analyzed']}/{total}
+├ Сохранено MAIN: {results['main_saved']}
+├ Сохранено ALT: {results['alts_saved']}
 ├ Хороших ставок (≥65%): {len(results['good_bets'])}
 ├ Пропущено: {results['skipped']}
 └ Ошибок: {results['errors']}
 
+💾 Все predictions сохранены в БД!
+📬 Алерты придут автоматически по результатам матчей
+
 """
 
     if results["good_bets"]:
-        # Sort by confidence
         results["good_bets"].sort(key=lambda x: x["conf"], reverse=True)
 
         summary += "🎯 **ТОП ставки дня:**\n"
-        for i, bet in enumerate(results["good_bets"][:15], 1):
-            summary += f"{i}. **{bet['conf']}%** {bet['bet']} - {bet['match']}\n"
-            summary += f"   └ {bet['comp']} | {bet['time']}\n"
+        for i, bet in enumerate(results["good_bets"][:20], 1):
+            alts_info = f" +{bet['alts']}alt" if bet.get('alts', 0) > 0 else ""
+            summary += f"{i}. **{bet['conf']}%** {bet['bet']}{alts_info} - {bet['match']}\n"
 
-    # Try to send with Markdown, fallback to plain
+    # Send summary (may need to split if too long)
     try:
-        await update.message.reply_text(summary, parse_mode="Markdown")
+        if len(summary) > 4000:
+            # Split into parts
+            parts = [summary[i:i+4000] for i in range(0, len(summary), 4000)]
+            for part in parts:
+                await update.message.reply_text(part, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(summary, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Markdown error in analyzeall summary: {e}")
         plain_summary = summary.replace("**", "")
