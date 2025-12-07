@@ -9337,6 +9337,10 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM live_subscribers")
     live_subs = c.fetchone()[0]
 
+    # Pending predictions (waiting for results)
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NULL")
+    pending_count = c.fetchone()[0]
+
     conn.close()
 
     # Get clean stats (without duplicates)
@@ -9357,7 +9361,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ├ Всего: {total_predictions}
 ├ Проверенных: {verified}
 ├ Верных: {correct}
-└ Точность (сырая): {accuracy}%
+├ Точность (сырая): {accuracy}%
+└ ⏳ Pending: {pending_count}
 
 📈 **Чистая статистика (без дубликатов):**
 ├ Уникальных: {clean['clean_total']}
@@ -9367,7 +9372,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚙️ **Админ-команды:**
 • /broadcast текст - Рассылка всем
 • /addpremium ID - Дать премиум
-• /checkresults - Проверить результаты
+• /forcecheck - Проверить ВСЕ pending predictions
+• /checkresults - Проверить свои результаты
 
 🔧 **Система:**
 ├ Админов: {len(ADMIN_IDS)}
@@ -11783,8 +11789,113 @@ async def check_results_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"   ❌ Ошибка\n\n"
     
     text += f"✅ Обновлено: {checked} прогнозов\nНапиши /stats для статистики"
-    
+
     await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to force-check ALL pending predictions (regardless of age)"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("🔄 Запускаю полную проверку ВСЕХ pending predictions...")
+
+    # Get ALL pending predictions (no time limit)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank,
+                        predicted_at
+                 FROM predictions
+                 WHERE is_correct IS NULL""")
+    rows = c.fetchall()
+    conn.close()
+
+    pending = [{"id": r[0], "user_id": r[1], "match_id": r[2], "home": r[3],
+                "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7],
+                "bet_rank": r[8] if len(r) > 8 else 1, "predicted_at": r[9]} for r in rows]
+
+    if not pending:
+        await update.message.reply_text("✅ Нет pending predictions!")
+        return
+
+    # Count by match_id status
+    with_match_id = sum(1 for p in pending if p.get("match_id"))
+    without_match_id = len(pending) - with_match_id
+
+    status_msg = f"""📊 **Найдено {len(pending)} pending predictions:**
+├ С match_id: {with_match_id}
+└ Без match_id: {without_match_id} (невозможно проверить)
+
+🔄 Проверяю..."""
+
+    await update.message.reply_text(status_msg, parse_mode="Markdown")
+
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    checked = 0
+    finished = 0
+    errors = 0
+    not_finished = 0
+
+    # Process all predictions with match_id
+    for pred in pending:
+        match_id = pred.get("match_id")
+        if not match_id:
+            continue
+
+        try:
+            url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+            session = await get_http_session()
+            async with session.get(url, headers=headers) as r:
+                if r.status != 200:
+                    errors += 1
+                    continue
+
+                match_data = await r.json()
+
+            status = match_data.get("status")
+
+            if status == "FINISHED":
+                score = match_data.get("score", {}).get("fullTime", {})
+                home_score = score.get("home", 0) or 0
+                away_score = score.get("away", 0) or 0
+
+                is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
+
+                if is_correct is True:
+                    db_value = 1
+                elif is_correct is False:
+                    db_value = 0
+                else:
+                    db_value = 2  # Push
+
+                result_str = f"{home_score}-{away_score}"
+                update_prediction_result(pred["id"], result_str, db_value)
+                finished += 1
+            else:
+                not_finished += 1
+
+            checked += 1
+            await asyncio.sleep(0.3)  # Rate limit
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Force check error for {match_id}: {e}")
+
+    result_text = f"""✅ **Проверка завершена!**
+
+📊 **Результаты:**
+├ Проверено: {checked}
+├ Обновлено (FINISHED): {finished}
+├ Ещё не завершены: {not_finished}
+├ Ошибок API: {errors}
+└ Без match_id: {without_match_id}
+
+💡 Теперь /stats покажет обновлённую статистику"""
+
+    await update.message.reply_text(result_text, parse_mode="Markdown")
 
 
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
@@ -13991,6 +14102,7 @@ def main():
     app.add_handler(CommandHandler("live", live_cmd))
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
+    app.add_handler(CommandHandler("forcecheck", force_check_cmd))  # Admin: force-check ALL pending
     app.add_handler(CommandHandler("debug", debug_cmd))
     app.add_handler(CommandHandler("premium", premium_cmd))
     app.add_handler(CommandHandler("ref", referral_cmd))
