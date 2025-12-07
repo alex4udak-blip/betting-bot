@@ -11853,39 +11853,56 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Нет pending predictions!")
         return
 
-    # Count by match_id status
-    with_match_id = sum(1 for p in pending if p.get("match_id"))
-    without_match_id = len(pending) - with_match_id
+    # Group by match_id to avoid duplicate API calls
+    from collections import defaultdict
+    by_match = defaultdict(list)
+    without_match_id = 0
+    for p in pending:
+        if p.get("match_id"):
+            by_match[p["match_id"]].append(p)
+        else:
+            without_match_id += 1
+
+    unique_matches = len(by_match)
 
     status_msg = f"""📊 **Найдено {len(pending)} pending predictions:**
-├ С match_id: {with_match_id}
+├ Уникальных матчей: {unique_matches}
 └ Без match_id: {without_match_id} (невозможно проверить)
 
-🔄 Проверяю..."""
+🔄 Проверяю (по {unique_matches} матчам)..."""
 
     await update.message.reply_text(status_msg, parse_mode="Markdown")
 
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    checked = 0
-    finished = 0
+    matches_checked = 0
+    predictions_updated = 0
     errors = 0
     not_finished = 0
 
-    # Process all predictions with match_id
-    for pred in pending:
-        match_id = pred.get("match_id")
-        if not match_id:
-            continue
+    # Process unique matches (not individual predictions)
+    match_ids = list(by_match.keys())
+    for i, match_id in enumerate(match_ids):
+        preds = by_match[match_id]
 
         try:
             url = f"{FOOTBALL_API_URL}/matches/{match_id}"
             session = await get_http_session()
-            async with session.get(url, headers=headers) as r:
-                if r.status != 200:
-                    errors += 1
-                    continue
 
-                match_data = await r.json()
+            # Add timeout
+            async with asyncio.timeout(10):
+                async with session.get(url, headers=headers) as r:
+                    if r.status == 429:
+                        # Rate limited - wait and continue
+                        logger.warning(f"Rate limited at match {match_id}")
+                        await update.message.reply_text(f"⚠️ Rate limited, ждём 5 сек...")
+                        await asyncio.sleep(5)
+                        continue
+                    elif r.status != 200:
+                        errors += 1
+                        logger.warning(f"API error {r.status} for match {match_id}")
+                        continue
+
+                    match_data = await r.json()
 
             status = match_data.get("status")
 
@@ -11893,25 +11910,40 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 score = match_data.get("score", {}).get("fullTime", {})
                 home_score = score.get("home", 0) or 0
                 away_score = score.get("away", 0) or 0
-
-                is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
-
-                if is_correct is True:
-                    db_value = 1
-                elif is_correct is False:
-                    db_value = 0
-                else:
-                    db_value = 2  # Push
-
                 result_str = f"{home_score}-{away_score}"
-                update_prediction_result(pred["id"], result_str, db_value)
-                finished += 1
+
+                # Update ALL predictions for this match
+                for pred in preds:
+                    try:
+                        is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
+
+                        if is_correct is True:
+                            db_value = 1
+                        elif is_correct is False:
+                            db_value = 0
+                        else:
+                            db_value = 2  # Push
+
+                        update_prediction_result(pred["id"], result_str, db_value)
+                        predictions_updated += 1
+                    except Exception as e:
+                        logger.error(f"Error updating pred {pred['id']}: {e}")
+                        errors += 1
             else:
-                not_finished += 1
+                not_finished += len(preds)
 
-            checked += 1
-            await asyncio.sleep(0.3)  # Rate limit
+            matches_checked += 1
+            await asyncio.sleep(0.5)  # Rate limit
 
+            # Progress update every 10 matches
+            if (i + 1) % 10 == 0:
+                await update.message.reply_text(
+                    f"⏳ Проверено {matches_checked}/{unique_matches} матчей, обновлено {predictions_updated} прогнозов..."
+                )
+
+        except asyncio.TimeoutError:
+            errors += 1
+            logger.error(f"Timeout for match {match_id}")
         except Exception as e:
             errors += 1
             logger.error(f"Force check error for {match_id}: {e}")
@@ -11919,10 +11951,10 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result_text = f"""✅ **Проверка завершена!**
 
 📊 **Результаты:**
-├ Проверено: {checked}
-├ Обновлено (FINISHED): {finished}
+├ Матчей проверено: {matches_checked}/{unique_matches}
+├ Прогнозов обновлено: {predictions_updated}
 ├ Ещё не завершены: {not_finished}
-├ Ошибок API: {errors}
+├ Ошибок: {errors}
 └ Без match_id: {without_match_id}
 
 💡 Теперь /stats покажет обновлённую статистику"""
