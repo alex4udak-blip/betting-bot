@@ -5761,8 +5761,14 @@ async def get_h2h(match_id: int) -> Optional[dict]:
     return None
 
 
-async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict]:
-    """Get enhanced team form with home/away split and average goals"""
+async def get_team_form_enhanced(team_id: int, limit: int = 10, upcoming_match_date: datetime = None) -> Optional[dict]:
+    """Get enhanced team form with home/away split and average goals.
+
+    Args:
+        team_id: Football-data.org team ID
+        limit: Number of past matches to analyze
+        upcoming_match_date: Date of upcoming match (for accurate rest days calculation)
+    """
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     session = await get_http_session()
 
@@ -5784,7 +5790,7 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict
                 btts_count = 0
                 over25_count = 0
 
-                # Rest days calculation
+                # Rest days calculation - calculate days between last match and UPCOMING match
                 last_match_date = None
                 rest_days = None
 
@@ -5795,9 +5801,20 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10) -> Optional[dict
                         if match_date_str:
                             try:
                                 last_match_date = datetime.fromisoformat(match_date_str.replace("Z", "+00:00"))
-                                rest_days = (datetime.now(last_match_date.tzinfo) - last_match_date).days
-                            except:
-                                pass
+                                # Calculate rest days to UPCOMING match, not to now
+                                if upcoming_match_date:
+                                    # Ensure both dates have timezone info
+                                    if upcoming_match_date.tzinfo is None:
+                                        upcoming_with_tz = upcoming_match_date.replace(tzinfo=timezone.utc)
+                                    else:
+                                        upcoming_with_tz = upcoming_match_date
+                                    rest_days = (upcoming_with_tz - last_match_date).days
+                                else:
+                                    # Fallback to now if upcoming date not provided
+                                    rest_days = (datetime.now(last_match_date.tzinfo) - last_match_date).days
+                                logger.debug(f"Team {team_id}: last match {last_match_date.date()}, upcoming {upcoming_match_date.date() if upcoming_match_date else 'N/A'}, rest_days={rest_days}")
+                            except Exception as e:
+                                logger.warning(f"Rest days calculation error: {e}")
                     home_id = m.get("homeTeam", {}).get("id")
                     score = m.get("score", {}).get("fullTime", {})
                     home_goals = score.get("home", 0) or 0
@@ -5913,6 +5930,7 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
         "injuries": [],
         "lineups": [],
         "news": [],
+        "referee": None,  # Referee name if found in news
         "raw_articles": [],
         "searched": False,
         "error": None
@@ -5920,14 +5938,23 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
 
     session = await get_http_session()
 
-    # Queries to search
+    # Queries to search - more specific for match context
+    # Clean team names (remove FC, CF, etc. for better search)
+    home_clean = home_team.replace(" FC", "").replace(" CF", "").replace("FC ", "").strip()
+    away_clean = away_team.replace(" FC", "").replace(" CF", "").replace("FC ", "").strip()
+
     queries = [
-        f"{home_team} vs {away_team} preview",
-        f"{home_team} injury news",
-        f"{away_team} injury news",
-        f"{home_team} lineup",
-        f"{away_team} lineup",
+        f"{home_clean} vs {away_clean} match preview",
+        f"{home_clean} team news injury",
+        f"{away_clean} team news injury",
+        f"{home_clean} {away_clean} predicted lineup",
+        f"{home_clean} vs {away_clean} referee assignment",
     ]
+
+    # Add competition-specific query if we have competition name
+    if competition:
+        comp_clean = competition.replace("Primera Division", "La Liga").replace("Serie A", "Serie A")
+        queries.insert(0, f"{home_clean} {away_clean} {comp_clean}")
 
     all_articles = []
 
@@ -5976,19 +6003,35 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
                                     result["lineups"].append(title_text)
                                 else:
                                     result["news"].append(title_text)
+
+                                # Try to extract referee name if mentioned
+                                if ('referee' in query or 'referee' in title_lower) and result["referee"] is None:
+                                    # Check if any known referee name is in the title
+                                    for ref_name in REFEREE_STATS.keys():
+                                        if ref_name.lower() in title_lower:
+                                            result["referee"] = ref_name
+                                            logger.info(f"🔍 Found referee in news: {ref_name}")
+                                            break
         except asyncio.TimeoutError:
             logger.warning(f"Web search timeout for: {query}")
         except Exception as e:
             logger.warning(f"Web search error for '{query}': {e}")
 
-    # Deduplicate
-    result["injuries"] = list(dict.fromkeys(result["injuries"]))[:5]
-    result["lineups"] = list(dict.fromkeys(result["lineups"]))[:4]
-    result["news"] = list(dict.fromkeys(result["news"]))[:6]
-    result["raw_articles"] = [a["title"] for a in all_articles][:15]
+    # Filter news for relevance - must mention at least one team
+    def is_relevant(text):
+        text_lower = text.lower()
+        return home_clean.lower() in text_lower or away_clean.lower() in text_lower
+
+    # Deduplicate and filter for relevance
+    result["injuries"] = list(dict.fromkeys([n for n in result["injuries"] if is_relevant(n)]))[:5]
+    result["lineups"] = list(dict.fromkeys([n for n in result["lineups"] if is_relevant(n)]))[:4]
+    # For general news, prefer relevant ones but keep some if nothing relevant found
+    relevant_news = [n for n in result["news"] if is_relevant(n)]
+    result["news"] = list(dict.fromkeys(relevant_news if relevant_news else result["news"][:3]))[:6]
+    result["raw_articles"] = [a["title"] for a in all_articles if is_relevant(a["title"])][:15]
     result["searched"] = len(all_articles) > 0
 
-    logger.info(f"🔍 Web search for {home_team} vs {away_team}: {len(all_articles)} articles found")
+    logger.info(f"🔍 Web search for {home_team} vs {away_team}: {len(all_articles)} articles found, {len(result['injuries'])} injuries, {len(result['news'])} news")
 
     return result
 
@@ -7718,9 +7761,18 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     comp = match.get("competition", {}).get("name", "?")
     comp_code = match.get("competition", {}).get("code", "PL")
 
-    # Get all data (async) - using ENHANCED form function
-    home_form = await get_team_form_enhanced(home_id) if home_id else None
-    away_form = await get_team_form_enhanced(away_id) if away_id else None
+    # Parse upcoming match date for accurate rest days calculation
+    match_date = None
+    match_date_str = match.get("utcDate", "")
+    if match_date_str:
+        try:
+            match_date = datetime.fromisoformat(match_date_str.replace("Z", "+00:00"))
+        except Exception as e:
+            logger.warning(f"Could not parse match date: {e}")
+
+    # Get all data (async) - using ENHANCED form function with match date for rest days
+    home_form = await get_team_form_enhanced(home_id, upcoming_match_date=match_date) if home_id else None
+    away_form = await get_team_form_enhanced(away_id, upcoming_match_date=match_date) if away_id else None
     h2h = await get_h2h(match_id) if match_id else None
     odds = await get_odds(home, away)
     standings = await get_standings(comp_code)
@@ -7735,6 +7787,10 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
 
     # 👨‍⚖️ REFEREE STATS: Get referee statistics for card/penalty predictions
     referee_name = lineups.get('referee') if lineups else None
+    # Fallback: try to get referee from web news if API doesn't have it
+    if not referee_name and web_news and web_news.get("referee"):
+        referee_name = web_news.get("referee")
+        logger.info(f"Using referee from web news: {referee_name}")
     referee_stats = get_referee_stats(referee_name, comp_code) if referee_name else None
 
     # Get bot's historical accuracy stats
@@ -12035,9 +12091,18 @@ async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
         home_id = match.get("homeTeam", {}).get("id")
         away_id = match.get("awayTeam", {}).get("id")
 
-        # Use enhanced form for ML features
-        home_form_enhanced = await get_team_form_enhanced(home_id) if home_id else None
-        away_form_enhanced = await get_team_form_enhanced(away_id) if away_id else None
+        # Parse match date for accurate rest days calculation
+        match_date = None
+        match_date_str = match.get("utcDate", "")
+        if match_date_str:
+            try:
+                match_date = datetime.fromisoformat(match_date_str.replace("Z", "+00:00"))
+            except:
+                pass
+
+        # Use enhanced form for ML features with match date for rest days
+        home_form_enhanced = await get_team_form_enhanced(home_id, upcoming_match_date=match_date) if home_id else None
+        away_form_enhanced = await get_team_form_enhanced(away_id, upcoming_match_date=match_date) if away_id else None
         odds = await get_odds(home, away)
         h2h = await get_h2h(match_id) if match_id else None
         standings = await get_standings(comp_code)
