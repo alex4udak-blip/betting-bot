@@ -12580,24 +12580,84 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
                                  lang: str = "ru") -> str:
     """Generate a SPECIFIC explanation for why prediction worked or didn't.
 
-    Includes actual score and concrete reasons based on bet type.
+    Fully multilingual (ru, en, pt, es, id) with actual score and concrete reasons.
     """
     total_goals = home_score + away_score
     bet_lower = bet_type.lower()
     score_str = f"{home_score}:{away_score}"
 
-    # Short team names
-    home_short = home_team.split()[-1] if home_team else "Хозяева"
-    away_short = away_team.split()[-1] if away_team else "Гости"
+    # Short team names with fallbacks per language
+    home_fallback = {"ru": "Хозяева", "en": "Home", "pt": "Mandante", "es": "Local", "id": "Tuan rumah"}
+    away_fallback = {"ru": "Гости", "en": "Away", "pt": "Visitante", "es": "Visitante", "id": "Tamu"}
+    home_short = home_team.split()[-1] if home_team else home_fallback.get(lang, "Home")
+    away_short = away_team.split()[-1] if away_team else away_fallback.get(lang, "Away")
 
-    # Labels for different languages
-    labels = {
+    # ===== FULL MULTILINGUAL PHRASES =====
+    phrases = {
         "ru": {
             "worked": "💡 **Почему сработало:**",
             "failed": "💡 **Почему не сработало:**",
             "variance": "Беттинг — это про вероятности, не гарантии",
             "keep_going": "Продолжай следить за нашими прогнозами!",
             "good_call": "Отличный анализ!",
+            # Totals
+            "over_ok": "Матч завершился {score} — всего {goals} голов (>2.5 ✓)",
+            "productive": "Команды показали результативный футбол",
+            "over_fail": "Матч завершился {score} — всего {goals} гол(а) (<2.5)",
+            "no_goals": "Ни одна команда не смогла забить",
+            "closed": "Очень закрытый матч, мало моментов",
+            "one_short": "Не хватило всего 1 гола для захода",
+            "under_ok": "Матч завершился {score} — всего {goals} гол(а) (<2.5 ✓)",
+            "careful": "Команды сыграли аккуратно",
+            "under_fail": "Матч завершился {score} — {goals} голов (>2.5)",
+            "too_many": "Матч получился слишком результативным",
+            # Home win
+            "home_won": "{team} победили {score}",
+            "home_crush": "Разгромная победа хозяев!",
+            "home_solid": "Уверенная победа дома",
+            "home_factor": "Домашний фактор сыграл свою роль",
+            "home_lost": "{team} проиграли дома {score}",
+            "away_better": "{team} оказались сильнее на выезде",
+            "draw_home": "Ничья {score} — {team} не смогли дожать",
+            "lack_attack": "Хозяевам не хватило остроты в атаке",
+            # Away win
+            "away_won": "{team} победили на выезде {score}",
+            "away_dominate": "Гости полностью переиграли хозяев",
+            "away_solid": "Крепкая гостевая победа",
+            "away_lost": "{team} проиграли {score}",
+            "home_held": "{team} не отдали победу дома",
+            "draw_away": "Ничья {score} — {team} не реализовали моменты",
+            "lack_cold": "Гостям не хватило хладнокровия",
+            # Draw
+            "draw_ok": "Ничья {score} — команды не выявили сильнейшего",
+            "draw_00": "Нулевая ничья — обоюдная осторожность",
+            "draw_fair": "Равная игра, справедливый результат",
+            "team_won": "{team} выиграли {score}",
+            "one_stronger": "Одна из команд оказалась сильнее",
+            # Double chance
+            "dc_ok": "Двойной шанс отработал!",
+            "dc_no_lose": "Ничья {score} — {team} не проиграли",
+            "away_surprise": "Гости удивили — хозяева провалились",
+            "home_stronger": "Хозяева были сильнее",
+            # BTTS
+            "btts_ok": "Обе забили! Счёт {score}",
+            "btts_attack": "Атакующий футбол с обеих сторон",
+            "btts_00": "Счёт 0:0 — никто не забил",
+            "gk_fire": "Вратари были в ударе",
+            "no_score_home": "{team} не забили (счёт {score})",
+            "no_score_away": "{team} не забили (счёт {score})",
+            "attack_fail": "Атака хозяев не сработала",
+            "away_wasted": "Гости не реализовали моменты",
+            # Handicap
+            "hcap_ok": "Фора зашла! Счёт {score}",
+            "hcap_math": "Расчёт на форе оправдался",
+            "hcap_fail": "Фора не зашла. Счёт {score}",
+            "draw_kill": "Ничья убила фору",
+            "diff_not_cover": "Разница голов ({diff}) не покрыла фору",
+            # Generic
+            "bet_ok": "Ставка зашла! Счёт {score}",
+            "bet_fail": "Ставка не зашла. Счёт {score}",
+            "unpredictable": "Футбол непредсказуем",
         },
         "en": {
             "worked": "💡 **Why it worked:**",
@@ -12605,154 +12665,375 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
             "variance": "Betting is about probabilities, not guarantees",
             "keep_going": "Keep following our predictions!",
             "good_call": "Great analysis!",
+            "over_ok": "Match ended {score} — {goals} total goals (>2.5 ✓)",
+            "productive": "Both teams showed attacking football",
+            "over_fail": "Match ended {score} — only {goals} goal(s) (<2.5)",
+            "no_goals": "Neither team managed to score",
+            "closed": "Very defensive match, few chances",
+            "one_short": "Just 1 goal short of hitting",
+            "under_ok": "Match ended {score} — only {goals} goal(s) (<2.5 ✓)",
+            "careful": "Both teams played carefully",
+            "under_fail": "Match ended {score} — {goals} goals (>2.5)",
+            "too_many": "Too many goals in this match",
+            "home_won": "{team} won {score}",
+            "home_crush": "Dominant home victory!",
+            "home_solid": "Solid home win",
+            "home_factor": "Home advantage made the difference",
+            "home_lost": "{team} lost at home {score}",
+            "away_better": "{team} were stronger away",
+            "draw_home": "Draw {score} — {team} couldn't finish it",
+            "lack_attack": "Home side lacked cutting edge",
+            "away_won": "{team} won away {score}",
+            "away_dominate": "Away side completely outplayed hosts",
+            "away_solid": "Strong away victory",
+            "away_lost": "{team} lost {score}",
+            "home_held": "{team} held on at home",
+            "draw_away": "Draw {score} — {team} wasted chances",
+            "lack_cold": "Away side lacked composure",
+            "draw_ok": "Draw {score} — neither team could win",
+            "draw_00": "Goalless draw — mutual caution",
+            "draw_fair": "Fair result, even match",
+            "team_won": "{team} won {score}",
+            "one_stronger": "One team proved stronger",
+            "dc_ok": "Double chance hit!",
+            "dc_no_lose": "Draw {score} — {team} didn't lose",
+            "away_surprise": "Away upset — hosts collapsed",
+            "home_stronger": "Home side was too strong",
+            "btts_ok": "Both scored! Final {score}",
+            "btts_attack": "Attacking football from both sides",
+            "btts_00": "0:0 — no one scored",
+            "gk_fire": "Goalkeepers were on fire",
+            "no_score_home": "{team} failed to score ({score})",
+            "no_score_away": "{team} failed to score ({score})",
+            "attack_fail": "Home attack didn't click",
+            "away_wasted": "Away side wasted chances",
+            "hcap_ok": "Handicap hit! Score {score}",
+            "hcap_math": "Handicap calculation paid off",
+            "hcap_fail": "Handicap missed. Score {score}",
+            "draw_kill": "Draw killed the handicap",
+            "diff_not_cover": "Goal difference ({diff}) didn't cover",
+            "bet_ok": "Bet won! Score {score}",
+            "bet_fail": "Bet lost. Score {score}",
+            "unpredictable": "Football is unpredictable",
+        },
+        "pt": {
+            "worked": "💡 **Por que funcionou:**",
+            "failed": "💡 **Por que não funcionou:**",
+            "variance": "Apostas são sobre probabilidades, não garantias",
+            "keep_going": "Continue acompanhando nossas previsões!",
+            "good_call": "Excelente análise!",
+            "over_ok": "Jogo terminou {score} — {goals} gols no total (>2.5 ✓)",
+            "productive": "Ambas equipes mostraram futebol ofensivo",
+            "over_fail": "Jogo terminou {score} — apenas {goals} gol(s) (<2.5)",
+            "no_goals": "Nenhum time conseguiu marcar",
+            "closed": "Jogo muito fechado, poucas chances",
+            "one_short": "Faltou apenas 1 gol para acertar",
+            "under_ok": "Jogo terminou {score} — apenas {goals} gol(s) (<2.5 ✓)",
+            "careful": "Times jogaram com cautela",
+            "under_fail": "Jogo terminou {score} — {goals} gols (>2.5)",
+            "too_many": "Muitos gols neste jogo",
+            "home_won": "{team} venceu {score}",
+            "home_crush": "Vitória avassaladora em casa!",
+            "home_solid": "Vitória sólida em casa",
+            "home_factor": "O fator casa fez a diferença",
+            "home_lost": "{team} perdeu em casa {score}",
+            "away_better": "{team} foram melhores fora",
+            "draw_home": "Empate {score} — {team} não conseguiu vencer",
+            "lack_attack": "Mandante sem criatividade no ataque",
+            "away_won": "{team} venceu fora {score}",
+            "away_dominate": "Visitantes dominaram completamente",
+            "away_solid": "Forte vitória fora de casa",
+            "away_lost": "{team} perdeu {score}",
+            "home_held": "{team} segurou em casa",
+            "draw_away": "Empate {score} — {team} desperdiçou chances",
+            "lack_cold": "Visitantes sem frieza",
+            "draw_ok": "Empate {score} — ninguém venceu",
+            "draw_00": "Empate sem gols — cautela mútua",
+            "draw_fair": "Resultado justo, jogo equilibrado",
+            "team_won": "{team} venceu {score}",
+            "one_stronger": "Um time foi mais forte",
+            "dc_ok": "Dupla chance acertou!",
+            "dc_no_lose": "Empate {score} — {team} não perdeu",
+            "away_surprise": "Surpresa visitante — mandante falhou",
+            "home_stronger": "Mandante foi mais forte",
+            "btts_ok": "Ambos marcaram! Placar {score}",
+            "btts_attack": "Futebol ofensivo de ambos",
+            "btts_00": "0:0 — ninguém marcou",
+            "gk_fire": "Goleiros em grande dia",
+            "no_score_home": "{team} não marcou ({score})",
+            "no_score_away": "{team} não marcou ({score})",
+            "attack_fail": "Ataque da casa não funcionou",
+            "away_wasted": "Visitantes desperdiçaram chances",
+            "hcap_ok": "Handicap acertou! Placar {score}",
+            "hcap_math": "Cálculo do handicap compensou",
+            "hcap_fail": "Handicap errou. Placar {score}",
+            "draw_kill": "Empate matou o handicap",
+            "diff_not_cover": "Diferença de gols ({diff}) não cobriu",
+            "bet_ok": "Aposta ganhou! Placar {score}",
+            "bet_fail": "Aposta perdeu. Placar {score}",
+            "unpredictable": "Futebol é imprevisível",
+        },
+        "es": {
+            "worked": "💡 **Por qué funcionó:**",
+            "failed": "💡 **Por qué no funcionó:**",
+            "variance": "Las apuestas son probabilidades, no garantías",
+            "keep_going": "¡Sigue nuestras predicciones!",
+            "good_call": "¡Excelente análisis!",
+            "over_ok": "Partido terminó {score} — {goals} goles en total (>2.5 ✓)",
+            "productive": "Ambos equipos mostraron fútbol ofensivo",
+            "over_fail": "Partido terminó {score} — solo {goals} gol(es) (<2.5)",
+            "no_goals": "Ningún equipo pudo marcar",
+            "closed": "Partido muy cerrado, pocas ocasiones",
+            "one_short": "Faltó solo 1 gol para acertar",
+            "under_ok": "Partido terminó {score} — solo {goals} gol(es) (<2.5 ✓)",
+            "careful": "Equipos jugaron con cautela",
+            "under_fail": "Partido terminó {score} — {goals} goles (>2.5)",
+            "too_many": "Demasiados goles en este partido",
+            "home_won": "{team} ganó {score}",
+            "home_crush": "¡Victoria aplastante en casa!",
+            "home_solid": "Victoria sólida en casa",
+            "home_factor": "El factor local hizo la diferencia",
+            "home_lost": "{team} perdió en casa {score}",
+            "away_better": "{team} fueron mejores de visita",
+            "draw_home": "Empate {score} — {team} no pudo ganar",
+            "lack_attack": "Local sin ideas en ataque",
+            "away_won": "{team} ganó de visita {score}",
+            "away_dominate": "Visitante dominó completamente",
+            "away_solid": "Fuerte victoria fuera de casa",
+            "away_lost": "{team} perdió {score}",
+            "home_held": "{team} aguantó en casa",
+            "draw_away": "Empate {score} — {team} desperdició ocasiones",
+            "lack_cold": "Visitante sin frialdad",
+            "draw_ok": "Empate {score} — nadie ganó",
+            "draw_00": "Empate sin goles — cautela mutua",
+            "draw_fair": "Resultado justo, partido parejo",
+            "team_won": "{team} ganó {score}",
+            "one_stronger": "Un equipo fue más fuerte",
+            "dc_ok": "¡Doble oportunidad acertó!",
+            "dc_no_lose": "Empate {score} — {team} no perdió",
+            "away_surprise": "Sorpresa visitante — local falló",
+            "home_stronger": "Local fue más fuerte",
+            "btts_ok": "¡Ambos marcaron! Marcador {score}",
+            "btts_attack": "Fútbol ofensivo de ambos",
+            "btts_00": "0:0 — nadie marcó",
+            "gk_fire": "Porteros en gran día",
+            "no_score_home": "{team} no marcó ({score})",
+            "no_score_away": "{team} no marcó ({score})",
+            "attack_fail": "Ataque local no funcionó",
+            "away_wasted": "Visitante desperdició ocasiones",
+            "hcap_ok": "¡Hándicap acertó! Marcador {score}",
+            "hcap_math": "Cálculo del hándicap funcionó",
+            "hcap_fail": "Hándicap falló. Marcador {score}",
+            "draw_kill": "Empate mató el hándicap",
+            "diff_not_cover": "Diferencia de goles ({diff}) no cubrió",
+            "bet_ok": "¡Apuesta ganada! Marcador {score}",
+            "bet_fail": "Apuesta perdida. Marcador {score}",
+            "unpredictable": "El fútbol es impredecible",
+        },
+        "id": {
+            "worked": "💡 **Mengapa berhasil:**",
+            "failed": "💡 **Mengapa tidak berhasil:**",
+            "variance": "Taruhan adalah tentang probabilitas, bukan jaminan",
+            "keep_going": "Terus ikuti prediksi kami!",
+            "good_call": "Analisis hebat!",
+            "over_ok": "Pertandingan berakhir {score} — {goals} gol total (>2.5 ✓)",
+            "productive": "Kedua tim menunjukkan sepak bola menyerang",
+            "over_fail": "Pertandingan berakhir {score} — hanya {goals} gol (<2.5)",
+            "no_goals": "Tidak ada tim yang bisa mencetak gol",
+            "closed": "Pertandingan sangat tertutup, sedikit peluang",
+            "one_short": "Kurang 1 gol untuk menang",
+            "under_ok": "Pertandingan berakhir {score} — hanya {goals} gol (<2.5 ✓)",
+            "careful": "Kedua tim bermain hati-hati",
+            "under_fail": "Pertandingan berakhir {score} — {goals} gol (>2.5)",
+            "too_many": "Terlalu banyak gol di pertandingan ini",
+            "home_won": "{team} menang {score}",
+            "home_crush": "Kemenangan telak di kandang!",
+            "home_solid": "Kemenangan solid di kandang",
+            "home_factor": "Keuntungan kandang membuat perbedaan",
+            "home_lost": "{team} kalah di kandang {score}",
+            "away_better": "{team} lebih kuat tandang",
+            "draw_home": "Seri {score} — {team} tidak bisa menyelesaikan",
+            "lack_attack": "Tuan rumah kurang tajam di depan",
+            "away_won": "{team} menang tandang {score}",
+            "away_dominate": "Tamu sepenuhnya menguasai pertandingan",
+            "away_solid": "Kemenangan tandang yang kuat",
+            "away_lost": "{team} kalah {score}",
+            "home_held": "{team} bertahan di kandang",
+            "draw_away": "Seri {score} — {team} menyia-nyiakan peluang",
+            "lack_cold": "Tamu kurang tenang",
+            "draw_ok": "Seri {score} — tidak ada pemenang",
+            "draw_00": "Seri tanpa gol — saling berhati-hati",
+            "draw_fair": "Hasil adil, pertandingan seimbang",
+            "team_won": "{team} menang {score}",
+            "one_stronger": "Satu tim lebih kuat",
+            "dc_ok": "Peluang ganda berhasil!",
+            "dc_no_lose": "Seri {score} — {team} tidak kalah",
+            "away_surprise": "Kejutan tamu — tuan rumah gagal",
+            "home_stronger": "Tuan rumah lebih kuat",
+            "btts_ok": "Keduanya mencetak gol! Skor {score}",
+            "btts_attack": "Sepak bola menyerang dari kedua tim",
+            "btts_00": "0:0 — tidak ada yang mencetak gol",
+            "gk_fire": "Kiper bermain cemerlang",
+            "no_score_home": "{team} tidak mencetak gol ({score})",
+            "no_score_away": "{team} tidak mencetak gol ({score})",
+            "attack_fail": "Serangan tuan rumah tidak berfungsi",
+            "away_wasted": "Tamu menyia-nyiakan peluang",
+            "hcap_ok": "Handicap berhasil! Skor {score}",
+            "hcap_math": "Perhitungan handicap terbayar",
+            "hcap_fail": "Handicap gagal. Skor {score}",
+            "draw_kill": "Seri membunuh handicap",
+            "diff_not_cover": "Selisih gol ({diff}) tidak menutupi",
+            "bet_ok": "Taruhan menang! Skor {score}",
+            "bet_fail": "Taruhan kalah. Skor {score}",
+            "unpredictable": "Sepak bola tidak dapat diprediksi",
         },
     }
 
-    lbl = labels.get(lang, labels.get("en", labels["ru"]))
-    header = lbl["worked"] if is_correct else lbl["failed"]
+    # Get phrases for current language, fallback to English then Russian
+    p = phrases.get(lang, phrases.get("en", phrases["ru"]))
+    header = p["worked"] if is_correct else p["failed"]
     explanations = []
 
     # ===== TOTALS =====
     if "тб 2.5" in bet_lower or "over 2.5" in bet_lower or ("тб" in bet_lower and "2.5" in bet_type):
         if is_correct:
-            explanations.append(f"Матч завершился {score_str} — всего {total_goals} голов (>2.5 ✓)")
-            explanations.append("Команды показали результативный футбол")
+            explanations.append(p["over_ok"].format(score=score_str, goals=total_goals))
+            explanations.append(p["productive"])
         else:
-            explanations.append(f"Матч завершился {score_str} — всего {total_goals} гол(а) (<2.5)")
+            explanations.append(p["over_fail"].format(score=score_str, goals=total_goals))
             if total_goals == 0:
-                explanations.append("Ни одна команда не смогла забить")
+                explanations.append(p["no_goals"])
             elif total_goals == 1:
-                explanations.append("Очень закрытый матч, мало моментов")
+                explanations.append(p["closed"])
             else:
-                explanations.append("Не хватило всего 1 гола для захода")
+                explanations.append(p["one_short"])
 
     elif "тм 2.5" in bet_lower or "under 2.5" in bet_lower or ("тм" in bet_lower and "2.5" in bet_type):
         if is_correct:
-            explanations.append(f"Матч завершился {score_str} — всего {total_goals} гол(а) (<2.5 ✓)")
-            explanations.append("Команды сыграли аккуратно")
+            explanations.append(p["under_ok"].format(score=score_str, goals=total_goals))
+            explanations.append(p["careful"])
         else:
-            explanations.append(f"Матч завершился {score_str} — {total_goals} голов (>2.5)")
-            explanations.append("Матч получился слишком результативным")
+            explanations.append(p["under_fail"].format(score=score_str, goals=total_goals))
+            explanations.append(p["too_many"])
 
     # ===== HOME WIN П1 =====
     elif "п1" in bet_lower or bet_type == "1":
         if is_correct:
             diff = home_score - away_score
-            explanations.append(f"{home_short} победили {score_str}")
+            explanations.append(p["home_won"].format(team=home_short, score=score_str))
             if diff >= 3:
-                explanations.append("Разгромная победа хозяев!")
+                explanations.append(p["home_crush"])
             elif diff == 2:
-                explanations.append("Уверенная победа дома")
+                explanations.append(p["home_solid"])
             else:
-                explanations.append("Домашний фактор сыграл свою роль")
+                explanations.append(p["home_factor"])
         else:
             if home_score < away_score:
-                explanations.append(f"{home_short} проиграли дома {score_str}")
-                explanations.append(f"{away_short} оказались сильнее на выезде")
+                explanations.append(p["home_lost"].format(team=home_short, score=score_str))
+                explanations.append(p["away_better"].format(team=away_short))
             else:
-                explanations.append(f"Ничья {score_str} — {home_short} не смогли дожать")
-                explanations.append("Хозяевам не хватило остроты в атаке")
+                explanations.append(p["draw_home"].format(score=score_str, team=home_short))
+                explanations.append(p["lack_attack"])
 
     # ===== AWAY WIN П2 =====
     elif "п2" in bet_lower or bet_type == "2":
         if is_correct:
+            explanations.append(p["away_won"].format(team=away_short, score=score_str))
             diff = away_score - home_score
-            explanations.append(f"{away_short} победили на выезде {score_str}")
             if diff >= 2:
-                explanations.append("Гости полностью переиграли хозяев")
+                explanations.append(p["away_dominate"])
             else:
-                explanations.append("Крепкая гостевая победа")
+                explanations.append(p["away_solid"])
         else:
             if away_score < home_score:
-                explanations.append(f"{away_short} проиграли {score_str}")
-                explanations.append(f"{home_short} не отдали победу дома")
+                explanations.append(p["away_lost"].format(team=away_short, score=score_str))
+                explanations.append(p["home_held"].format(team=home_short))
             else:
-                explanations.append(f"Ничья {score_str} — {away_short} не реализовали моменты")
-                explanations.append("Гостям не хватило хладнокровия")
+                explanations.append(p["draw_away"].format(score=score_str, team=away_short))
+                explanations.append(p["lack_cold"])
 
     # ===== DRAW Х =====
     elif "ничья" in bet_lower or bet_lower == "х" or bet_lower == "x":
         if is_correct:
-            explanations.append(f"Ничья {score_str} — команды не выявили сильнейшего")
+            explanations.append(p["draw_ok"].format(score=score_str))
             if total_goals == 0:
-                explanations.append("Нулевая ничья — обоюдная осторожность")
+                explanations.append(p["draw_00"])
             else:
-                explanations.append("Равная игра, справедливый результат")
+                explanations.append(p["draw_fair"])
         else:
             if home_score > away_score:
-                explanations.append(f"{home_short} выиграли {score_str}")
+                explanations.append(p["team_won"].format(team=home_short, score=score_str))
             else:
-                explanations.append(f"{away_short} выиграли {score_str}")
-            explanations.append("Одна из команд оказалась сильнее")
+                explanations.append(p["team_won"].format(team=away_short, score=score_str))
+            explanations.append(p["one_stronger"])
 
     # ===== DOUBLE CHANCE 1X =====
     elif "1x" in bet_lower or "п1 или х" in bet_lower:
         if is_correct:
             if home_score > away_score:
-                explanations.append(f"{home_short} победили {score_str}")
+                explanations.append(p["home_won"].format(team=home_short, score=score_str))
             else:
-                explanations.append(f"Ничья {score_str} — хозяева не проиграли")
-            explanations.append("Двойной шанс отработал!")
+                explanations.append(p["dc_no_lose"].format(score=score_str, team=home_short))
+            explanations.append(p["dc_ok"])
         else:
-            explanations.append(f"{away_short} выиграли на выезде {score_str}")
-            explanations.append(f"Гости удивили — хозяева провалились")
+            explanations.append(p["away_won"].format(team=away_short, score=score_str))
+            explanations.append(p["away_surprise"])
 
     # ===== DOUBLE CHANCE X2 =====
     elif "x2" in bet_lower or "2x" in bet_lower or "х или п2" in bet_lower:
         if is_correct:
             if away_score > home_score:
-                explanations.append(f"{away_short} победили {score_str}")
+                explanations.append(p["away_won"].format(team=away_short, score=score_str))
             else:
-                explanations.append(f"Ничья {score_str} — гости не проиграли")
-            explanations.append("Двойной шанс отработал!")
+                explanations.append(p["dc_no_lose"].format(score=score_str, team=away_short))
+            explanations.append(p["dc_ok"])
         else:
-            explanations.append(f"{home_short} победили дома {score_str}")
-            explanations.append("Хозяева были сильнее")
+            explanations.append(p["home_won"].format(team=home_short, score=score_str))
+            explanations.append(p["home_stronger"])
 
     # ===== BTTS =====
     elif "btts" in bet_lower or "обе забьют" in bet_lower:
-        both_scored = home_score > 0 and away_score > 0
         if is_correct:
-            explanations.append(f"Обе забили! Счёт {score_str}")
-            explanations.append("Атакующий футбол с обеих сторон")
+            explanations.append(p["btts_ok"].format(score=score_str))
+            explanations.append(p["btts_attack"])
         else:
             if home_score == 0 and away_score == 0:
-                explanations.append(f"Счёт 0:0 — никто не забил")
-                explanations.append("Вратари были в ударе")
+                explanations.append(p["btts_00"])
+                explanations.append(p["gk_fire"])
             elif home_score == 0:
-                explanations.append(f"{home_short} не забили (счёт {score_str})")
-                explanations.append("Атака хозяев не сработала")
+                explanations.append(p["no_score_home"].format(team=home_short, score=score_str))
+                explanations.append(p["attack_fail"])
             else:
-                explanations.append(f"{away_short} не забили (счёт {score_str})")
-                explanations.append("Гости не реализовали моменты")
+                explanations.append(p["no_score_away"].format(team=away_short, score=score_str))
+                explanations.append(p["away_wasted"])
 
     # ===== HANDICAP ФОРА =====
     elif "фора" in bet_lower or "handicap" in bet_lower:
         if is_correct:
-            explanations.append(f"Фора зашла! Счёт {score_str}")
-            explanations.append("Расчёт на форе оправдался")
+            explanations.append(p["hcap_ok"].format(score=score_str))
+            explanations.append(p["hcap_math"])
         else:
-            explanations.append(f"Фора не зашла. Счёт {score_str}")
+            explanations.append(p["hcap_fail"].format(score=score_str))
             diff = abs(home_score - away_score)
             if diff == 0:
-                explanations.append("Ничья убила фору")
+                explanations.append(p["draw_kill"])
             else:
-                explanations.append(f"Разница голов ({diff}) не покрыла фору")
+                explanations.append(p["diff_not_cover"].format(diff=diff))
 
     # ===== GENERIC =====
     else:
         if is_correct:
-            explanations.append(f"Ставка зашла! Счёт {score_str}")
+            explanations.append(p["bet_ok"].format(score=score_str))
         else:
-            explanations.append(f"Ставка не зашла. Счёт {score_str}")
-            explanations.append("Футбол непредсказуем")
+            explanations.append(p["bet_fail"].format(score=score_str))
+            explanations.append(p["unpredictable"])
 
     # Add encouragement
     if is_correct:
-        explanations.append(lbl["good_call"])
+        explanations.append(p["good_call"])
     else:
-        explanations.append(lbl["variance"])
-        explanations.append(lbl["keep_going"])
+        explanations.append(p["variance"])
+        explanations.append(p["keep_going"])
 
     # Format output
     result = f"{header}\n"
