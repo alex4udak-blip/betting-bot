@@ -3260,46 +3260,58 @@ def get_clean_stats() -> dict:
     A duplicate is: same (user_id, match_id, bet_type, bet_rank).
     Different bet types or ranks (main vs alt) are NOT duplicates.
     """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
 
-    # Count unique predictions (first per user+match+bet_type+bet_rank)
-    c.execute("""
-        WITH unique_preds AS (
-            SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY user_id, match_id, bet_type, bet_rank
-                ORDER BY predicted_at ASC
-            ) as rn
-            FROM predictions
-            WHERE is_correct IS NOT NULL
-        )
-        SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
-        FROM unique_preds WHERE rn = 1
-    """)
-    row = c.fetchone()
-    total = row[0] or 0
-    correct = row[1] or 0
+        # Count unique predictions (first per user+match+bet_type+bet_rank)
+        c.execute("""
+            WITH unique_preds AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY user_id, match_id, bet_type, bet_rank
+                    ORDER BY predicted_at ASC
+                ) as rn
+                FROM predictions
+                WHERE is_correct IS NOT NULL
+            )
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+            FROM unique_preds WHERE rn = 1
+        """)
+        row = c.fetchone()
+        total = row[0] or 0
+        correct = row[1] or 0
 
-    # Current stats (with duplicates)
-    c.execute("""SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
-                 FROM predictions WHERE is_correct IS NOT NULL""")
-    row2 = c.fetchone()
-    total_with_dups = row2[0] or 0
-    correct_with_dups = row2[1] or 0
+        # Current stats (with duplicates)
+        c.execute("""SELECT COUNT(*), SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END)
+                     FROM predictions WHERE is_correct IS NOT NULL""")
+        row2 = c.fetchone()
+        total_with_dups = row2[0] or 0
+        correct_with_dups = row2[1] or 0
 
-    conn.close()
+        conn.close()
 
-    return {
-        "clean_total": total,
-        "clean_correct": correct,
-        "clean_accuracy": round(correct / total * 100, 1) if total > 0 else 0,
-        "with_dups_total": total_with_dups,
-        "with_dups_correct": correct_with_dups,
-        "with_dups_accuracy": round(correct_with_dups / total_with_dups * 100, 1) if total_with_dups > 0 else 0,
-        "duplicates_count": total_with_dups - total
-    }
+        return {
+            "clean_total": total,
+            "clean_correct": correct,
+            "clean_accuracy": round(correct / total * 100, 1) if total > 0 else 0,
+            "with_dups_total": total_with_dups,
+            "with_dups_correct": correct_with_dups,
+            "with_dups_accuracy": round(correct_with_dups / total_with_dups * 100, 1) if total_with_dups > 0 else 0,
+            "duplicates_count": total_with_dups - total
+        }
+    except Exception as e:
+        logger.error(f"get_clean_stats error: {e}")
+        return {
+            "clean_total": 0,
+            "clean_correct": 0,
+            "clean_accuracy": 0,
+            "with_dups_total": 0,
+            "with_dups_correct": 0,
+            "with_dups_accuracy": 0,
+            "duplicates_count": 0
+        }
 
 
 def get_roi_stats(user_id: int = None) -> dict:
@@ -9408,7 +9420,27 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
+    # Check for pending predictions first
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NULL")
+    pending_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NOT NULL")
+    verified_count = c.fetchone()[0]
+
+    if verified_count == 0:
+        await update.message.reply_text(
+            f"⚠️ Нет проверенных predictions!\n\n"
+            f"📊 Pending: {pending_count}\n"
+            f"📊 Verified: {verified_count}\n\n"
+            f"💡 Используй /forcecheck для проверки всех pending"
+        )
+        conn.close()
+        return
+
     text = "📊 **ДЕТАЛЬНЫЙ АНАЛИЗ ТОЧНОСТИ**\n" + "=" * 35 + "\n\n"
+
+    if pending_count > 0:
+        text += f"⚠️ Pending predictions: {pending_count}\n\n"
 
     # Overall stats
     c.execute("""
