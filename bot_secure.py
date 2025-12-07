@@ -12062,6 +12062,148 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(result_text)
 
 
+async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to analyze ALL today's matches one by one with summary"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    # Get today's matches
+    await update.message.reply_text("🔄 Загружаю все матчи на сегодня...")
+
+    matches = await get_matches(date_filter="today", use_cache=False)
+
+    if not matches:
+        await update.message.reply_text("❌ Нет матчей на сегодня!")
+        return
+
+    # Sort by time
+    matches.sort(key=lambda x: x.get("utcDate", ""))
+
+    total = len(matches)
+    await update.message.reply_text(f"""📊 **Массовый анализ матчей**
+
+├ Всего матчей: {total}
+├ Пауза между анализами: 3 сек
+└ Примерное время: {total * 25 // 60} минут
+
+🔄 Начинаю анализ...""", parse_mode="Markdown")
+
+    # Track results
+    results = {
+        "analyzed": 0,
+        "good_bets": [],  # (match, bet_type, confidence)
+        "errors": 0,
+        "skipped": 0
+    }
+
+    progress_msg = await update.message.reply_text("⏳ Прогресс: 0%")
+
+    for i, match in enumerate(matches):
+        home = match.get("homeTeam", {}).get("name", "?")
+        away = match.get("awayTeam", {}).get("name", "?")
+        comp = match.get("competition", {}).get("name", "?")
+        match_time = match.get("utcDate", "")[:16].replace("T", " ")
+
+        try:
+            # Run analysis
+            analysis, ml_features = await analyze_match_enhanced(match, None, "ru")
+
+            if analysis and "AI unavailable" not in analysis:
+                results["analyzed"] += 1
+
+                # Extract main bet info
+                main_bet_match = re.search(r'ОСНОВНАЯ СТАВКА.*?[Уу]веренность[:\s]*(\d+)%', analysis, re.DOTALL | re.IGNORECASE)
+                if main_bet_match:
+                    confidence = int(main_bet_match.group(1))
+
+                    # Extract bet type
+                    bet_section = re.search(r'ОСНОВНАЯ СТАВКА.*?(?=📈|АЛЬТЕРНАТИВ|$)', analysis, re.DOTALL | re.IGNORECASE)
+                    bet_type = "?"
+                    if bet_section:
+                        section = bet_section.group(0).lower()
+                        if "тб 2.5" in section or "тотал больше" in section:
+                            bet_type = "ТБ 2.5"
+                        elif "тм 2.5" in section or "тотал меньше" in section:
+                            bet_type = "ТМ 2.5"
+                        elif "п1 или х" in section or "1x" in section:
+                            bet_type = "1X"
+                        elif "х или п2" in section or "x2" in section:
+                            bet_type = "X2"
+                        elif "btts" in section or "обе забьют" in section:
+                            bet_type = "BTTS"
+                        elif "п2" in section:
+                            bet_type = "П2"
+                        elif "п1" in section:
+                            bet_type = "П1"
+                        elif "ничья" in section:
+                            bet_type = "Х"
+
+                    # Track good bets (confidence >= 65)
+                    if confidence >= 65:
+                        results["good_bets"].append({
+                            "match": f"{home} vs {away}",
+                            "comp": comp,
+                            "time": match_time,
+                            "bet": bet_type,
+                            "conf": confidence
+                        })
+            else:
+                results["skipped"] += 1
+
+        except Exception as e:
+            logger.error(f"Error analyzing {home} vs {away}: {e}")
+            results["errors"] += 1
+
+        # Update progress every 5 matches
+        if (i + 1) % 5 == 0 or i == total - 1:
+            pct = int((i + 1) / total * 100)
+            try:
+                await progress_msg.edit_text(f"⏳ Прогресс: {pct}% ({i+1}/{total})\n└ Последний: {home} vs {away}")
+            except:
+                pass
+
+        # Delay between analyses to avoid rate limiting
+        if i < total - 1:
+            await asyncio.sleep(3)
+
+    # Build summary
+    summary = f"""✅ **Массовый анализ завершён!**
+
+📊 **Статистика:**
+├ Проанализировано: {results['analyzed']}/{total}
+├ Хороших ставок (≥65%): {len(results['good_bets'])}
+├ Пропущено: {results['skipped']}
+└ Ошибок: {results['errors']}
+
+"""
+
+    if results["good_bets"]:
+        # Sort by confidence
+        results["good_bets"].sort(key=lambda x: x["conf"], reverse=True)
+
+        summary += "🎯 **ТОП ставки дня:**\n"
+        for i, bet in enumerate(results["good_bets"][:15], 1):
+            summary += f"{i}. **{bet['conf']}%** {bet['bet']} - {bet['match']}\n"
+            summary += f"   └ {bet['comp']} | {bet['time']}\n"
+
+    # Try to send with Markdown, fallback to plain
+    try:
+        await update.message.reply_text(summary, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Markdown error in analyzeall summary: {e}")
+        plain_summary = summary.replace("**", "")
+        await update.message.reply_text(plain_summary)
+
+    # Clean up progress message
+    try:
+        await progress_msg.delete()
+    except:
+        pass
+
+
 async def check_live_matches(context: ContextTypes.DEFAULT_TYPE):
     """Check upcoming matches and send alerts"""
     global sent_alerts
@@ -14276,6 +14418,7 @@ def main():
     app.add_handler(CommandHandler("testalert", testalert_cmd))
     app.add_handler(CommandHandler("checkresults", check_results_cmd))
     app.add_handler(CommandHandler("forcecheck", force_check_cmd))  # Admin: force-check ALL pending
+    app.add_handler(CommandHandler("analyzeall", analyze_all_cmd))  # Admin: analyze all today's matches
     app.add_handler(CommandHandler("debug", debug_cmd))
     app.add_handler(CommandHandler("premium", premium_cmd))
     app.add_handler(CommandHandler("ref", referral_cmd))
