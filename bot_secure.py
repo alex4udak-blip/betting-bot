@@ -139,7 +139,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит в 1win — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит у партнёра — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -252,7 +252,7 @@ TRANSLATIONS = {
         # Premium page
         "premium_title": "💎 **ПРЕМИУМ ДОСТУП**",
         "premium_unlimited": "🎯 Безлимитные прогнозы с точностью 70%+",
-        "premium_option1_title": "**Вариант 1: Депозит в 1win** 🎰",
+        "premium_option1_title": "**Вариант 1: Депозит у партнёра** 🎰",
         "premium_option1_desc": "Сделай депозит — получи премиум автоматически!",
         "premium_option2_title": "**Вариант 2: Крипта (USDT/TON)** 💰",
         "premium_option2_crypto": "Выбери тариф ниже — оплата через @CryptoBot",
@@ -262,7 +262,7 @@ TRANSLATIONS = {
         "premium_earned": "Уже заработано: **{days} дней**",
         "premium_click_below": "Нажми кнопку ниже 👇",
         "premium_after_payment": "После оплаты — скинь скрин @{support}",
-        "premium_deposit_btn": "🎰 Депозит в 1win",
+        "premium_deposit_btn": "🎰 Депозит у партнёра",
         "premium_contact_btn": "💬 Написать @{support}",
         "premium_friends_btn": "👥 Бесплатно (друзья)",
         "premium_status": "✅ У тебя премиум до: {date}",
@@ -318,8 +318,8 @@ TRANSLATIONS = {
         "onboard_try_now": "Попробуй прямо сейчас 👇",
         "try_prediction_btn": "🎯 Попробовать прогноз",
         "where_to_bet": "🎰 **Где делать ставки:**",
-        "bet_partner_text": "Делай ставки у нашего партнёра 1win — бонус +500% на первый депозит!",
-        "open_1win_btn": "🎰 Открыть 1win",
+        "bet_partner_text": "Делай ставки у нашего партнёра — бонус на первый депозит!",
+        "open_1win_btn": "🎰 Открыть букмекера",
         # Hot match alert
         "hot_match_title": "🔥 **ГОРЯЧИЙ МАТЧ!**",
         "hot_match_starts": "⏰ Начало через {hours}ч",
@@ -342,7 +342,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit on 1win — get premium automatically.\n\n👇 Tap the button below:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit with our partner — get premium automatically.\n\n👇 Tap the button below:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -455,7 +455,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         # Premium page
         "premium_title": "💎 **PREMIUM ACCESS**",
         "premium_unlimited": "🎯 Unlimited predictions with 70%+ accuracy",
-        "premium_option1_title": "**Option 1: Deposit on 1win** 🎰",
+        "premium_option1_title": "**Option 1: Partner deposit** 🎰",
         "premium_option1_desc": "Make a deposit — get premium automatically!",
         "premium_option2_title": "**Option 2: Crypto (USDT/TON)** 💰",
         "premium_option2_crypto": "Choose plan below — pay via @CryptoBot",
@@ -465,7 +465,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "premium_earned": "Already earned: **{days} days**",
         "premium_click_below": "Click button below 👇",
         "premium_after_payment": "After payment — send screenshot to @{support}",
-        "premium_deposit_btn": "🎰 Deposit on 1win",
+        "premium_deposit_btn": "🎰 Partner deposit",
         "premium_contact_btn": "💬 Contact @{support}",
         "premium_friends_btn": "👥 Free (invite friends)",
         "premium_status": "✅ You have premium until: {date}",
@@ -515,8 +515,8 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "onboard_try_now": "Try it now 👇",
         "try_prediction_btn": "🎯 Try a prediction",
         "where_to_bet": "🎰 **Where to bet:**",
-        "bet_partner_text": "Bet with our partner 1win — +500% bonus on first deposit!",
-        "open_1win_btn": "🎰 Open 1win",
+        "bet_partner_text": "Bet with our partner — bonus on first deposit!",
+        "open_1win_btn": "🎰 Open bookmaker",
         "hot_match_title": "🔥 **HOT MATCH!**",
         "hot_match_starts": "⏰ Starts in {hours}h",
         "hot_match_confidence": "📊 Confidence: {percent}%",
@@ -537,7 +537,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito no 1win — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito com nosso parceiro — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -650,7 +650,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         # Premium page
         "premium_title": "💎 **ACESSO PREMIUM**",
         "premium_unlimited": "🎯 Previsões ilimitadas com 70%+ de precisão",
-        "premium_option1_title": "**Opção 1: Depósito no 1win** 🎰",
+        "premium_option1_title": "**Opção 1: Depósito com parceiro** 🎰",
         "premium_option1_desc": "Faça um depósito — ganhe premium automaticamente!",
         "premium_option2_title": "**Opção 2: Cripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Escolha o plano abaixo — pague via @CryptoBot",
@@ -660,7 +660,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "premium_earned": "Já ganhou: **{days} dias**",
         "premium_click_below": "Clique no botão abaixo 👇",
         "premium_after_payment": "Após o pagamento — envie print para @{support}",
-        "premium_deposit_btn": "🎰 Depósito no 1win",
+        "premium_deposit_btn": "🎰 Depósito com parceiro",
         "premium_contact_btn": "💬 Contatar @{support}",
         "premium_friends_btn": "👥 Grátis (convide amigos)",
         "premium_status": "✅ Você tem premium até: {date}",
@@ -710,8 +710,8 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "onboard_try_now": "Tente agora 👇",
         "try_prediction_btn": "🎯 Testar previsão",
         "where_to_bet": "🎰 **Onde apostar:**",
-        "bet_partner_text": "Aposte com nosso parceiro 1win — bônus +500% no primeiro depósito!",
-        "open_1win_btn": "🎰 Abrir 1win",
+        "bet_partner_text": "Aposte com nosso parceiro — bônus no primeiro depósito!",
+        "open_1win_btn": "🎰 Abrir casa de apostas",
         "hot_match_title": "🔥 **JOGO QUENTE!**",
         "hot_match_starts": "⏰ Começa em {hours}h",
         "hot_match_confidence": "📊 Confiança: {percent}%",
@@ -732,7 +732,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito en 1win — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito con nuestro socio — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -845,7 +845,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         # Premium page
         "premium_title": "💎 **ACCESO PREMIUM**",
         "premium_unlimited": "🎯 Pronósticos ilimitados con 70%+ de precisión",
-        "premium_option1_title": "**Opción 1: Depósito en 1win** 🎰",
+        "premium_option1_title": "**Opción 1: Depósito con socio** 🎰",
         "premium_option1_desc": "¡Haz un depósito — obtén premium automáticamente!",
         "premium_option2_title": "**Opción 2: Cripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Elige el plan abajo — paga vía @CryptoBot",
@@ -855,7 +855,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "premium_earned": "Ya ganaste: **{days} días**",
         "premium_click_below": "Haz clic en el botón abajo 👇",
         "premium_after_payment": "Después del pago — envía captura a @{support}",
-        "premium_deposit_btn": "🎰 Depósito en 1win",
+        "premium_deposit_btn": "🎰 Depósito con socio",
         "premium_contact_btn": "💬 Contactar @{support}",
         "premium_friends_btn": "👥 Gratis (invita amigos)",
         "premium_status": "✅ Tienes premium hasta: {date}",
@@ -905,8 +905,8 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "onboard_try_now": "Pruébalo ahora 👇",
         "try_prediction_btn": "🎯 Probar pronóstico",
         "where_to_bet": "🎰 **Dónde apostar:**",
-        "bet_partner_text": "Apuesta con nuestro socio 1win — ¡bono +500% en primer depósito!",
-        "open_1win_btn": "🎰 Abrir 1win",
+        "bet_partner_text": "Apuesta con nuestro socio — ¡bono en primer depósito!",
+        "open_1win_btn": "🎰 Abrir casa de apuestas",
         "hot_match_title": "🔥 **¡PARTIDO CALIENTE!**",
         "hot_match_starts": "⏰ Empieza en {hours}h",
         "hot_match_confidence": "📊 Confianza: {percent}%",
@@ -927,7 +927,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "favorites": "⭐ Favorit",
         "settings": "⚙️ Pengaturan",
         "help_btn": "❓ Bantuan",
-        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit di 1win — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
+        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit dengan mitra kami — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
         "place_bet": "🎰 Pasang taruhan",
         "no_matches": "Tidak ada pertandingan",
         "analyzing": "🔍 Menganalisis...",
@@ -1040,7 +1040,7 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         # Premium page
         "premium_title": "💎 **AKSES PREMIUM**",
         "premium_unlimited": "🎯 Prediksi tak terbatas dengan akurasi 70%+",
-        "premium_option1_title": "**Opsi 1: Deposit di 1win** 🎰",
+        "premium_option1_title": "**Opsi 1: Deposit dengan mitra** 🎰",
         "premium_option1_desc": "Lakukan deposit — dapatkan premium otomatis!",
         "premium_option2_title": "**Opsi 2: Kripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Pilih paket di bawah — bayar via @CryptoBot",
@@ -1050,7 +1050,7 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "premium_earned": "Sudah diperoleh: **{days} hari**",
         "premium_click_below": "Klik tombol di bawah 👇",
         "premium_after_payment": "Setelah pembayaran — kirim screenshot ke @{support}",
-        "premium_deposit_btn": "🎰 Deposit di 1win",
+        "premium_deposit_btn": "🎰 Deposit dengan mitra",
         "premium_contact_btn": "💬 Hubungi @{support}",
         "premium_friends_btn": "👥 Gratis (undang teman)",
         "premium_status": "✅ Anda memiliki premium hingga: {date}",
@@ -1100,8 +1100,8 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "onboard_try_now": "Coba sekarang 👇",
         "try_prediction_btn": "🎯 Coba prediksi",
         "where_to_bet": "🎰 **Di mana bertaruh:**",
-        "bet_partner_text": "Taruhan dengan mitra kami 1win — bonus +500% pada deposit pertama!",
-        "open_1win_btn": "🎰 Buka 1win",
+        "bet_partner_text": "Taruhan dengan mitra kami — bonus pada deposit pertama!",
+        "open_1win_btn": "🎰 Buka bandar taruhan",
         "hot_match_title": "🔥 **PERTANDINGAN PANAS!**",
         "hot_match_starts": "⏰ Mulai dalam {hours}j",
         "hot_match_confidence": "📊 Kepercayaan: {percent}%",
@@ -1669,7 +1669,7 @@ async def notify_admins_new_user(bot, user_id: int, username: str = None, langua
         "organic": "🌱",
         "referral": "👥",
         "ads": "📢",
-        "1win": "🎰"
+        "partner": "🎰"
     }.get(source, "📥")
 
     lang_flag = {
@@ -8954,13 +8954,13 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"\n\n🎁 {get_text('referral_bonus_title', lang)}\n{get_text('referral_bonus_progress', lang).format(current=ref_bonus['progress'])}"
             keyboard = [
                 [InlineKeyboardButton("🎁 Получить бонус", callback_data="claim_ref_bonus")],
-                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+                [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
                  InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
             ]
         else:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+                [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
                  InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
             ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -9020,7 +9020,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
         keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -10221,7 +10221,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11115,7 +11115,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11426,7 +11426,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11481,7 +11481,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
         keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))

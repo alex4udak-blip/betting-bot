@@ -16,13 +16,13 @@ FOOTBALL_API_URL = "https://api.football-data.org/v4"
 ODDS_API_URL = "https://api.the-odds-api.com/v4"
 
 # ===== AFFILIATE & PAYMENTS =====
-# 1WIN Affiliate Link (Universal Router - auto GEO redirect)
-AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
+# TEMPORARY PLACEHOLDER - Original values saved in config_original_values.py.backup
+AFFILIATE_LINK = "https://example.com/betting-partner"  # Placeholder
 
-# Crypto wallets for manual payment
+# Crypto wallets for manual payment - TEMPORARY PLACEHOLDERS
 CRYPTO_WALLETS = {
-    "USDT_TRC20": os.getenv("CRYPTO_WALLET_USDT", "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC"),
-    "TON": os.getenv("CRYPTO_WALLET_TON", "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL")
+    "USDT_TRC20": os.getenv("CRYPTO_WALLET_USDT", "YOUR_USDT_TRC20_WALLET_HERE"),
+    "TON": os.getenv("CRYPTO_WALLET_TON", "YOUR_TON_WALLET_HERE")
 }
 
 # CryptoBot API token (get from @CryptoBot -> Crypto Pay -> My Apps)
@@ -59,7 +59,7 @@ ADMIN_IDS: Set[int] = {
 }
 
 # Support username for manual payment/help (without @)
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "alex4udak")
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "support_placeholder")
 
 # ===== DATABASE =====
 # Use /data directory if available (for Docker/persistent storage)
