@@ -5425,6 +5425,129 @@ def suggest_alternative_bet(bet_category: str, features: dict, risky_conditions:
     return None
 
 
+def get_smart_learning_context_for_claude(features: dict, league_code: str = None) -> str:
+    """Generate learning context for Claude prompt based on historical patterns.
+
+    This tells Claude BEFORE analysis what conditions historically led to errors,
+    so it can make better decisions (not just adjust confidence after).
+
+    Returns formatted string for Claude prompt.
+    """
+    if not features:
+        return ""
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    context_parts = []
+    warnings = []
+    recommendations = []
+
+    # Categories to check
+    bet_categories = [
+        ("outcomes_home", "П1 (победа хозяев)"),
+        ("outcomes_away", "П2 (победа гостей)"),
+        ("outcomes_draw", "Ничья"),
+        ("totals_over", "Тотал больше 2.5"),
+        ("totals_under", "Тотал меньше 2.5"),
+        ("btts", "Обе забьют")
+    ]
+
+    for category, category_name in bet_categories:
+        conditions = extract_feature_conditions(features, category)
+
+        if not conditions:
+            continue
+
+        category_issues = []
+        category_strengths = []
+
+        for condition in conditions:
+            condition_key = get_condition_key(category, condition)
+
+            c.execute("""SELECT wins, losses, total_predictions, suggested_adjustment
+                         FROM feature_error_patterns
+                         WHERE condition_key = ? AND total_predictions >= 5""",
+                      (condition_key,))
+            row = c.fetchone()
+
+            if row:
+                wins, losses, total, adj = row
+                win_rate = wins / total if total > 0 else 0.5
+
+                # Format condition name for readability
+                condition_readable = condition.replace("_", " ")
+
+                if win_rate < 0.40:  # Very risky
+                    category_issues.append({
+                        "condition": condition_readable,
+                        "win_rate": win_rate,
+                        "sample": total,
+                        "severity": "high"
+                    })
+                elif win_rate < 0.48:  # Moderately risky
+                    category_issues.append({
+                        "condition": condition_readable,
+                        "win_rate": win_rate,
+                        "sample": total,
+                        "severity": "medium"
+                    })
+                elif win_rate > 0.60:  # Strong pattern
+                    category_strengths.append({
+                        "condition": condition_readable,
+                        "win_rate": win_rate,
+                        "sample": total
+                    })
+
+        # Generate warnings for risky categories
+        if category_issues:
+            high_risk = [i for i in category_issues if i["severity"] == "high"]
+            if high_risk:
+                worst = min(high_risk, key=lambda x: x["win_rate"])
+                warnings.append(
+                    f"🔴 {category_name}: ОСТОРОЖНО! При условии '{worst['condition']}' "
+                    f"винрейт только {worst['win_rate']:.0%} (n={worst['sample']}). "
+                    f"Рассмотри альтернативу!"
+                )
+            elif category_issues:
+                issue = category_issues[0]
+                warnings.append(
+                    f"🟡 {category_name}: При условии '{issue['condition']}' "
+                    f"винрейт {issue['win_rate']:.0%} - ниже среднего."
+                )
+
+        # Generate recommendations for strong patterns
+        if category_strengths:
+            best = max(category_strengths, key=lambda x: x["win_rate"])
+            recommendations.append(
+                f"🟢 {category_name}: Условие '{best['condition']}' исторически хорошо работает "
+                f"({best['win_rate']:.0%} винрейт, n={best['sample']})"
+            )
+
+    conn.close()
+
+    # Build final context
+    if not warnings and not recommendations:
+        return ""
+
+    context_parts.append("\n🧠 SMART LEARNING - УРОКИ ИЗ ПРОШЛЫХ ОШИБОК:")
+    context_parts.append("(Основано на анализе исторических прогнозов бота)")
+
+    if warnings:
+        context_parts.append("\n⚠️ ПРЕДУПРЕЖДЕНИЯ для этого матча:")
+        for w in warnings[:4]:  # Max 4 warnings
+            context_parts.append(f"  {w}")
+
+    if recommendations:
+        context_parts.append("\n✅ СИЛЬНЫЕ СТОРОНЫ для этого матча:")
+        for r in recommendations[:3]:  # Max 3 recommendations
+            context_parts.append(f"  {r}")
+
+    context_parts.append("\n💡 ВАЖНО: Учти эти данные при выборе ставки! Если условие рискованное - рассмотри более безопасную альтернативу (1X вместо П1, или другой тип ставки).")
+
+    return "\n".join(context_parts)
+
+
 def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dict) -> tuple:
     """Apply all learning adjustments to confidence.
 
@@ -8440,6 +8563,13 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += f"\n{learning_context}\n\n"
         analysis_data += "⚠️ ВАЖНО: Учти эти уроки при анализе! Не повторяй прошлые ошибки.\n\n"
 
+    # ===== SMART LEARNING - CONDITION-BASED FEEDBACK =====
+    # Tell Claude about specific conditions that historically led to errors/successes
+    # This influences HOW Claude analyzes, not just adjusts confidence after
+    smart_learning_context = get_smart_learning_context_for_claude(ml_features, comp_code)
+    if smart_learning_context:
+        analysis_data += f"{smart_learning_context}\n\n"
+
     # User settings for filtering
     filter_info = ""
     if user_settings:
@@ -8577,13 +8707,21 @@ CRITICAL ANALYSIS RULES:
    - 55-64%: Single factor + value → MODERATE
    - <55%: Skip or very small stake
 
-16. DIVERSIFY BET TYPES based on data:
+16. 🧠 SMART LEARNING - УЧИСЬ НА ОШИБКАХ (CRITICAL!):
+   - If "SMART LEARNING" section shows WARNING for a bet type → AVOID that bet or lower confidence by 15-20%!
+   - If it shows STRENGTH for a bet type → This bet historically works well, consider it!
+   - Example: "П1 при условии 'home many injuries' винрейт 35%" → DON'T recommend П1! Use 1X instead.
+   - Example: "Тотал больше 2.5 при условии 'high scoring teams' винрейт 68%" → GOOD bet to recommend!
+   - This is REAL DATA from bot's past predictions - trust it more than general rules!
+   - Your goal: Improve win rate by avoiding past mistakes and repeating successes!
+
+17. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
    - Close match → X2 or 1X (double chance)
 
-17. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
+18. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
    - No clear statistical edge → SKIP
    - Too many unknowns (injuries, rotation) → SKIP
    - Odds don't offer value → SKIP
