@@ -7072,6 +7072,82 @@ def format_web_context_for_claude(web_news: dict, weather: dict = None, lang: st
     return context
 
 
+def format_lineups_from_api(lineups: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format lineup and injury data from Football API (PRIMARY SOURCE).
+
+    This is more reliable than web search - use this data first!
+    """
+    if not lineups:
+        return ""
+
+    context = ""
+
+    # Official lineups from API
+    home_lineup = lineups.get("home_lineup", [])
+    away_lineup = lineups.get("away_lineup", [])
+
+    if home_lineup or away_lineup:
+        context += "\n📋 ОФИЦИАЛЬНЫЕ СОСТАВЫ (из API):\n"
+        if home_lineup:
+            players = [p.get("name", p) if isinstance(p, dict) else str(p) for p in home_lineup[:11]]
+            context += f"  {home_team}: {', '.join(players[:5])}...\n"
+        if away_lineup:
+            players = [p.get("name", p) if isinstance(p, dict) else str(p) for p in away_lineup[:11]]
+            context += f"  {away_team}: {', '.join(players[:5])}...\n"
+
+    # Injuries from API (CRITICAL DATA!)
+    home_injuries = lineups.get("home_injuries", [])
+    away_injuries = lineups.get("away_injuries", [])
+
+    total_injuries = len(home_injuries) + len(away_injuries)
+
+    if home_injuries or away_injuries:
+        context += f"\n🏥 ТРАВМЫ/ДИСКВАЛИФИКАЦИИ (из API) - ВСЕГО: {total_injuries}:\n"
+
+        if home_injuries:
+            context += f"  {home_team} ({len(home_injuries)} игроков):\n"
+            for inj in home_injuries[:5]:
+                if isinstance(inj, dict):
+                    name = inj.get("name", "Unknown")
+                    reason = inj.get("type", inj.get("reason", ""))
+                    context += f"    ❌ {name}"
+                    if reason:
+                        context += f" ({reason})"
+                    context += "\n"
+                else:
+                    context += f"    ❌ {inj}\n"
+            if len(home_injuries) > 5:
+                context += f"    ... и еще {len(home_injuries) - 5}\n"
+
+        if away_injuries:
+            context += f"  {away_team} ({len(away_injuries)} игроков):\n"
+            for inj in away_injuries[:5]:
+                if isinstance(inj, dict):
+                    name = inj.get("name", "Unknown")
+                    reason = inj.get("type", inj.get("reason", ""))
+                    context += f"    ❌ {name}"
+                    if reason:
+                        context += f" ({reason})"
+                    context += "\n"
+                else:
+                    context += f"    ❌ {inj}\n"
+            if len(away_injuries) > 5:
+                context += f"    ... и еще {len(away_injuries) - 5}\n"
+
+        # Add impact assessment
+        if total_injuries >= 8:
+            context += "  ⚠️ КРИТИЧНО: Много травм - высокая неопределенность!\n"
+        elif total_injuries >= 4:
+            context += "  ⚠️ Умеренные потери - учитывай в анализе\n"
+
+    # Match status
+    status = lineups.get("status", "")
+    if status and status != "SCHEDULED":
+        context += f"\n📌 Статус матча: {status}\n"
+
+    return context
+
+
 # ===== REFEREE STATISTICS =====
 # Average stats per game for top European referees
 # Data source: Transfermarkt, WhoScored (manually compiled, update periodically)
@@ -8466,16 +8542,35 @@ async def get_lineups(match_id: int) -> Optional[dict]:
                 if away_data.get("injuries"):
                     away_injuries = away_data.get("injuries", [])
 
-                # Get referee info
+                # Get referee info - try multiple fields
                 referees = data.get("referees", [])
                 main_referee = None
+
+                # Log referee data for debugging
+                if referees:
+                    logger.info(f"👨‍⚖️ API returned {len(referees)} referees: {referees}")
+                else:
+                    logger.warning(f"👨‍⚖️ No referees in API response for match {match_id}")
+
+                # Try to find main referee by type
                 for ref in referees:
-                    if ref.get("type") == "REFEREE":
+                    ref_type = ref.get("type", "").upper()
+                    if ref_type in ["REFEREE", "MAIN_REFEREE", "CENTRE_REFEREE"]:
                         main_referee = ref.get("name")
+                        logger.info(f"👨‍⚖️ Found main referee: {main_referee}")
                         break
+
                 # Fallback to first referee if no main found
                 if not main_referee and referees:
                     main_referee = referees[0].get("name")
+                    logger.info(f"👨‍⚖️ Using first referee as fallback: {main_referee}")
+
+                # Try alternate fields in API response
+                if not main_referee:
+                    # Some API responses have referee directly
+                    main_referee = data.get("referee")
+                    if main_referee:
+                        logger.info(f"👨‍⚖️ Found referee in alternate field: {main_referee}")
 
                 return {
                     "home_team": home_team,
@@ -9064,6 +9159,12 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
 
     if lineups and lineups.get('venue'):
         analysis_data += f"🏟️ Стадион: {lineups['venue']}\n\n"
+
+    # 📋 OFFICIAL LINEUPS AND INJURIES FROM API (PRIMARY SOURCE!)
+    lineups_context = format_lineups_from_api(lineups, home, away, lang)
+    if lineups_context:
+        analysis_data += lineups_context
+        analysis_data += "\n"
 
     # Odds with VALUE calculation, line movements, and bookmaker info
     if odds:
@@ -14349,8 +14450,8 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
 async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
     """Background task to track odds for upcoming matches.
 
-    This runs every 2 hours to build historical odds data for line movement detection.
-    By tracking odds over time, we can detect sharp money movements before user requests analysis.
+    This runs every 30 min to build historical odds data for line movement detection.
+    Prioritizes matches starting soon (within 6 hours) for more frequent tracking.
     """
     logger.info("=== TRACK ODDS JOB STARTED ===")
 
@@ -14362,8 +14463,24 @@ async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
             logger.info("No upcoming matches to track odds")
             return
 
+        # Sort matches by start time - prioritize soon-starting matches
+        now = datetime.now(timezone.utc)
+        matches_with_time = []
+        for m in matches:
+            try:
+                match_time = datetime.fromisoformat(m.get("utcDate", "").replace("Z", "+00:00"))
+                hours_until = (match_time - now).total_seconds() / 3600
+                matches_with_time.append((m, hours_until))
+            except:
+                matches_with_time.append((m, 999))
+
+        # Sort by hours until match (closest first)
+        matches_with_time.sort(key=lambda x: x[1])
+
         tracked = 0
-        for match in matches[:30]:  # Limit to 30 matches to conserve API credits
+        soon_matches = 0
+
+        for match, hours_until in matches_with_time[:40]:  # Track up to 40 matches
             home = match.get("homeTeam", {}).get("name", "")
             away = match.get("awayTeam", {}).get("name", "")
 
@@ -14375,13 +14492,16 @@ async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
 
             if odds:
                 tracked += 1
-                # Odds are automatically saved to odds_history in get_odds function
-                logger.debug(f"Tracked odds: {home} vs {away}")
+                if hours_until <= 6:
+                    soon_matches += 1
+                    logger.info(f"⚡ Tracked SOON match ({hours_until:.1f}h): {home} vs {away}")
+                else:
+                    logger.debug(f"Tracked odds: {home} vs {away}")
 
             # Small delay to not overwhelm API
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
-        logger.info(f"=== TRACK ODDS COMPLETED: {tracked} matches tracked ===")
+        logger.info(f"=== TRACK ODDS COMPLETED: {tracked} total, {soon_matches} within 6h ===")
 
     except Exception as e:
         logger.error(f"Track odds job error: {e}")
@@ -16123,7 +16243,7 @@ def main():
     job_queue.run_repeating(check_live_matches, interval=600, first=120)
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
     job_queue.run_repeating(check_predictions_results, interval=1200, first=300)  # Every 20 min
-    job_queue.run_repeating(track_upcoming_odds, interval=7200, first=600)  # Every 2 hours - track odds for line movements
+    job_queue.run_repeating(track_upcoming_odds, interval=1800, first=300)  # Every 30 min - track odds for line movements
     # Marketing jobs
     job_queue.run_repeating(send_marketing_notifications, interval=14400, first=1800)  # Every 4 hours
     job_queue.run_repeating(check_streak_milestones, interval=3600, first=900)  # Every hour
