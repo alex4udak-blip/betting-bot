@@ -1483,6 +1483,19 @@ def init_db():
         UNIQUE(bet_category, condition_key)
     )''')
 
+    # Coach history - for automatic new coach detection
+    c.execute('''CREATE TABLE IF NOT EXISTS coach_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id INTEGER,
+        team_name TEXT,
+        coach_id INTEGER,
+        coach_name TEXT,
+        contract_start TEXT,
+        first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        matches_tracked INTEGER DEFAULT 0,
+        UNIQUE(team_id, coach_id)
+    )''')
+
     # 1win deposits tracking
     c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3984,7 +3997,11 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["implied_away"] = 1 / features["odds_away"] if features["odds_away"] > 0 else 0.35
 
         # Line movement features (sharp money indicators)
-        movements = odds.get("_line_movements", {})
+        movements_raw = odds.get("_line_movements", {})
+        # Filter out metadata keys (start with _)
+        movements = {k: v for k, v in movements_raw.items()
+                    if not k.startswith("_") and isinstance(v, dict)}
+
         if movements:
             # Check each outcome for sharp money (odds dropped)
             for outcome_key in ["Home", "home", "1"]:
@@ -4009,7 +4026,7 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                     break
 
             # Overall sharp money detection
-            sharp_count = sum(1 for m in movements.values() if m.get("sharp"))
+            sharp_count = sum(1 for m in movements.values() if isinstance(m, dict) and m.get("sharp"))
             features["sharp_money_detected"] = 1 if sharp_count > 0 else 0
 
             # Direction: positive if home favored more now, negative if away
@@ -7429,40 +7446,121 @@ def is_derby_match(home_team: str, away_team: str) -> bool:
     return False
 
 
-# ===== COACH CHANGE TRACKING =====
-# Track recent coach changes - "new coach boost" typically lasts 2-3 matches
-# Format: "team_name": {"coach": "name", "appointed": "YYYY-MM-DD", "matches_since": N}
-# Update this periodically based on news
-
-RECENT_COACH_CHANGES = {
-    # Format: lowercase team name -> coach info
-    # Example entries (update with real data):
-    # "manchester united": {"coach": "Ruben Amorim", "appointed": "2024-11-11", "matches_since": 0},
-}
+# ===== COACH CHANGE TRACKING (API-BASED) =====
+# Automatically detects new coaches by comparing with history in database
+# No manual updates needed - data comes from Football Data API
 
 
-def get_coach_change_info(team_name: str) -> Optional[dict]:
-    """Check if team has a recent coach change.
+async def get_coach_from_api(team_id: int, team_name: str) -> Optional[dict]:
+    """Get coach info from Football Data API and detect if coach is new.
 
-    Returns dict with coach info if new coach (< 5 matches), None otherwise.
+    Returns dict with coach info and is_new flag if new coach detected.
     """
-    team_normalized = normalize_team_name(team_name)
+    if not team_id or not FOOTBALL_API_KEY:
+        return None
 
-    for team_key, info in RECENT_COACH_CHANGES.items():
-        if team_key in team_normalized or team_normalized in team_key:
-            matches = info.get("matches_since", 10)
-            if matches < 5:  # "New coach boost" period
-                return {
-                    "coach": info.get("coach", "Unknown"),
-                    "matches_since": matches,
-                    "is_new": matches <= 2,  # Very new (first 2 matches)
-                    "boost": 15 if matches <= 2 else 10 if matches <= 4 else 5,
-                }
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    session = await get_http_session()
+
+    try:
+        url = f"{FOOTBALL_API_URL}/teams/{team_id}"
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+                coach_data = data.get("coach")
+
+                if not coach_data:
+                    return None
+
+                coach_id = coach_data.get("id")
+                coach_name = coach_data.get("name", "Unknown")
+                contract = coach_data.get("contract", {})
+                contract_start = contract.get("start", "")
+
+                # Check if this is a new coach by comparing with history
+                is_new_coach = False
+                matches_tracked = 0
+
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+
+                # Get previous coach record for this team
+                c.execute("""SELECT coach_id, coach_name, matches_tracked
+                            FROM coach_history
+                            WHERE team_id = ?
+                            ORDER BY first_seen DESC LIMIT 1""", (team_id,))
+                prev_coach = c.fetchone()
+
+                if prev_coach:
+                    prev_coach_id, prev_coach_name, prev_matches = prev_coach
+
+                    if prev_coach_id != coach_id:
+                        # Different coach! This is a NEW coach
+                        is_new_coach = True
+                        matches_tracked = 0
+                        logger.info(f"🆕 New coach detected: {team_name} - {coach_name} (prev: {prev_coach_name})")
+
+                        # Insert new coach record
+                        c.execute("""INSERT OR REPLACE INTO coach_history
+                                    (team_id, team_name, coach_id, coach_name, contract_start, matches_tracked)
+                                    VALUES (?, ?, ?, ?, ?, 0)""",
+                                 (team_id, team_name, coach_id, coach_name, contract_start))
+                    else:
+                        # Same coach - increment matches tracked
+                        matches_tracked = prev_matches + 1
+                        c.execute("""UPDATE coach_history SET matches_tracked = ?
+                                    WHERE team_id = ? AND coach_id = ?""",
+                                 (matches_tracked, team_id, coach_id))
+
+                        # Still "new" if < 5 matches
+                        if matches_tracked < 5:
+                            is_new_coach = True
+                else:
+                    # First time seeing this team - save coach as baseline
+                    c.execute("""INSERT INTO coach_history
+                                (team_id, team_name, coach_id, coach_name, contract_start, matches_tracked)
+                                VALUES (?, ?, ?, ?, ?, 0)""",
+                             (team_id, team_name, coach_id, coach_name, contract_start))
+
+                    # Check if contract started recently (within 3 months)
+                    if contract_start:
+                        try:
+                            start_date = datetime.fromisoformat(contract_start)
+                            days_since = (datetime.now() - start_date).days
+                            if days_since < 90:  # Less than 3 months
+                                is_new_coach = True
+                                matches_tracked = max(0, days_since // 7)  # Estimate ~1 match/week
+                                logger.info(f"📋 First seen coach, recent contract: {team_name} - {coach_name} ({days_since} days)")
+                        except:
+                            pass
+
+                conn.commit()
+                conn.close()
+
+                if is_new_coach and matches_tracked < 5:
+                    # Calculate boost based on how new the coach is
+                    boost = 15 if matches_tracked <= 2 else 10 if matches_tracked <= 4 else 5
+
+                    return {
+                        "coach": coach_name,
+                        "coach_id": coach_id,
+                        "matches_since": matches_tracked,
+                        "is_new": matches_tracked <= 2,
+                        "boost": boost,
+                        "contract_start": contract_start
+                    }
+
+                return None
+
+    except Exception as e:
+        logger.error(f"Coach API error for {team_name}: {e}")
+
     return None
 
 
-def calculate_coach_factor(home_team: str, away_team: str) -> dict:
-    """Calculate coach change factor for both teams.
+async def calculate_coach_factor(home_team: str, away_team: str,
+                                  home_id: int = None, away_id: int = None) -> dict:
+    """Calculate coach change factor for both teams using API data.
 
     New coach typically brings:
     - First 2 matches: +15% motivation boost (honeymoon period)
@@ -7471,8 +7569,14 @@ def calculate_coach_factor(home_team: str, away_team: str) -> dict:
 
     Returns dict with home_new_coach, away_new_coach, and boost values.
     """
-    home_coach = get_coach_change_info(home_team)
-    away_coach = get_coach_change_info(away_team)
+    home_coach = None
+    away_coach = None
+
+    # Fetch coach data from API if team IDs are provided
+    if home_id:
+        home_coach = await get_coach_from_api(home_id, home_team)
+    if away_id:
+        away_coach = await get_coach_from_api(away_id, away_team)
 
     return {
         "home_new_coach": home_coach is not None,
@@ -8338,25 +8442,52 @@ def save_odds_history(match_key: str, bookmaker: str, odds_data: dict):
 
 
 def get_line_movement(match_key: str, current_odds: dict) -> dict:
-    """Compare current odds with historical to detect line movement"""
-    movements = {}
+    """Compare current odds with historical to detect line movement.
+
+    Returns dict with movements and metadata:
+    - '_has_history': True if we have historical data for comparison
+    - '_first_seen': timestamp of first recorded odds
+    - '_hours_tracked': how many hours we've been tracking
+    """
+    movements = {"_has_history": False, "_hours_tracked": 0}
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        # Get oldest recorded odds for this match (first time we saw it)
-        c.execute("""SELECT outcome, odds, recorded_at FROM odds_history
+
+        # Get oldest and count of records for this match
+        c.execute("""SELECT outcome, odds, recorded_at,
+                     MIN(recorded_at) OVER () as first_seen
+                     FROM odds_history
                      WHERE match_key = ?
                      ORDER BY recorded_at ASC""", (match_key,))
         rows = c.fetchall()
         conn.close()
 
         if not rows:
-            return {}
+            return movements
 
         first_odds = {}
-        for outcome, odds, _ in rows:
+        first_seen = None
+
+        for outcome, odds, recorded_at, first_ts in rows:
             if outcome not in first_odds:
                 first_odds[outcome] = odds
+            if first_seen is None and first_ts:
+                first_seen = first_ts
+
+        # Calculate how long we've been tracking
+        if first_seen:
+            try:
+                first_dt = datetime.fromisoformat(first_seen)
+                hours_tracked = (datetime.now() - first_dt).total_seconds() / 3600
+                movements["_hours_tracked"] = round(hours_tracked, 1)
+                movements["_first_seen"] = first_seen
+
+                # Only show movements if we have at least 1 hour of tracking
+                if hours_tracked >= 0.5:  # 30+ minutes of data
+                    movements["_has_history"] = True
+            except:
+                pass
 
         # Compare with current
         for outcome, current in current_odds.items():
@@ -8374,6 +8505,7 @@ def get_line_movement(match_key: str, current_odds: dict) -> dict:
                         "direction": direction,
                         "sharp": diff < -0.15  # Sharp money indicator (odds dropped significantly)
                     }
+
     except Exception as e:
         logger.error(f"Line movement error: {e}")
     return movements
@@ -8763,8 +8895,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     if motivation_context:
         analysis_data += motivation_context
 
-    # 👔 COACH CHANGE - new coach boost factor
-    coach_factor = calculate_coach_factor(home, away)
+    # 👔 COACH CHANGE - new coach boost factor (now API-based!)
+    coach_factor = await calculate_coach_factor(home, away, home_id, away_id)
     coach_context = format_coach_context(coach_factor, home, away, lang)
     if coach_context:
         analysis_data += coach_context
@@ -8825,17 +8957,28 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
 
         # Line movements (sharp money indicator)
         movements = odds.get("_line_movements", {})
-        if movements:
-            analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ:\n"
-            for outcome, mv in movements.items():
+        has_history = movements.get("_has_history", False)
+        hours_tracked = movements.get("_hours_tracked", 0)
+
+        # Filter out metadata keys to get actual movements
+        actual_movements = {k: v for k, v in movements.items()
+                          if not k.startswith("_") and isinstance(v, dict)}
+
+        if actual_movements:
+            analysis_data += f"\n📉 ДВИЖЕНИЕ ЛИНИЙ (за {hours_tracked:.1f}ч):\n"
+            for outcome, mv in actual_movements.items():
                 sharp_icon = "🔥" if mv.get("sharp") else ""
                 analysis_data += f"  {outcome}: {mv['first']} → {mv['current']} ({mv['direction']}{abs(mv['pct']):.1f}%) {sharp_icon}\n"
-            sharp_moves = [m for m in movements.values() if m.get("sharp")]
+            sharp_moves = [m for m in actual_movements.values() if m.get("sharp")]
             if sharp_moves:
                 analysis_data += "  ⚡ SHARP MONEY DETECTED - линия упала значительно!\n"
+        elif has_history:
+            # We have history but no significant movements
+            analysis_data += f"\n📉 ДВИЖЕНИЕ ЛИНИЙ (за {hours_tracked:.1f}ч): Стабильно ✓\n"
         else:
-            # Show stable lines message when no significant movement
-            analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ: Стабильно (нет значительных изменений)\n"
+            # First time seeing this match - explain
+            analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ: 📊 Начато отслеживание\n"
+            analysis_data += "  ℹ️ При повторном анализе покажем изменения коэффициентов\n"
 
         # Value bets (our odds vs average)
         value_bets = odds.get("_value_bets", {})
@@ -14056,6 +14199,47 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
     return result.strip()
 
 
+async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
+    """Background task to track odds for upcoming matches.
+
+    This runs every 2 hours to build historical odds data for line movement detection.
+    By tracking odds over time, we can detect sharp money movements before user requests analysis.
+    """
+    logger.info("=== TRACK ODDS JOB STARTED ===")
+
+    try:
+        # Get matches for next 48 hours across all leagues
+        matches = await get_matches(days=2)
+
+        if not matches:
+            logger.info("No upcoming matches to track odds")
+            return
+
+        tracked = 0
+        for match in matches[:30]:  # Limit to 30 matches to conserve API credits
+            home = match.get("homeTeam", {}).get("name", "")
+            away = match.get("awayTeam", {}).get("name", "")
+
+            if not home or not away:
+                continue
+
+            # Get odds for this match
+            odds = await get_odds(home, away)
+
+            if odds:
+                tracked += 1
+                # Odds are automatically saved to odds_history in get_odds function
+                logger.debug(f"Tracked odds: {home} vs {away}")
+
+            # Small delay to not overwhelm API
+            await asyncio.sleep(0.5)
+
+        logger.info(f"=== TRACK ODDS COMPLETED: {tracked} matches tracked ===")
+
+    except Exception as e:
+        logger.error(f"Track odds job error: {e}")
+
+
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
     """Check results of past predictions - grouped by match for combined notifications"""
     logger.info("=== CHECK RESULTS JOB STARTED ===")
@@ -15792,6 +15976,7 @@ def main():
     job_queue.run_repeating(check_live_matches, interval=600, first=120)
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
     job_queue.run_repeating(check_predictions_results, interval=1200, first=300)  # Every 20 min
+    job_queue.run_repeating(track_upcoming_odds, interval=7200, first=600)  # Every 2 hours - track odds for line movements
     # Marketing jobs
     job_queue.run_repeating(send_marketing_notifications, interval=14400, first=1800)  # Every 4 hours
     job_queue.run_repeating(check_streak_milestones, interval=3600, first=900)  # Every hour
