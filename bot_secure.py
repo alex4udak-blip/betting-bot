@@ -12143,96 +12143,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             }
 
-            if ml_status in ml_texts:
-                ml_text = ml_texts[ml_status].get(lang, ml_texts[ml_status]["en"])
-                analysis = analysis + f"\n\n{ml_text}"
-            # no_model - don't show anything
+            # ML adjustments applied internally, no display to user
+            # (confidence already includes ML corrections)
 
-        # Add Kelly Criterion recommendation (localized)
-        if confidence > 0 and odds_value > 1:
-            kelly_stake = calculate_kelly(confidence / 100, odds_value)
-            if kelly_stake > 0:
-                kelly_percent = kelly_stake * 100
+        # Kelly Criterion calculated internally, not displayed
+        # (confidence already reflects value assessment)
 
-                kelly_labels = {
-                    "aggressive": {"ru": "АГРЕССИВНО", "en": "AGGRESSIVE", "pt": "AGRESSIVO", "es": "AGRESIVO", "id": "AGRESIF"},
-                    "moderate": {"ru": "УМЕРЕННО", "en": "MODERATE", "pt": "MODERADO", "es": "MODERADO", "id": "MODERAT"},
-                    "careful": {"ru": "ОСТОРОЖНО", "en": "CAREFUL", "pt": "CUIDADO", "es": "CUIDADO", "id": "HATI-HATI"},
-                    "bankroll": {"ru": "банкролла", "en": "bankroll", "pt": "banca", "es": "bankroll", "id": "bankroll"}
-                }
-
-                if kelly_percent >= 5:
-                    stake_emoji = "🔥"
-                    stake_key = "aggressive"
-                elif kelly_percent >= 2:
-                    stake_emoji = "✅"
-                    stake_key = "moderate"
-                else:
-                    stake_emoji = "⚠️"
-                    stake_key = "careful"
-
-                stake_text = kelly_labels[stake_key].get(lang, kelly_labels[stake_key]["en"])
-                bankroll_text = kelly_labels["bankroll"].get(lang, kelly_labels["bankroll"]["en"])
-                analysis = analysis + f"\n\n{stake_emoji} **KELLY CRITERION:** {kelly_percent:.1f}% {bankroll_text} ({stake_text})"
-            else:
-                no_value_texts = {
-                    "ru": "⛔ **KELLY:** Нет ценности (VALUE отрицательный)",
-                    "en": "⛔ **KELLY:** No value (negative VALUE)",
-                    "pt": "⛔ **KELLY:** Sem valor (VALUE negativo)",
-                    "es": "⛔ **KELLY:** Sin valor (VALUE negativo)",
-                    "id": "⛔ **KELLY:** Tidak ada nilai (VALUE negatif)"
-                }
-                analysis = analysis + f"\n\n{no_value_texts.get(lang, no_value_texts['en'])}"
-
-        # Add personalized advice based on user's history
         bet_category = categorize_bet(bet_type)
-        personal_advice = get_personalized_advice(user_id, bet_category, lang)
-        if personal_advice:
-            analysis = analysis + f"\n\n{personal_advice}"
+        # Personalized advice applied internally through Smart Learning adjustments
 
-        # NEW: Smart Learning - Check for risky conditions and suggest alternatives
-        if ml_features and bet_category:
-            risky_conditions = get_risky_conditions(bet_category, ml_features)
-
-            if risky_conditions:
-                # Show warning about risky conditions
-                risky_labels = {
-                    "ru": "🧠 **УМНОЕ ОБУЧЕНИЕ:**",
-                    "en": "🧠 **SMART LEARNING:**",
-                    "pt": "🧠 **APRENDIZADO INTELIGENTE:**",
-                    "es": "🧠 **APRENDIZAJE INTELIGENTE:**",
-                    "id": "🧠 **PEMBELAJARAN PINTAR:**"
-                }
-
-                risky_texts = []
-                for risky in risky_conditions[:2]:  # Show max 2 conditions
-                    condition_names = {
-                        "home_many_injuries": {"ru": "много травм дома", "en": "many home injuries", "pt": "muitas lesões em casa", "es": "muchas lesiones locales", "id": "banyak cedera tuan rumah"},
-                        "away_many_injuries": {"ru": "много травм гостей", "en": "many away injuries", "pt": "muitas lesões visitantes", "es": "muchas lesiones visitantes", "id": "banyak cedera tamu"},
-                        "away_higher_position": {"ru": "гости выше в таблице", "en": "away higher in table", "pt": "visitante melhor colocado", "es": "visitante mejor posicionado", "id": "tamu lebih tinggi di tabel"},
-                        "away_higher_class": {"ru": "гости класснее", "en": "away team higher class", "pt": "visitante de classe superior", "es": "visitante de mayor clase", "id": "tamu kelas lebih tinggi"},
-                        "poor_home_form": {"ru": "слабая форма хозяев", "en": "poor home form", "pt": "má forma local", "es": "mala forma local", "id": "performa tuan rumah buruk"},
-                        "strong_away_form": {"ru": "сильная форма гостей", "en": "strong away form", "pt": "boa forma visitante", "es": "buena forma visitante", "id": "performa tamu kuat"},
-                        "cup_match": {"ru": "кубковый матч", "en": "cup match", "pt": "jogo de copa", "es": "partido de copa", "id": "pertandingan piala"},
-                        "no_h2h_data": {"ru": "нет истории встреч", "en": "no H2H history", "pt": "sem histórico H2H", "es": "sin historial H2H", "id": "tidak ada riwayat H2H"},
-                    }
-                    cond_name = condition_names.get(risky["condition"], {}).get(lang, risky["condition"])
-                    risky_texts.append(f"⚠️ {cond_name}: {risky['win_rate']:.0%} винрейт ({risky['sample_size']} ставок)")
-
-                if risky_texts:
-                    analysis = analysis + f"\n\n{risky_labels.get(lang, risky_labels['en'])}\n" + "\n".join(risky_texts)
-
-                # Suggest alternative if available
-                alt_suggestion = suggest_alternative_bet(bet_category, ml_features, risky_conditions)
-                if alt_suggestion:
-                    alt_labels = {
-                        "ru": f"💡 **Безопаснее:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
-                        "en": f"💡 **Safer:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
-                        "pt": f"💡 **Mais seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
-                        "es": f"💡 **Más seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
-                        "id": f"💡 **Lebih aman:** {alt_suggestion['name']} — {alt_suggestion['reason']}"
-                    }
-                    analysis = analysis + f"\n{alt_labels.get(lang, alt_labels['en'])}"
+        # Smart Learning adjustments already applied via apply_learning_adjustments()
+        # No warnings displayed - confidence already reflects all factors
 
         # Extract league_code from features for learning system
         league_code = ml_features.get("league_code") if ml_features else None
@@ -12257,8 +12178,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Only {len(alternatives)}/3 unique alternatives for {home} vs {away}")
 
         # Save each alternative with correct sequential bet_rank
+        # Apply Smart Learning adjustments to alternatives too
         for alt_idx, (alt_type, alt_conf, alt_odds) in enumerate(alternatives[:3]):
             bet_rank = alt_idx + 2  # bet_rank 2, 3, 4
+
+            # Apply learning adjustments to alternative confidence
+            if ml_features:
+                adjusted_alt_conf, alt_adjustments = apply_learning_adjustments(alt_type, alt_conf, ml_features)
+                if alt_adjustments:
+                    logger.info(f"ALT{alt_idx+1} adjustments: {alt_conf}% → {adjusted_alt_conf}% ({', '.join(alt_adjustments[:2])})")
+                alt_conf = adjusted_alt_conf
+
             save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
                             ml_features=ml_features, bet_rank=bet_rank, league_code=league_code)
             logger.info(f"Saved ALT{alt_idx+1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
