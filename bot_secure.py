@@ -6767,8 +6767,90 @@ async def get_team_form_enhanced(team_id: int, limit: int = 10, upcoming_match_d
 
 # ===== WEB SEARCH FOR MATCH CONTEXT =====
 
+def extract_referee_name_from_text(text: str) -> Optional[str]:
+    """Extract referee name from article title/text using patterns.
+
+    Looks for patterns like:
+    - "referee: Name Surname"
+    - "appointed referee Name"
+    - "Name Surname will referee"
+    - "official Name Surname"
+    """
+    import re
+    text_lower = text.lower()
+
+    # Common referee name patterns
+    patterns = [
+        r'referee[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+        r'appointed\s+(?:referee\s+)?([A-Z][a-z]+\s+[A-Z][a-z]+)',
+        r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:will\s+)?referee',
+        r'official[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+        r'(?:match\s+)?official[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+        r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s+to\s+officiate',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            name = match.group(1).strip()
+            # Filter out common false positives
+            false_positives = ['match preview', 'team news', 'starting lineup', 'injury update']
+            if name.lower() not in false_positives and len(name) > 5:
+                return name
+
+    return None
+
+
+def extract_odds_movement_from_text(text: str) -> Optional[dict]:
+    """Extract odds movement information from article title/text.
+
+    Looks for patterns like:
+    - "odds drop" / "odds fall"
+    - "price shortened"
+    - "1.50 to 1.40"
+    - "heavy backing"
+    """
+    import re
+    text_lower = text.lower()
+
+    movement = {"detected": False, "direction": None, "details": None}
+
+    # Patterns indicating odds dropped (sharp money on that outcome)
+    drop_patterns = ['odds drop', 'odds fall', 'price short', 'odds shorten',
+                     'heavy backing', 'money coming in', 'being backed']
+    rise_patterns = ['odds rise', 'odds drift', 'price lengthen', 'odds lengthen']
+
+    for pattern in drop_patterns:
+        if pattern in text_lower:
+            movement["detected"] = True
+            movement["direction"] = "drop"
+            movement["details"] = text[:100]
+            return movement
+
+    for pattern in rise_patterns:
+        if pattern in text_lower:
+            movement["detected"] = True
+            movement["direction"] = "rise"
+            movement["details"] = text[:100]
+            return movement
+
+    # Try to find numerical odds changes like "1.80 to 1.60"
+    odds_pattern = r'(\d+\.\d+)\s*(?:to|→|->)\s*(\d+\.\d+)'
+    match = re.search(odds_pattern, text)
+    if match:
+        old_odds = float(match.group(1))
+        new_odds = float(match.group(2))
+        if abs(old_odds - new_odds) >= 0.05:
+            movement["detected"] = True
+            movement["direction"] = "drop" if new_odds < old_odds else "rise"
+            movement["details"] = f"{old_odds} → {new_odds}"
+            return movement
+
+    return None
+
+
 async def search_match_news(home_team: str, away_team: str, competition: str = "") -> dict:
-    """Search for real-time news about the match: injuries, lineups, team news.
+    """Search for real-time news about the match: injuries, lineups, team news, referee, odds.
 
     Uses Google News RSS (free, no API key required).
 
@@ -6776,6 +6858,8 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
     - injuries: list of injury news
     - lineups: lineup information
     - news: general team news
+    - referee: referee name if found
+    - odds_movement: odds movement info if detected
     - raw_articles: raw article titles for Claude context
     """
     result = {
@@ -6783,6 +6867,7 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
         "lineups": [],
         "news": [],
         "referee": None,  # Referee name if found in news
+        "odds_movement": None,  # Odds movement info
         "raw_articles": [],
         "searched": False,
         "error": None
@@ -6800,13 +6885,16 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
         f"{home_clean} team news injury",
         f"{away_clean} team news injury",
         f"{home_clean} {away_clean} predicted lineup",
-        f"{home_clean} vs {away_clean} referee assignment",
+        f"{home_clean} vs {away_clean} referee",  # More generic referee search
+        f"{home_clean} {away_clean} odds betting",  # Odds movement search
     ]
 
     # Add competition-specific query if we have competition name
     if competition:
         comp_clean = competition.replace("Primera Division", "La Liga").replace("Serie A", "Serie A")
         queries.insert(0, f"{home_clean} {away_clean} {comp_clean}")
+        # Add referee search with competition
+        queries.append(f"{comp_clean} referee {home_clean} {away_clean}")
 
     all_articles = []
 
@@ -6857,13 +6945,27 @@ async def search_match_news(home_team: str, away_team: str, competition: str = "
                                     result["news"].append(title_text)
 
                                 # Try to extract referee name if mentioned
-                                if ('referee' in query or 'referee' in title_lower) and result["referee"] is None:
-                                    # Check if any known referee name is in the title
+                                if ('referee' in query or 'referee' in title_lower or 'official' in title_lower) and result["referee"] is None:
+                                    # First check known referees
                                     for ref_name in REFEREE_STATS.keys():
                                         if ref_name.lower() in title_lower:
                                             result["referee"] = ref_name
-                                            logger.info(f"🔍 Found referee in news: {ref_name}")
+                                            logger.info(f"🔍 Found known referee in news: {ref_name}")
                                             break
+
+                                    # If not found, try to extract name from text
+                                    if result["referee"] is None:
+                                        extracted_ref = extract_referee_name_from_text(title_text)
+                                        if extracted_ref:
+                                            result["referee"] = extracted_ref
+                                            logger.info(f"🔍 Extracted referee from news: {extracted_ref}")
+
+                                # Try to extract odds movement info
+                                if ('odds' in query or 'betting' in query or 'odds' in title_lower) and result["odds_movement"] is None:
+                                    movement = extract_odds_movement_from_text(title_text)
+                                    if movement and movement.get("detected"):
+                                        result["odds_movement"] = movement
+                                        logger.info(f"🔍 Found odds movement in news: {movement}")
         except asyncio.TimeoutError:
             logger.warning(f"Web search timeout for: {query}")
         except Exception as e:
@@ -6924,6 +7026,20 @@ def format_web_context_for_claude(web_news: dict, weather: dict = None, lang: st
         return ""
 
     context = "\n🌐 АКТУАЛЬНЫЕ НОВОСТИ (веб-поиск):\n"
+
+    # Referee from web search
+    if web_news.get("referee"):
+        context += f"\n👨‍⚖️ СУДЬЯ (из новостей): {web_news['referee']}\n"
+
+    # Odds movement from web search
+    if web_news.get("odds_movement") and web_news["odds_movement"].get("detected"):
+        movement = web_news["odds_movement"]
+        direction = "⬇️ ПАДАЮТ" if movement["direction"] == "drop" else "⬆️ РАСТУТ"
+        context += f"\n📉 ДВИЖЕНИЕ КОЭФФИЦИЕНТОВ (из новостей): Коэффициенты {direction}\n"
+        if movement.get("details"):
+            context += f"  • {movement['details']}\n"
+        if movement["direction"] == "drop":
+            context += "  • ⚡ Признаки SHARP MONEY - профессионалы ставят!\n"
 
     if web_news.get("injuries"):
         context += "\n⚠️ ТРАВМЫ И ПРОПУСКИ:\n"
@@ -8971,6 +9087,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         actual_movements = {k: v for k, v in movements.items()
                           if not k.startswith("_") and isinstance(v, dict)}
 
+        # Also check web search for odds movement info
+        web_odds_movement = web_news.get("odds_movement") if web_news else None
+
         if actual_movements:
             analysis_data += f"\n📉 ДВИЖЕНИЕ ЛИНИЙ (за {hours_tracked:.1f}ч):\n"
             for outcome, mv in actual_movements.items():
@@ -8979,13 +9098,21 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
             sharp_moves = [m for m in actual_movements.values() if m.get("sharp")]
             if sharp_moves:
                 analysis_data += "  ⚡ SHARP MONEY DETECTED - линия упала значительно!\n"
+        elif web_odds_movement and web_odds_movement.get("detected"):
+            # Use web search data if no DB history
+            direction = "⬇️ ПАДАЮТ" if web_odds_movement["direction"] == "drop" else "⬆️ РАСТУТ"
+            analysis_data += f"\n📉 ДВИЖЕНИЕ ЛИНИЙ (из новостей): Коэффициенты {direction}\n"
+            if web_odds_movement.get("details"):
+                analysis_data += f"  • {web_odds_movement['details']}\n"
+            if web_odds_movement["direction"] == "drop":
+                analysis_data += "  ⚡ SHARP MONEY - профессионалы ставят на эту сторону!\n"
         elif has_history:
             # We have history but no significant movements
             analysis_data += f"\n📉 ДВИЖЕНИЕ ЛИНИЙ (за {hours_tracked:.1f}ч): Стабильно ✓\n"
         else:
             # First time seeing this match - explain
             analysis_data += "\n📉 ДВИЖЕНИЕ ЛИНИЙ: 📊 Начато отслеживание\n"
-            analysis_data += "  ℹ️ При повторном анализе покажем изменения коэффициентов\n"
+            analysis_data += "  ℹ️ При повторном анализе покажем изменения\n"
 
         # Value bets (our odds vs average)
         value_bets = odds.get("_value_bets", {})
