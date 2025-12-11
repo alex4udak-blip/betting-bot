@@ -1632,6 +1632,46 @@ def init_db():
         UNIQUE(bet_category, condition_type, condition_value)
     )''')
 
+    # Key players - impact scores for important players (auto-updated from API)
+    c.execute('''CREATE TABLE IF NOT EXISTS key_players (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id INTEGER,
+        team_name TEXT,
+        player_id INTEGER,
+        player_name TEXT,
+        position TEXT,
+        impact_attack INTEGER DEFAULT 0,
+        impact_defense INTEGER DEFAULT 0,
+        impact_creativity INTEGER DEFAULT 0,
+        impact_goals INTEGER DEFAULT 0,
+        goals_season INTEGER DEFAULT 0,
+        assists_season INTEGER DEFAULT 0,
+        minutes_played INTEGER DEFAULT 0,
+        market_value TEXT,
+        is_key_player BOOLEAN DEFAULT 1,
+        league_code TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(team_id, player_id)
+    )''')
+
+    # Ensemble ML models - stores multiple model types for voting
+    c.execute('''CREATE TABLE IF NOT EXISTS ensemble_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_name TEXT,
+        model_type TEXT,
+        bet_category TEXT,
+        accuracy REAL,
+        precision_score REAL,
+        recall_score REAL,
+        f1_score REAL,
+        samples_count INTEGER,
+        feature_importance TEXT,
+        trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        model_path TEXT,
+        is_active BOOLEAN DEFAULT 1,
+        UNIQUE(model_name, bet_category)
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -4232,6 +4272,791 @@ def format_xg_analysis(xg_data: dict, home_team: str, away_team: str, lang: str 
     return "\n".join(lines)
 
 
+# ===== PLAYER IMPACT SYSTEM =====
+# Tracks key players and their impact on team performance
+# Auto-updated from API (top scorers + squad data)
+
+# Position impact weights (how much each position affects different aspects)
+POSITION_IMPACT_WEIGHTS = {
+    "Offence": {"attack": 0.8, "defense": 0.1, "creativity": 0.4, "goals": 0.9},
+    "Forward": {"attack": 0.8, "defense": 0.1, "creativity": 0.4, "goals": 0.9},
+    "Midfield": {"attack": 0.5, "defense": 0.4, "creativity": 0.8, "goals": 0.3},
+    "Defence": {"attack": 0.2, "defense": 0.9, "creativity": 0.2, "goals": 0.1},
+    "Defender": {"attack": 0.2, "defense": 0.9, "creativity": 0.2, "goals": 0.1},
+    "Goalkeeper": {"attack": 0.0, "defense": 1.0, "creativity": 0.1, "goals": 0.0},
+}
+
+# Cache for player impact data
+_player_impact_cache = {}
+_player_impact_cache_time = {}
+PLAYER_IMPACT_CACHE_DURATION = 3600 * 6  # 6 hours
+
+
+async def update_key_players_from_api(league_code: str) -> int:
+    """
+    Fetch and update key players for a league from API.
+    Uses top scorers + team squad data.
+
+    Returns number of players updated.
+    """
+    if not FOOTBALL_API_KEY:
+        return 0
+
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    session = await get_http_session()
+    updated_count = 0
+
+    try:
+        # Step 1: Get top scorers (these are definitely key players)
+        url = f"{FOOTBALL_API_URL}/competitions/{league_code}/scorers"
+        async with session.get(url, headers=headers, params={"limit": 30}) as r:
+            if r.status == 200:
+                data = await r.json()
+                scorers = data.get("scorers", [])
+
+                for scorer in scorers:
+                    player = scorer.get("player", {})
+                    team = scorer.get("team", {})
+
+                    if not player.get("id") or not team.get("id"):
+                        continue
+
+                    goals = scorer.get("goals", 0)
+                    assists = scorer.get("assists", 0)
+                    played = scorer.get("playedMatches", 1)
+
+                    # Calculate impact scores based on performance
+                    goals_per_game = goals / max(played, 1)
+                    assists_per_game = assists / max(played, 1)
+
+                    # Impact calculation:
+                    # - Top scorer with 1+ goals/game = 40-50 impact
+                    # - Good scorer with 0.5 goals/game = 25-35 impact
+                    # - Playmaker with high assists = 20-30 creativity impact
+
+                    attack_impact = min(50, int(goals_per_game * 40 + assists_per_game * 15))
+                    goals_impact = min(50, int(goals_per_game * 45))
+                    creativity_impact = min(40, int(assists_per_game * 35 + goals_per_game * 10))
+
+                    # Save to database
+                    save_key_player(
+                        team_id=team.get("id"),
+                        team_name=team.get("name"),
+                        player_id=player.get("id"),
+                        player_name=player.get("name"),
+                        position=player.get("position", "Offence"),
+                        impact_attack=attack_impact,
+                        impact_goals=goals_impact,
+                        impact_creativity=creativity_impact,
+                        goals_season=goals,
+                        assists_season=assists,
+                        league_code=league_code
+                    )
+                    updated_count += 1
+
+                logger.info(f"🌟 Updated {updated_count} key players for {league_code} from top scorers")
+
+        # Step 2: Get teams and their key defenders/goalkeepers
+        url = f"{FOOTBALL_API_URL}/competitions/{league_code}/teams"
+        async with session.get(url, headers=headers) as r:
+            if r.status == 200:
+                data = await r.json()
+                teams = data.get("teams", [])
+
+                for team in teams[:20]:  # Top 20 teams
+                    team_id = team.get("id")
+                    team_name = team.get("name")
+                    squad = team.get("squad", [])
+
+                    if not squad:
+                        continue
+
+                    # Find key defenders and GKs (usually most experienced/capped)
+                    for player in squad:
+                        position = player.get("position", "Unknown")
+
+                        # We already have attackers from scorers, now add defenders/GKs
+                        if position in ["Goalkeeper", "Defence", "Defender", "Centre-Back"]:
+                            # Estimate impact based on position
+                            # For defenders/GKs we don't have goal stats, so estimate
+                            defense_impact = 30 if position == "Goalkeeper" else 25
+
+                            save_key_player(
+                                team_id=team_id,
+                                team_name=team_name,
+                                player_id=player.get("id"),
+                                player_name=player.get("name"),
+                                position=position,
+                                impact_defense=defense_impact,
+                                impact_attack=5,
+                                league_code=league_code
+                            )
+                            updated_count += 1
+
+        logger.info(f"🌟 Total {updated_count} key players updated for {league_code}")
+
+    except Exception as e:
+        logger.error(f"Error updating key players for {league_code}: {e}")
+
+    return updated_count
+
+
+def save_key_player(team_id: int, team_name: str, player_id: int, player_name: str,
+                    position: str, impact_attack: int = 0, impact_defense: int = 0,
+                    impact_creativity: int = 0, impact_goals: int = 0,
+                    goals_season: int = 0, assists_season: int = 0,
+                    league_code: str = None):
+    """Save or update a key player in database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO key_players
+            (team_id, team_name, player_id, player_name, position,
+             impact_attack, impact_defense, impact_creativity, impact_goals,
+             goals_season, assists_season, league_code, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(team_id, player_id) DO UPDATE SET
+                player_name = excluded.player_name,
+                position = excluded.position,
+                impact_attack = MAX(impact_attack, excluded.impact_attack),
+                impact_defense = MAX(impact_defense, excluded.impact_defense),
+                impact_creativity = MAX(impact_creativity, excluded.impact_creativity),
+                impact_goals = MAX(impact_goals, excluded.impact_goals),
+                goals_season = excluded.goals_season,
+                assists_season = excluded.assists_season,
+                updated_at = CURRENT_TIMESTAMP
+        """, (team_id, team_name, player_id, player_name, position,
+              impact_attack, impact_defense, impact_creativity, impact_goals,
+              goals_season, assists_season, league_code))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error saving key player {player_name}: {e}")
+
+
+def get_team_key_players(team_name: str, team_id: int = None) -> list:
+    """Get key players for a team from database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        if team_id:
+            c.execute("""
+                SELECT * FROM key_players
+                WHERE team_id = ? AND is_key_player = 1
+                ORDER BY (impact_attack + impact_defense + impact_goals) DESC
+                LIMIT 10
+            """, (team_id,))
+        else:
+            # Try to match by team name
+            c.execute("""
+                SELECT * FROM key_players
+                WHERE (team_name LIKE ? OR team_name LIKE ?) AND is_key_player = 1
+                ORDER BY (impact_attack + impact_defense + impact_goals) DESC
+                LIMIT 10
+            """, (f"%{team_name}%", f"{team_name}%"))
+
+        rows = c.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Error getting key players for {team_name}: {e}")
+        return []
+
+
+def calculate_player_impact(team_name: str, injuries: list, team_id: int = None) -> dict:
+    """
+    Calculate the impact of missing players on team performance.
+
+    Args:
+        team_name: Name of the team
+        injuries: List of injured/suspended players (from lineups API)
+        team_id: Optional team ID for better matching
+
+    Returns:
+        dict with:
+        - attack_modifier: % reduction in attack (negative)
+        - defense_modifier: % reduction in defense (negative)
+        - creativity_modifier: % reduction in creativity
+        - goals_modifier: % reduction in expected goals
+        - key_players_out: list of key players missing
+        - total_impact: overall team strength modifier
+        - impact_details: detailed breakdown
+    """
+    result = {
+        "attack_modifier": 0,
+        "defense_modifier": 0,
+        "creativity_modifier": 0,
+        "goals_modifier": 0,
+        "key_players_out": [],
+        "total_impact": 0,
+        "impact_details": [],
+        "available": False
+    }
+
+    if not injuries:
+        result["available"] = True
+        return result
+
+    # Get key players for this team
+    key_players = get_team_key_players(team_name, team_id)
+
+    if not key_players:
+        # No key players in DB - still mark as available but no impact calculation
+        result["available"] = True
+        return result
+
+    # Create lookup for injured players (normalize names)
+    injured_names = set()
+    for injury in injuries:
+        if isinstance(injury, dict):
+            name = injury.get("player", injury.get("name", ""))
+        else:
+            name = str(injury)
+
+        # Normalize: "E. Haaland" -> "haaland", "Erling Haaland" -> "haaland"
+        name_parts = name.lower().replace(".", "").split()
+        if name_parts:
+            injured_names.add(name_parts[-1])  # Last name
+            injured_names.add(" ".join(name_parts))  # Full name
+
+    # Check which key players are injured
+    total_attack = 0
+    total_defense = 0
+    total_creativity = 0
+    total_goals = 0
+
+    for player in key_players:
+        player_name = player.get("player_name", "")
+        name_parts = player_name.lower().replace(".", "").split()
+
+        is_injured = False
+        for part in name_parts:
+            if part in injured_names:
+                is_injured = True
+                break
+
+        if not is_injured and " ".join(name_parts) in injured_names:
+            is_injured = True
+
+        if is_injured:
+            attack_impact = player.get("impact_attack", 0)
+            defense_impact = player.get("impact_defense", 0)
+            creativity_impact = player.get("impact_creativity", 0)
+            goals_impact = player.get("impact_goals", 0)
+
+            total_attack += attack_impact
+            total_defense += defense_impact
+            total_creativity += creativity_impact
+            total_goals += goals_impact
+
+            result["key_players_out"].append({
+                "name": player_name,
+                "position": player.get("position", "Unknown"),
+                "impact_attack": attack_impact,
+                "impact_defense": defense_impact,
+                "impact_goals": goals_impact
+            })
+
+            # Add detail
+            impact_desc = []
+            if attack_impact > 15:
+                impact_desc.append(f"атака -{attack_impact}%")
+            if defense_impact > 15:
+                impact_desc.append(f"защита -{defense_impact}%")
+            if goals_impact > 15:
+                impact_desc.append(f"голы -{goals_impact}%")
+
+            if impact_desc:
+                result["impact_details"].append(f"❌ {player_name}: {', '.join(impact_desc)}")
+
+    # Cap modifiers at reasonable levels
+    result["attack_modifier"] = -min(total_attack, 60)
+    result["defense_modifier"] = -min(total_defense, 50)
+    result["creativity_modifier"] = -min(total_creativity, 40)
+    result["goals_modifier"] = -min(total_goals, 55)
+
+    # Calculate total impact (weighted average)
+    result["total_impact"] = round(
+        (result["attack_modifier"] * 0.4 +
+         result["defense_modifier"] * 0.3 +
+         result["goals_modifier"] * 0.3), 1
+    )
+
+    result["available"] = True
+
+    if result["key_players_out"]:
+        logger.info(f"🏥 Player impact for {team_name}: {len(result['key_players_out'])} key players out, total impact: {result['total_impact']}%")
+
+    return result
+
+
+def format_player_impact(home_impact: dict, away_impact: dict,
+                         home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format player impact analysis for display."""
+    if not home_impact.get("available") and not away_impact.get("available"):
+        return ""
+
+    lines = []
+    has_impact = False
+
+    # Check if there's any significant impact
+    home_out = home_impact.get("key_players_out", [])
+    away_out = away_impact.get("key_players_out", [])
+
+    if not home_out and not away_out:
+        return ""
+
+    if lang == "ru":
+        lines.append("🌟 **ВЛИЯНИЕ КЛЮЧЕВЫХ ИГРОКОВ**")
+    else:
+        lines.append("🌟 **KEY PLAYER IMPACT**")
+
+    # Home team
+    if home_out:
+        has_impact = True
+        total_impact = home_impact.get("total_impact", 0)
+        lines.append(f"  {home_team}:")
+
+        for detail in home_impact.get("impact_details", [])[:3]:
+            lines.append(f"    {detail}")
+
+        if total_impact < -20:
+            lines.append(f"    ⚠️ **КРИТИЧНО: Общее влияние {total_impact}%**")
+        elif total_impact < -10:
+            lines.append(f"    ⚡ Заметное влияние: {total_impact}%")
+
+    # Away team
+    if away_out:
+        has_impact = True
+        total_impact = away_impact.get("total_impact", 0)
+        lines.append(f"  {away_team}:")
+
+        for detail in away_impact.get("impact_details", [])[:3]:
+            lines.append(f"    {detail}")
+
+        if total_impact < -20:
+            lines.append(f"    ⚠️ **КРИТИЧНО: Общее влияние {total_impact}%**")
+        elif total_impact < -10:
+            lines.append(f"    ⚡ Заметное влияние: {total_impact}%")
+
+    # Analysis summary
+    if has_impact:
+        lines.append("")
+        home_attack_mod = home_impact.get("attack_modifier", 0)
+        away_attack_mod = away_impact.get("attack_modifier", 0)
+        home_defense_mod = home_impact.get("defense_modifier", 0)
+        away_defense_mod = away_impact.get("defense_modifier", 0)
+
+        # Totals impact
+        if home_attack_mod < -25 or away_attack_mod < -25:
+            if lang == "ru":
+                lines.append("  📉 Потеря ключевого атакующего → меньше голов (UNDER)")
+            else:
+                lines.append("  📉 Key attacker out → fewer goals (UNDER)")
+
+        if home_defense_mod < -25 or away_defense_mod < -25:
+            if lang == "ru":
+                lines.append("  📈 Потеря ключевого защитника → больше пропустят (OVER)")
+            else:
+                lines.append("  📈 Key defender out → more goals conceded (OVER)")
+
+    return "\n".join(lines) if has_impact else ""
+
+
+# ===== ENSEMBLE ML SYSTEM =====
+# Multiple models vote for higher confidence predictions
+
+# Available model types for ensemble
+ENSEMBLE_MODEL_TYPES = {
+    "random_forest": {
+        "class": "RandomForestClassifier",
+        "params": {"n_estimators": 100, "max_depth": 10, "min_samples_split": 5, "random_state": 42},
+        "weight": 1.0
+    },
+    "gradient_boost": {
+        "class": "GradientBoostingClassifier",
+        "params": {"n_estimators": 100, "max_depth": 5, "learning_rate": 0.1, "random_state": 42},
+        "weight": 1.2  # Slightly higher weight - often performs better
+    },
+    "logistic": {
+        "class": "LogisticRegression",
+        "params": {"max_iter": 1000, "random_state": 42},
+        "weight": 0.8  # Lower weight - simpler model
+    },
+}
+
+# Loaded ensemble models cache
+_ensemble_models = {}
+
+
+def train_ensemble_models(bet_category: str = "match_result") -> dict:
+    """
+    Train multiple ML models for ensemble voting.
+
+    Returns dict with training results for each model.
+    """
+    if not ML_AVAILABLE:
+        return {"error": "ML libraries not available"}
+
+    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+    results = {}
+
+    try:
+        # Load training data
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            SELECT features_json, target FROM ml_training_data
+            WHERE bet_category = ? AND target IS NOT NULL
+        """, (bet_category,))
+        rows = c.fetchall()
+        conn.close()
+
+        if len(rows) < ML_MIN_SAMPLES:
+            return {"error": f"Not enough samples: {len(rows)} < {ML_MIN_SAMPLES}"}
+
+        # Prepare data
+        X = []
+        y = []
+        feature_names = None
+
+        for features_json, target in rows:
+            features = json.loads(features_json)
+            if feature_names is None:
+                feature_names = sorted(features.keys())
+
+            feature_vector = [features.get(f, 0) for f in feature_names]
+            X.append(feature_vector)
+            y.append(target)
+
+        X = np.array(X)
+        y = np.array(y)
+
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        # Train each model type
+        model_classes = {
+            "random_forest": RandomForestClassifier(**ENSEMBLE_MODEL_TYPES["random_forest"]["params"]),
+            "gradient_boost": GradientBoostingClassifier(**ENSEMBLE_MODEL_TYPES["gradient_boost"]["params"]),
+            "logistic": LogisticRegression(**ENSEMBLE_MODEL_TYPES["logistic"]["params"]),
+        }
+
+        for model_name, model in model_classes.items():
+            try:
+                # Train
+                model.fit(X_train, y_train)
+
+                # Evaluate
+                y_pred = model.predict(X_test)
+                accuracy = accuracy_score(y_test, y_pred)
+                precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+                recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+                f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+
+                # Get feature importance
+                if hasattr(model, 'feature_importances_'):
+                    importance = dict(zip(feature_names, model.feature_importances_.tolist()))
+                    # Top 10 features
+                    importance = dict(sorted(importance.items(), key=lambda x: x[1], reverse=True)[:10])
+                else:
+                    importance = {}
+
+                # Save model
+                model_path = f"{ML_MODELS_DIR}/{model_name}_{bet_category}.joblib"
+                os.makedirs(ML_MODELS_DIR, exist_ok=True)
+                joblib.dump({"model": model, "feature_names": feature_names}, model_path)
+
+                # Save to database
+                save_ensemble_model(
+                    model_name=model_name,
+                    bet_category=bet_category,
+                    accuracy=accuracy,
+                    precision_score=precision,
+                    recall_score=recall,
+                    f1_score=f1,
+                    samples_count=len(rows),
+                    feature_importance=importance,
+                    model_path=model_path
+                )
+
+                # Cache model
+                cache_key = f"{model_name}_{bet_category}"
+                _ensemble_models[cache_key] = {
+                    "model": model,
+                    "feature_names": feature_names,
+                    "accuracy": accuracy
+                }
+
+                results[model_name] = {
+                    "accuracy": round(accuracy * 100, 1),
+                    "precision": round(precision * 100, 1),
+                    "recall": round(recall * 100, 1),
+                    "f1": round(f1 * 100, 1),
+                    "samples": len(rows)
+                }
+
+                logger.info(f"🤖 Trained {model_name} for {bet_category}: accuracy={accuracy:.1%}")
+
+            except Exception as e:
+                logger.error(f"Error training {model_name}: {e}")
+                results[model_name] = {"error": str(e)}
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Ensemble training error: {e}")
+        return {"error": str(e)}
+
+
+def save_ensemble_model(model_name: str, bet_category: str, accuracy: float,
+                        precision_score: float, recall_score: float, f1_score: float,
+                        samples_count: int, feature_importance: dict, model_path: str):
+    """Save ensemble model info to database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO ensemble_models
+            (model_name, model_type, bet_category, accuracy, precision_score,
+             recall_score, f1_score, samples_count, feature_importance, model_path, trained_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(model_name, bet_category) DO UPDATE SET
+                accuracy = excluded.accuracy,
+                precision_score = excluded.precision_score,
+                recall_score = excluded.recall_score,
+                f1_score = excluded.f1_score,
+                samples_count = excluded.samples_count,
+                feature_importance = excluded.feature_importance,
+                model_path = excluded.model_path,
+                trained_at = CURRENT_TIMESTAMP
+        """, (model_name, model_name, bet_category, accuracy, precision_score,
+              recall_score, f1_score, samples_count, json.dumps(feature_importance), model_path))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error saving ensemble model: {e}")
+
+
+def load_ensemble_models(bet_category: str = "match_result") -> dict:
+    """Load all ensemble models for a bet category."""
+    models = {}
+
+    for model_name in ENSEMBLE_MODEL_TYPES.keys():
+        cache_key = f"{model_name}_{bet_category}"
+
+        # Check cache first
+        if cache_key in _ensemble_models:
+            models[model_name] = _ensemble_models[cache_key]
+            continue
+
+        # Try to load from file
+        model_path = f"{ML_MODELS_DIR}/{model_name}_{bet_category}.joblib"
+        if os.path.exists(model_path):
+            try:
+                data = joblib.load(model_path)
+                models[model_name] = data
+                _ensemble_models[cache_key] = data
+            except Exception as e:
+                logger.error(f"Error loading {model_name}: {e}")
+
+    return models
+
+
+def get_ensemble_prediction(features: dict, bet_category: str = "match_result") -> dict:
+    """
+    Get prediction from ensemble of models with voting.
+
+    Returns:
+    {
+        "prediction": int (predicted class),
+        "confidence": float (0-100),
+        "votes": {model_name: {"pred": int, "prob": float, "class_name": str}},
+        "agreement": float (0-1, how many models agree),
+        "consensus_boost": int (confidence adjustment based on agreement),
+        "available": bool
+    }
+    """
+    result = {
+        "prediction": None,
+        "confidence": 50,
+        "votes": {},
+        "agreement": 0,
+        "consensus_boost": 0,
+        "available": False
+    }
+
+    if not ML_AVAILABLE:
+        return result
+
+    # Load models
+    models = load_ensemble_models(bet_category)
+
+    if not models:
+        return result
+
+    # Get predictions from each model
+    predictions = []
+    probabilities = []
+
+    for model_name, model_data in models.items():
+        try:
+            model = model_data.get("model")
+            feature_names = model_data.get("feature_names", [])
+
+            if not model or not feature_names:
+                continue
+
+            # Prepare feature vector
+            feature_vector = np.array([[features.get(f, 0) for f in feature_names]])
+
+            # Get prediction and probability
+            pred = model.predict(feature_vector)[0]
+            prob = model.predict_proba(feature_vector)[0]
+
+            # Get probability of predicted class
+            pred_prob = prob[pred] if pred < len(prob) else 0.5
+
+            # Map prediction to class name
+            class_names = {0: "away", 1: "draw", 2: "home"} if bet_category == "match_result" else {0: "no", 1: "yes"}
+            class_name = class_names.get(pred, str(pred))
+
+            # Weight by model's historical accuracy
+            weight = ENSEMBLE_MODEL_TYPES.get(model_name, {}).get("weight", 1.0)
+
+            result["votes"][model_name] = {
+                "pred": int(pred),
+                "prob": round(pred_prob * 100, 1),
+                "class_name": class_name,
+                "weight": weight
+            }
+
+            predictions.append(pred)
+            probabilities.append(pred_prob * weight)
+
+        except Exception as e:
+            logger.error(f"Error getting prediction from {model_name}: {e}")
+
+    if not predictions:
+        return result
+
+    result["available"] = True
+
+    # Calculate consensus
+    from collections import Counter
+    vote_counts = Counter(predictions)
+    most_common_pred, most_common_count = vote_counts.most_common(1)[0]
+
+    result["prediction"] = int(most_common_pred)
+    result["agreement"] = most_common_count / len(predictions)
+
+    # Calculate weighted average probability
+    total_weight = sum(ENSEMBLE_MODEL_TYPES.get(m, {}).get("weight", 1.0) for m in result["votes"].keys())
+    weighted_prob = sum(probabilities) / total_weight if total_weight > 0 else 0.5
+
+    # Base confidence from weighted probability
+    base_confidence = weighted_prob * 100
+
+    # Consensus boost
+    if result["agreement"] >= 1.0:  # All models agree
+        result["consensus_boost"] = 15
+    elif result["agreement"] >= 0.67:  # Most models agree
+        result["consensus_boost"] = 8
+    elif result["agreement"] >= 0.5:  # Half agree
+        result["consensus_boost"] = 0
+    else:  # Disagreement
+        result["consensus_boost"] = -10
+
+    result["confidence"] = min(95, max(30, base_confidence + result["consensus_boost"]))
+
+    return result
+
+
+def format_ensemble_prediction(ensemble_result: dict, lang: str = "ru") -> str:
+    """Format ensemble ML prediction for display."""
+    if not ensemble_result.get("available"):
+        return ""
+
+    lines = []
+
+    if lang == "ru":
+        lines.append("🤖 **ML ENSEMBLE** (голосование моделей)")
+    else:
+        lines.append("🤖 **ML ENSEMBLE** (model voting)")
+
+    votes = ensemble_result.get("votes", {})
+
+    # Display each model's vote
+    model_display_names = {
+        "random_forest": "RandomForest",
+        "gradient_boost": "GradientBoost",
+        "logistic": "Logistic"
+    }
+
+    for model_name, vote in votes.items():
+        display_name = model_display_names.get(model_name, model_name)
+        prob = vote.get("prob", 50)
+        class_name = vote.get("class_name", "?")
+
+        # Emoji for prediction
+        if class_name == "home":
+            emoji = "🏠"
+        elif class_name == "away":
+            emoji = "✈️"
+        elif class_name == "draw":
+            emoji = "🤝"
+        elif class_name == "yes":
+            emoji = "✅"
+        else:
+            emoji = "❌"
+
+        lines.append(f"  {display_name:14} {prob:5.1f}% → {emoji} {class_name.upper()}")
+
+    # Divider
+    lines.append("  " + "─" * 30)
+
+    # Consensus
+    agreement = ensemble_result.get("agreement", 0)
+    consensus_boost = ensemble_result.get("consensus_boost", 0)
+    confidence = ensemble_result.get("confidence", 50)
+
+    num_models = len(votes)
+    agreeing = int(agreement * num_models)
+
+    if agreement >= 1.0:
+        consensus_emoji = "🟢"
+        consensus_text = "ПОЛНЫЙ" if lang == "ru" else "FULL"
+    elif agreement >= 0.67:
+        consensus_emoji = "🟡"
+        consensus_text = "ВЫСОКИЙ" if lang == "ru" else "HIGH"
+    else:
+        consensus_emoji = "🔴"
+        consensus_text = "НИЗКИЙ" if lang == "ru" else "LOW"
+
+    boost_str = f"+{consensus_boost}" if consensus_boost > 0 else str(consensus_boost)
+
+    if lang == "ru":
+        lines.append(f"  КОНСЕНСУС: {agreeing}/{num_models} {consensus_emoji} ({boost_str}% уверенность)")
+        lines.append(f"  **ИТОГО: {confidence:.0f}%**")
+    else:
+        lines.append(f"  CONSENSUS: {agreeing}/{num_models} {consensus_emoji} ({boost_str}% confidence)")
+        lines.append(f"  **TOTAL: {confidence:.0f}%**")
+
+    return "\n".join(lines)
+
+
 # ===== IMPROVED EXPECTED GOALS CALCULATION =====
 # Uses home/away specific stats instead of overall averages
 
@@ -4572,8 +5397,9 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                      referee_stats: dict = None, has_web_news: bool = False,
                      congestion: dict = None, motivation: dict = None,
                      team_class: dict = None, coach_factor: dict = None,
-                     lineups: dict = None, xg_data: dict = None) -> dict:
-    """Extract numerical features for ML model including congestion, motivation, team class, coach, lineups, and xG"""
+                     lineups: dict = None, xg_data: dict = None,
+                     player_impact: dict = None) -> dict:
+    """Extract numerical features for ML model including all factors + player impact"""
     features = {}
 
     # Home team form features
@@ -4896,6 +5722,54 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["both_underperforming"] = 0
         features["both_overperforming"] = 0
         features["xg_data_available"] = 0
+
+    # Player Impact features - KEY for predictions when stars are injured!
+    if player_impact:
+        home_impact = player_impact.get("home", {})
+        away_impact = player_impact.get("away", {})
+
+        # Attack/defense modifiers (negative values = weaker)
+        features["home_attack_modifier"] = home_impact.get("attack_modifier", 0)
+        features["away_attack_modifier"] = away_impact.get("attack_modifier", 0)
+        features["home_defense_modifier"] = home_impact.get("defense_modifier", 0)
+        features["away_defense_modifier"] = away_impact.get("defense_modifier", 0)
+
+        # Goals modifier (direct impact on scoring)
+        features["home_goals_modifier"] = home_impact.get("goals_modifier", 0)
+        features["away_goals_modifier"] = away_impact.get("goals_modifier", 0)
+
+        # Total impact
+        features["home_total_impact"] = home_impact.get("total_impact", 0)
+        features["away_total_impact"] = away_impact.get("total_impact", 0)
+
+        # Number of key players out
+        features["home_key_players_out"] = len(home_impact.get("key_players_out", []))
+        features["away_key_players_out"] = len(away_impact.get("key_players_out", []))
+
+        # Critical flags
+        features["home_star_out"] = 1 if home_impact.get("attack_modifier", 0) < -25 else 0
+        features["away_star_out"] = 1 if away_impact.get("attack_modifier", 0) < -25 else 0
+        features["home_defense_crisis"] = 1 if home_impact.get("defense_modifier", 0) < -25 else 0
+        features["away_defense_crisis"] = 1 if away_impact.get("defense_modifier", 0) < -25 else 0
+
+        features["player_impact_available"] = 1
+        logger.debug(f"🌟 Player impact: home={features['home_total_impact']}%, away={features['away_total_impact']}%")
+    else:
+        features["home_attack_modifier"] = 0
+        features["away_attack_modifier"] = 0
+        features["home_defense_modifier"] = 0
+        features["away_defense_modifier"] = 0
+        features["home_goals_modifier"] = 0
+        features["away_goals_modifier"] = 0
+        features["home_total_impact"] = 0
+        features["away_total_impact"] = 0
+        features["home_key_players_out"] = 0
+        features["away_key_players_out"] = 0
+        features["home_star_out"] = 0
+        features["away_star_out"] = 0
+        features["home_defense_crisis"] = 0
+        features["away_defense_crisis"] = 0
+        features["player_impact_available"] = 0
 
     return features
 
@@ -9909,6 +10783,25 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += lineups_context
         analysis_data += "\n"
 
+    # 🌟 PLAYER IMPACT ANALYSIS - How missing key players affect the team
+    home_injuries = lineups.get("home_injuries", []) if lineups else []
+    away_injuries = lineups.get("away_injuries", []) if lineups else []
+
+    home_player_impact = calculate_player_impact(home, home_injuries, home_id)
+    away_player_impact = calculate_player_impact(away, away_injuries, away_id)
+
+    # Combined player impact for ML
+    player_impact_data = {
+        "home": home_player_impact,
+        "away": away_player_impact
+    }
+
+    # Format and add to analysis
+    player_impact_context = format_player_impact(home_player_impact, away_player_impact, home, away, lang)
+    if player_impact_context:
+        analysis_data += player_impact_context
+        analysis_data += "\n\n"
+
     # Odds with VALUE calculation, line movements, and bookmaker info
     if odds:
         bookmaker = odds.get("_bookmaker", "unknown")
@@ -9993,8 +10886,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         motivation=motivation,
         team_class=team_class,
         coach_factor=coach_factor,
-        lineups=lineups,  # CRITICAL: Injuries data for ML!
-        xg_data=xg_data   # CRITICAL: Real xG data for totals predictions!
+        lineups=lineups,  # Injuries data for ML
+        xg_data=xg_data,  # Real xG data for totals
+        player_impact=player_impact_data  # KEY PLAYER IMPACT!
     )
 
     # Get ML predictions if models are trained
@@ -10015,6 +10909,13 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
             conf = pred["confidence"]
             analysis_data += f"  {name}: {conf:.0f}% вероятность\n"
         analysis_data += "  ⚠️ ML модель обучена на исторических данных бота\n\n"
+
+    # 🤖 ENSEMBLE ML - Multiple models voting
+    ensemble_result = get_ensemble_prediction(ml_features, "match_result")
+    ensemble_context = format_ensemble_prediction(ensemble_result, lang)
+    if ensemble_context:
+        analysis_data += ensemble_context
+        analysis_data += "\n\n"
 
     # Store features for future ML training (will be linked to prediction later)
     # Features are stored in match context for saving after Claude response
@@ -15252,6 +16153,57 @@ async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Track odds job error: {e}")
 
 
+async def update_key_players_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Background job to update key players database from API.
+    Runs every 12 hours to keep player impact data fresh.
+    """
+    logger.info("=== UPDATE KEY PLAYERS JOB STARTED ===")
+
+    # Leagues supported by football-data.org
+    leagues = ["PL", "PD", "SA", "BL1", "FL1", "DED", "PPL", "ELC", "CL", "EL"]
+
+    total_updated = 0
+
+    for league_code in leagues:
+        try:
+            updated = await update_key_players_from_api(league_code)
+            total_updated += updated
+
+            # Small delay to respect API rate limits
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            logger.error(f"Error updating key players for {league_code}: {e}")
+
+    logger.info(f"=== UPDATE KEY PLAYERS COMPLETED: {total_updated} players updated ===")
+
+
+async def train_ensemble_models_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Background job to train ensemble ML models.
+    Runs every 24 hours to keep models updated with latest data.
+    """
+    logger.info("=== TRAIN ENSEMBLE MODELS JOB STARTED ===")
+
+    # Train for different bet categories
+    categories = ["match_result", "totals", "btts"]
+
+    for category in categories:
+        try:
+            result = train_ensemble_models(category)
+
+            if "error" not in result:
+                logger.info(f"✅ Ensemble trained for {category}: {result}")
+            else:
+                logger.warning(f"⚠️ Ensemble training for {category}: {result['error']}")
+
+        except Exception as e:
+            logger.error(f"Error training ensemble for {category}: {e}")
+
+    logger.info("=== TRAIN ENSEMBLE MODELS COMPLETED ===")
+
+
 async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
     """Check results of past predictions - grouped by match for combined notifications"""
     logger.info("=== CHECK RESULTS JOB STARTED ===")
@@ -16989,6 +17941,8 @@ def main():
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
     job_queue.run_repeating(check_predictions_results, interval=1200, first=300)  # Every 20 min
     job_queue.run_repeating(track_upcoming_odds, interval=1800, first=300)  # Every 30 min - track odds for line movements
+    job_queue.run_repeating(update_key_players_job, interval=43200, first=600)  # Every 12 hours - update player impact DB
+    job_queue.run_repeating(train_ensemble_models_job, interval=86400, first=900)  # Every 24 hours - train ensemble ML
     # Marketing jobs
     job_queue.run_repeating(send_marketing_notifications, interval=14400, first=1800)  # Every 4 hours
     job_queue.run_repeating(check_streak_milestones, interval=3600, first=900)  # Every hour
