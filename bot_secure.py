@@ -1551,6 +1551,35 @@ def init_db():
         UNIQUE(league_code, bet_category)
     )''')
 
+    # Feature-based error patterns - learns WHEN specific bets fail
+    # Key insight: "П1 fails when injuries > 8 AND away_position < home_position"
+    c.execute('''CREATE TABLE IF NOT EXISTS feature_error_patterns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        feature_condition TEXT,
+        condition_key TEXT UNIQUE,
+        total_predictions INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        avg_confidence_when_failed REAL,
+        suggested_adjustment INTEGER DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # Smart adjustments - learned rules for confidence correction
+    c.execute('''CREATE TABLE IF NOT EXISTS smart_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        condition_type TEXT,
+        condition_value TEXT,
+        adjustment_percent INTEGER,
+        sample_size INTEGER DEFAULT 0,
+        win_rate REAL,
+        is_active BOOLEAN DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(bet_category, condition_type, condition_value)
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -4955,7 +4984,18 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
     if league_code and bet_category:
         update_league_learning(league_code, bet_category, is_win, error_type)
 
-    # 5. Check if model needs retraining
+    # 5. NEW: Update feature-based error patterns (SMART LEARNING)
+    # This is the key to learning WHEN specific bets fail
+    if features and bet_category:
+        conditions = extract_feature_conditions(features, bet_category)
+        for condition in conditions:
+            update_feature_pattern(bet_category, condition, is_win, confidence)
+
+        # Log if we found significant risky conditions
+        if not is_win and conditions:
+            logger.info(f"📚 Feature learning: {bet_category} failed with conditions: {', '.join(conditions)}")
+
+    # 6. Check if model needs retraining
     if bet_category and should_retrain_model(bet_category):
         logger.info(f"🔄 Triggering model retrain for {bet_category}")
         result = train_ml_model(bet_category)
@@ -5082,6 +5122,301 @@ def get_learning_stats() -> dict:
     }
 
 
+# ===== SMART FEATURE-BASED LEARNING =====
+# System that learns WHEN specific bet types fail based on match features
+
+def extract_feature_conditions(features: dict, bet_category: str) -> list:
+    """Extract relevant feature conditions for a bet type.
+
+    Returns list of conditions like:
+    - "high_injuries" (injuries > 8)
+    - "away_higher_position" (away team higher in table)
+    - "low_home_form" (home win rate < 50%)
+    """
+    conditions = []
+
+    if not features:
+        return conditions
+
+    # Injury conditions
+    home_injuries = features.get("home_injuries", 0)
+    away_injuries = features.get("away_injuries", 0)
+    if home_injuries > 8:
+        conditions.append("home_many_injuries")
+    if away_injuries > 8:
+        conditions.append("away_many_injuries")
+
+    # Position/class conditions
+    position_diff = features.get("position_diff", 0)
+    if position_diff < -5:  # Away team much higher
+        conditions.append("away_higher_position")
+    elif position_diff > 5:  # Home team much higher
+        conditions.append("home_higher_position")
+
+    class_diff = features.get("class_diff", 0)
+    if class_diff < -1:
+        conditions.append("away_higher_class")
+    elif class_diff > 1:
+        conditions.append("home_higher_class")
+
+    # Form conditions
+    home_wins = features.get("home_wins", 0)
+    away_wins = features.get("away_wins", 0)
+    if home_wins < 2:  # Out of 5
+        conditions.append("poor_home_form")
+    if home_wins >= 4:
+        conditions.append("strong_home_form")
+    if away_wins < 2:
+        conditions.append("poor_away_form")
+    if away_wins >= 4:
+        conditions.append("strong_away_form")
+
+    # Goals conditions (for totals)
+    home_scored = features.get("home_scored", 0)
+    away_scored = features.get("away_scored", 0)
+    home_conceded = features.get("home_conceded", 0)
+    away_conceded = features.get("away_conceded", 0)
+
+    avg_goals = (home_scored + away_scored + home_conceded + away_conceded) / 4 if any([home_scored, away_scored]) else 0
+    if avg_goals < 1.0:
+        conditions.append("low_scoring_teams")
+    elif avg_goals > 2.0:
+        conditions.append("high_scoring_teams")
+
+    # H2H conditions
+    h2h_count = features.get("h2h_count", 0)
+    if h2h_count == 0:
+        conditions.append("no_h2h_data")
+
+    # Motivation/fatigue
+    home_rest_days = features.get("home_rest_days", 5)
+    away_rest_days = features.get("away_rest_days", 5)
+    if home_rest_days < 3:
+        conditions.append("home_tired")
+    if away_rest_days < 3:
+        conditions.append("away_tired")
+
+    # Cup match
+    is_cup = features.get("is_cup", 0)
+    if is_cup:
+        conditions.append("cup_match")
+
+    return conditions
+
+
+def get_condition_key(bet_category: str, condition: str) -> str:
+    """Generate unique key for bet_category + condition combination."""
+    return f"{bet_category}|{condition}"
+
+
+def update_feature_pattern(bet_category: str, condition: str, is_win: bool, confidence: int):
+    """Update feature-based error pattern after a result."""
+    condition_key = get_condition_key(bet_category, condition)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""SELECT id, total_predictions, wins, losses, avg_confidence_when_failed
+                 FROM feature_error_patterns WHERE condition_key = ?""", (condition_key,))
+    row = c.fetchone()
+
+    if row:
+        total = row[1] + 1
+        wins = row[2] + (1 if is_win else 0)
+        losses = row[3] + (0 if is_win else 1)
+
+        # Track average confidence when failed (to understand overconfidence)
+        if not is_win:
+            old_avg = row[4] or confidence
+            old_losses = row[3]
+            new_avg = (old_avg * old_losses + confidence) / losses if losses > 0 else confidence
+        else:
+            new_avg = row[4]
+
+        # Calculate suggested adjustment based on win rate
+        win_rate = wins / total if total > 0 else 0.5
+        # If win rate is 40%, we should reduce confidence by ~10-15%
+        # If win rate is 60%, we can slightly boost by ~5%
+        suggested_adj = int((win_rate - 0.5) * 30)  # Range: -15 to +15
+        suggested_adj = max(-20, min(10, suggested_adj))  # More aggressive penalty, conservative boost
+
+        c.execute("""UPDATE feature_error_patterns
+                     SET total_predictions = ?, wins = ?, losses = ?,
+                         avg_confidence_when_failed = ?, suggested_adjustment = ?,
+                         last_updated = CURRENT_TIMESTAMP
+                     WHERE id = ?""",
+                  (total, wins, losses, new_avg, suggested_adj, row[0]))
+    else:
+        c.execute("""INSERT INTO feature_error_patterns
+                     (bet_category, feature_condition, condition_key, total_predictions,
+                      wins, losses, avg_confidence_when_failed, suggested_adjustment)
+                     VALUES (?, ?, ?, 1, ?, ?, ?, 0)""",
+                  (bet_category, condition, condition_key,
+                   1 if is_win else 0, 0 if is_win else 1,
+                   None if is_win else confidence))
+
+    conn.commit()
+    conn.close()
+
+
+def get_smart_adjustments(bet_category: str, features: dict) -> tuple:
+    """Get smart adjustments based on learned feature patterns.
+
+    Returns: (total_adjustment, list of applied adjustments with reasons)
+    """
+    conditions = extract_feature_conditions(features, bet_category)
+
+    if not conditions:
+        return 0, []
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    adjustments = []
+    total_adjustment = 0
+
+    for condition in conditions:
+        condition_key = get_condition_key(bet_category, condition)
+
+        c.execute("""SELECT wins, losses, suggested_adjustment, total_predictions
+                     FROM feature_error_patterns
+                     WHERE condition_key = ? AND total_predictions >= 5""",
+                  (condition_key,))
+        row = c.fetchone()
+
+        if row:
+            wins, losses, suggested_adj, total = row
+            win_rate = wins / total if total > 0 else 0.5
+
+            # Only apply adjustment if we have enough data and pattern is significant
+            if total >= 5 and abs(suggested_adj) >= 3:
+                # Weight by sample size (more samples = more confidence in adjustment)
+                weight = min(1.0, total / 20)  # Full weight at 20+ samples
+                weighted_adj = int(suggested_adj * weight)
+
+                if weighted_adj != 0:
+                    total_adjustment += weighted_adj
+                    direction = "⬇️" if weighted_adj < 0 else "⬆️"
+                    adjustments.append(f"{direction} {condition}: {weighted_adj:+d}% (win rate: {win_rate:.0%}, n={total})")
+
+    conn.close()
+
+    # Cap total adjustment
+    total_adjustment = max(-25, min(15, total_adjustment))
+
+    return total_adjustment, adjustments
+
+
+def get_risky_conditions(bet_category: str, features: dict) -> list:
+    """Check if current conditions are historically risky for this bet type.
+
+    Returns list of risky conditions with their stats.
+    """
+    conditions = extract_feature_conditions(features, bet_category)
+    risky = []
+
+    if not conditions:
+        return risky
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    for condition in conditions:
+        condition_key = get_condition_key(bet_category, condition)
+
+        c.execute("""SELECT wins, losses, total_predictions
+                     FROM feature_error_patterns
+                     WHERE condition_key = ? AND total_predictions >= 5""",
+                  (condition_key,))
+        row = c.fetchone()
+
+        if row:
+            wins, losses, total = row
+            win_rate = wins / total if total > 0 else 0.5
+
+            # Condition is risky if win rate < 45%
+            if win_rate < 0.45 and total >= 5:
+                risky.append({
+                    "condition": condition,
+                    "win_rate": win_rate,
+                    "sample_size": total,
+                    "wins": wins,
+                    "losses": losses
+                })
+
+    conn.close()
+
+    return sorted(risky, key=lambda x: x["win_rate"])
+
+
+def suggest_alternative_bet(bet_category: str, features: dict, risky_conditions: list) -> dict:
+    """Suggest a safer alternative bet based on risky conditions.
+
+    Returns dict with alternative suggestion or None.
+    """
+    if not risky_conditions:
+        return None
+
+    # Map risky outcomes to safer alternatives
+    alternatives = {
+        "outcomes_home": [
+            {"category": "double_chance_1x", "name": "1X (Double Chance)", "reason": "Safer - covers draw"},
+            {"category": "handicap_home", "name": "Home +1.5", "reason": "Safer - home can lose by 1"},
+        ],
+        "outcomes_away": [
+            {"category": "double_chance_x2", "name": "X2 (Double Chance)", "reason": "Safer - covers draw"},
+            {"category": "handicap_away", "name": "Away +1.5", "reason": "Safer - away can lose by 1"},
+        ],
+        "totals_over": [
+            {"category": "totals_over_1.5", "name": "Over 1.5", "reason": "Lower line - easier to hit"},
+            {"category": "btts", "name": "BTTS Yes", "reason": "Both teams scoring = goals"},
+        ],
+        "totals_under": [
+            {"category": "totals_under_3.5", "name": "Under 3.5", "reason": "Higher line - safer"},
+        ],
+    }
+
+    if bet_category in alternatives:
+        # Check which alternative has best historical performance
+        best_alt = None
+        best_win_rate = 0
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        for alt in alternatives[bet_category]:
+            # Check if alternative performs better with same conditions
+            total_wins = 0
+            total_preds = 0
+
+            for risky in risky_conditions:
+                alt_key = get_condition_key(alt["category"], risky["condition"])
+                c.execute("""SELECT wins, total_predictions FROM feature_error_patterns
+                             WHERE condition_key = ?""", (alt_key,))
+                row = c.fetchone()
+                if row and row[1] > 0:
+                    total_wins += row[0]
+                    total_preds += row[1]
+
+            if total_preds > 0:
+                alt_win_rate = total_wins / total_preds
+                if alt_win_rate > best_win_rate:
+                    best_win_rate = alt_win_rate
+                    best_alt = alt
+
+        conn.close()
+
+        if best_alt and best_win_rate > 0.5:
+            return {
+                "category": best_alt["category"],
+                "name": best_alt["name"],
+                "reason": best_alt["reason"],
+                "expected_win_rate": best_win_rate
+            }
+
+    return None
+
+
 def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dict) -> tuple:
     """Apply all learning adjustments to confidence.
 
@@ -5099,7 +5434,7 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             adjustments.append(f"calibration: {confidence}→{calibrated}")
             confidence = calibrated
 
-    # 2. Apply pattern adjustment
+    # 2. Apply pattern adjustment (basic patterns)
     if features:
         pattern_key = detect_pattern(features, bet_type)
         pattern_adj = get_pattern_adjustment(pattern_key)
@@ -5107,6 +5442,18 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             new_conf = max(30, min(95, confidence + pattern_adj))
             adjustments.append(f"pattern: {'+' if pattern_adj > 0 else ''}{pattern_adj}")
             confidence = new_conf
+
+    # 3. NEW: Apply smart feature-based adjustments
+    # This is the KEY improvement - learns from specific conditions that cause failures
+    if features and category:
+        smart_adj, smart_reasons = get_smart_adjustments(category, features)
+        if smart_adj != 0:
+            old_conf = confidence
+            confidence = max(30, min(95, confidence + smart_adj))
+            adjustments.append(f"smart_learning: {old_conf}→{confidence}")
+            # Add detailed reasons to log
+            for reason in smart_reasons:
+                adjustments.append(f"  └─ {reason}")
 
     return confidence, adjustments
 
@@ -11713,6 +12060,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         personal_advice = get_personalized_advice(user_id, bet_category, lang)
         if personal_advice:
             analysis = analysis + f"\n\n{personal_advice}"
+
+        # NEW: Smart Learning - Check for risky conditions and suggest alternatives
+        if ml_features and bet_category:
+            risky_conditions = get_risky_conditions(bet_category, ml_features)
+
+            if risky_conditions:
+                # Show warning about risky conditions
+                risky_labels = {
+                    "ru": "🧠 **УМНОЕ ОБУЧЕНИЕ:**",
+                    "en": "🧠 **SMART LEARNING:**",
+                    "pt": "🧠 **APRENDIZADO INTELIGENTE:**",
+                    "es": "🧠 **APRENDIZAJE INTELIGENTE:**",
+                    "id": "🧠 **PEMBELAJARAN PINTAR:**"
+                }
+
+                risky_texts = []
+                for risky in risky_conditions[:2]:  # Show max 2 conditions
+                    condition_names = {
+                        "home_many_injuries": {"ru": "много травм дома", "en": "many home injuries", "pt": "muitas lesões em casa", "es": "muchas lesiones locales", "id": "banyak cedera tuan rumah"},
+                        "away_many_injuries": {"ru": "много травм гостей", "en": "many away injuries", "pt": "muitas lesões visitantes", "es": "muchas lesiones visitantes", "id": "banyak cedera tamu"},
+                        "away_higher_position": {"ru": "гости выше в таблице", "en": "away higher in table", "pt": "visitante melhor colocado", "es": "visitante mejor posicionado", "id": "tamu lebih tinggi di tabel"},
+                        "away_higher_class": {"ru": "гости класснее", "en": "away team higher class", "pt": "visitante de classe superior", "es": "visitante de mayor clase", "id": "tamu kelas lebih tinggi"},
+                        "poor_home_form": {"ru": "слабая форма хозяев", "en": "poor home form", "pt": "má forma local", "es": "mala forma local", "id": "performa tuan rumah buruk"},
+                        "strong_away_form": {"ru": "сильная форма гостей", "en": "strong away form", "pt": "boa forma visitante", "es": "buena forma visitante", "id": "performa tamu kuat"},
+                        "cup_match": {"ru": "кубковый матч", "en": "cup match", "pt": "jogo de copa", "es": "partido de copa", "id": "pertandingan piala"},
+                        "no_h2h_data": {"ru": "нет истории встреч", "en": "no H2H history", "pt": "sem histórico H2H", "es": "sin historial H2H", "id": "tidak ada riwayat H2H"},
+                    }
+                    cond_name = condition_names.get(risky["condition"], {}).get(lang, risky["condition"])
+                    risky_texts.append(f"⚠️ {cond_name}: {risky['win_rate']:.0%} винрейт ({risky['sample_size']} ставок)")
+
+                if risky_texts:
+                    analysis = analysis + f"\n\n{risky_labels.get(lang, risky_labels['en'])}\n" + "\n".join(risky_texts)
+
+                # Suggest alternative if available
+                alt_suggestion = suggest_alternative_bet(bet_category, ml_features, risky_conditions)
+                if alt_suggestion:
+                    alt_labels = {
+                        "ru": f"💡 **Безопаснее:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "en": f"💡 **Safer:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "pt": f"💡 **Mais seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "es": f"💡 **Más seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "id": f"💡 **Lebih aman:** {alt_suggestion['name']} — {alt_suggestion['reason']}"
+                    }
+                    analysis = analysis + f"\n{alt_labels.get(lang, alt_labels['en'])}"
 
         # Extract league_code from features for learning system
         league_code = ml_features.get("league_code") if ml_features else None
