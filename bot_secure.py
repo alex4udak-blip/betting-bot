@@ -1650,8 +1650,37 @@ def init_db():
         market_value TEXT,
         is_key_player BOOLEAN DEFAULT 1,
         league_code TEXT,
+        -- Flat track bully tracking (goals vs strong/weak opponents)
+        goals_vs_top6 INTEGER DEFAULT 0,
+        goals_vs_mid INTEGER DEFAULT 0,
+        goals_vs_bottom6 INTEGER DEFAULT 0,
+        games_vs_top6 INTEGER DEFAULT 0,
+        games_vs_mid INTEGER DEFAULT 0,
+        games_vs_bottom6 INTEGER DEFAULT 0,
+        is_big_game_player BOOLEAN DEFAULT 0,
+        is_flat_track_bully BOOLEAN DEFAULT 0,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(team_id, player_id)
+    )''')
+
+    # Player performance history - tracks individual match performances
+    c.execute('''CREATE TABLE IF NOT EXISTS player_match_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER,
+        player_name TEXT,
+        team_id INTEGER,
+        match_id INTEGER,
+        opponent_id INTEGER,
+        opponent_name TEXT,
+        opponent_position INTEGER,
+        opponent_class TEXT,
+        goals INTEGER DEFAULT 0,
+        assists INTEGER DEFAULT 0,
+        minutes INTEGER DEFAULT 0,
+        match_date DATE,
+        league_code TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(player_id, match_id)
     )''')
 
     # Ensemble ML models - stores multiple model types for voting
@@ -4596,6 +4625,330 @@ def calculate_player_impact(team_name: str, injuries: list, team_id: int = None)
     return result
 
 
+def get_opponent_class(position: int, total_teams: int = 20) -> str:
+    """Classify opponent by table position."""
+    if position <= 6:
+        return "top6"
+    elif position >= total_teams - 5:
+        return "bottom6"
+    else:
+        return "mid"
+
+
+def analyze_flat_track_bully(team_name: str, team_id: int = None) -> dict:
+    """
+    Analyze if team's key players are "flat track bullies" or "big game players".
+
+    Flat track bully = scores lots vs weak teams, struggles vs strong
+    Big game player = performs well in big matches vs top teams
+
+    Returns analysis with scoring patterns by opponent strength.
+    """
+    result = {
+        "available": False,
+        "players": [],
+        "team_has_flat_track_bullies": False,
+        "team_has_big_game_players": False,
+        "goals_vs_top6_per_game": 0,
+        "goals_vs_bottom6_per_game": 0,
+        "scoring_ratio": 1.0,  # bottom6/top6 ratio (>2 = flat track bully team)
+    }
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        # Get key players with their vs-opponent stats
+        if team_id:
+            c.execute("""
+                SELECT * FROM key_players
+                WHERE team_id = ? AND is_key_player = 1
+                  AND (goals_vs_top6 > 0 OR goals_vs_bottom6 > 0)
+                ORDER BY goals_season DESC
+                LIMIT 5
+            """, (team_id,))
+        else:
+            c.execute("""
+                SELECT * FROM key_players
+                WHERE (team_name LIKE ? OR team_name LIKE ?) AND is_key_player = 1
+                  AND (goals_vs_top6 > 0 OR goals_vs_bottom6 > 0)
+                ORDER BY goals_season DESC
+                LIMIT 5
+            """, (f"%{team_name}%", f"{team_name}%"))
+
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            return result
+
+        result["available"] = True
+
+        total_goals_top6 = 0
+        total_goals_bottom6 = 0
+        total_games_top6 = 0
+        total_games_bottom6 = 0
+
+        for row in rows:
+            player = dict(row)
+
+            goals_top6 = player.get("goals_vs_top6", 0)
+            goals_mid = player.get("goals_vs_mid", 0)
+            goals_bottom6 = player.get("goals_vs_bottom6", 0)
+            games_top6 = player.get("games_vs_top6", 1)
+            games_bottom6 = player.get("games_vs_bottom6", 1)
+
+            # Calculate per-game rates
+            rate_top6 = goals_top6 / max(games_top6, 1)
+            rate_bottom6 = goals_bottom6 / max(games_bottom6, 1)
+
+            # Classify player
+            is_flat_track = rate_bottom6 > rate_top6 * 2 and goals_bottom6 >= 3
+            is_big_game = rate_top6 >= rate_bottom6 * 0.8 and goals_top6 >= 2
+
+            player_analysis = {
+                "name": player.get("player_name"),
+                "goals_vs_top6": goals_top6,
+                "goals_vs_mid": goals_mid,
+                "goals_vs_bottom6": goals_bottom6,
+                "rate_vs_top6": round(rate_top6, 2),
+                "rate_vs_bottom6": round(rate_bottom6, 2),
+                "is_flat_track_bully": is_flat_track,
+                "is_big_game_player": is_big_game
+            }
+
+            result["players"].append(player_analysis)
+
+            if is_flat_track:
+                result["team_has_flat_track_bullies"] = True
+            if is_big_game:
+                result["team_has_big_game_players"] = True
+
+            total_goals_top6 += goals_top6
+            total_goals_bottom6 += goals_bottom6
+            total_games_top6 += games_top6
+            total_games_bottom6 += games_bottom6
+
+        # Team-level stats
+        if total_games_top6 > 0:
+            result["goals_vs_top6_per_game"] = round(total_goals_top6 / total_games_top6, 2)
+        if total_games_bottom6 > 0:
+            result["goals_vs_bottom6_per_game"] = round(total_goals_bottom6 / total_games_bottom6, 2)
+
+        # Scoring ratio (how much more they score vs weak teams)
+        if result["goals_vs_top6_per_game"] > 0:
+            result["scoring_ratio"] = round(
+                result["goals_vs_bottom6_per_game"] / result["goals_vs_top6_per_game"], 2
+            )
+
+        logger.debug(f"📊 Flat track analysis for {team_name}: ratio={result['scoring_ratio']}")
+
+    except Exception as e:
+        logger.error(f"Error analyzing flat track bully for {team_name}: {e}")
+
+    return result
+
+
+def update_player_match_performance(player_id: int, player_name: str, team_id: int,
+                                     match_id: int, opponent_id: int, opponent_name: str,
+                                     opponent_position: int, goals: int, assists: int,
+                                     league_code: str):
+    """
+    Update player's performance stats after a match.
+    Called when checking match results.
+    """
+    try:
+        opponent_class = get_opponent_class(opponent_position)
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Insert match stats
+        c.execute("""
+            INSERT INTO player_match_stats
+            (player_id, player_name, team_id, match_id, opponent_id, opponent_name,
+             opponent_position, opponent_class, goals, assists, league_code, match_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE('now'))
+            ON CONFLICT(player_id, match_id) DO UPDATE SET
+                goals = excluded.goals,
+                assists = excluded.assists
+        """, (player_id, player_name, team_id, match_id, opponent_id, opponent_name,
+              opponent_position, opponent_class, goals, assists, league_code))
+
+        # Update aggregates in key_players table
+        if opponent_class == "top6":
+            c.execute("""
+                UPDATE key_players SET
+                    goals_vs_top6 = goals_vs_top6 + ?,
+                    games_vs_top6 = games_vs_top6 + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE player_id = ?
+            """, (goals, player_id))
+        elif opponent_class == "bottom6":
+            c.execute("""
+                UPDATE key_players SET
+                    goals_vs_bottom6 = goals_vs_bottom6 + ?,
+                    games_vs_bottom6 = games_vs_bottom6 + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE player_id = ?
+            """, (goals, player_id))
+        else:
+            c.execute("""
+                UPDATE key_players SET
+                    goals_vs_mid = goals_vs_mid + ?,
+                    games_vs_mid = games_vs_mid + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE player_id = ?
+            """, (goals, player_id))
+
+        # Update is_flat_track_bully / is_big_game_player flags
+        c.execute("""
+            UPDATE key_players SET
+                is_flat_track_bully = CASE
+                    WHEN games_vs_bottom6 >= 3 AND games_vs_top6 >= 2 AND
+                         (goals_vs_bottom6 * 1.0 / games_vs_bottom6) > (goals_vs_top6 * 2.0 / MAX(games_vs_top6, 1))
+                    THEN 1 ELSE 0 END,
+                is_big_game_player = CASE
+                    WHEN games_vs_top6 >= 3 AND goals_vs_top6 >= 2 AND
+                         (goals_vs_top6 * 1.0 / games_vs_top6) >= (goals_vs_bottom6 * 0.5 / MAX(games_vs_bottom6, 1))
+                    THEN 1 ELSE 0 END
+            WHERE player_id = ?
+        """, (player_id,))
+
+        conn.commit()
+        conn.close()
+
+        logger.debug(f"📊 Updated player stats: {player_name} vs {opponent_class} = {goals} goals")
+
+    except Exception as e:
+        logger.error(f"Error updating player match performance: {e}")
+
+
+def get_flat_track_context(home_team: str, away_team: str, home_id: int, away_id: int,
+                           opponent_home_pos: int, opponent_away_pos: int) -> dict:
+    """
+    Get flat track bully context for a match.
+
+    Analyzes if key players tend to score more/less based on opponent strength.
+    Returns adjustments and warnings.
+    """
+    result = {
+        "home_analysis": None,
+        "away_analysis": None,
+        "home_scoring_adjustment": 0,
+        "away_scoring_adjustment": 0,
+        "warnings": [],
+        "available": False
+    }
+
+    # Analyze both teams
+    home_analysis = analyze_flat_track_bully(home_team, home_id)
+    away_analysis = analyze_flat_track_bully(away_team, away_id)
+
+    result["home_analysis"] = home_analysis
+    result["away_analysis"] = away_analysis
+
+    if not home_analysis.get("available") and not away_analysis.get("available"):
+        return result
+
+    result["available"] = True
+
+    # Determine opponent classes for this match
+    home_opponent_class = get_opponent_class(opponent_away_pos)  # Home plays vs away
+    away_opponent_class = get_opponent_class(opponent_home_pos)  # Away plays vs home
+
+    # Home team scoring adjustment
+    if home_analysis.get("available"):
+        ratio = home_analysis.get("scoring_ratio", 1.0)
+
+        if home_opponent_class == "top6" and ratio > 1.8:
+            # Playing strong team, but scores more vs weak = reduce expected goals
+            result["home_scoring_adjustment"] = -15
+            if home_analysis.get("team_has_flat_track_bullies"):
+                bullies = [p["name"] for p in home_analysis.get("players", []) if p.get("is_flat_track_bully")]
+                if bullies:
+                    result["warnings"].append(
+                        f"⚠️ {home_team}: {', '.join(bullies[:2])} хуже играют против топов (flat track bully)"
+                    )
+
+        elif home_opponent_class == "bottom6" and ratio > 1.5:
+            # Playing weak team, scores well vs weak = boost expected goals
+            result["home_scoring_adjustment"] = 10
+            result["warnings"].append(
+                f"🎯 {home_team}: Ключевые игроки хорошо забивают слабым → больше голов"
+            )
+
+    # Away team scoring adjustment
+    if away_analysis.get("available"):
+        ratio = away_analysis.get("scoring_ratio", 1.0)
+
+        if away_opponent_class == "top6" and ratio > 1.8:
+            result["away_scoring_adjustment"] = -15
+            if away_analysis.get("team_has_flat_track_bullies"):
+                bullies = [p["name"] for p in away_analysis.get("players", []) if p.get("is_flat_track_bully")]
+                if bullies:
+                    result["warnings"].append(
+                        f"⚠️ {away_team}: {', '.join(bullies[:2])} хуже играют против топов (flat track bully)"
+                    )
+
+        elif away_opponent_class == "bottom6" and ratio > 1.5:
+            result["away_scoring_adjustment"] = 10
+            result["warnings"].append(
+                f"🎯 {away_team}: Ключевые игроки хорошо забивают слабым → больше голов"
+            )
+
+    # Big game player bonus
+    if home_opponent_class == "top6" and home_analysis.get("team_has_big_game_players"):
+        result["home_scoring_adjustment"] += 8
+        result["warnings"].append(f"💪 {home_team}: Есть игроки для больших матчей")
+
+    if away_opponent_class == "top6" and away_analysis.get("team_has_big_game_players"):
+        result["away_scoring_adjustment"] += 8
+        result["warnings"].append(f"💪 {away_team}: Есть игроки для больших матчей")
+
+    return result
+
+
+def format_flat_track_context(flat_track: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format flat track bully analysis for display."""
+    if not flat_track.get("available"):
+        return ""
+
+    warnings = flat_track.get("warnings", [])
+    if not warnings:
+        return ""
+
+    lines = []
+
+    if lang == "ru":
+        lines.append("🎯 **ЭФФЕКТИВНОСТЬ VS СОПЕРНИКИ**")
+    else:
+        lines.append("🎯 **PERFORMANCE VS OPPONENT TYPE**")
+
+    for warning in warnings:
+        lines.append(f"  {warning}")
+
+    # Summary of scoring adjustments
+    home_adj = flat_track.get("home_scoring_adjustment", 0)
+    away_adj = flat_track.get("away_scoring_adjustment", 0)
+
+    if home_adj != 0 or away_adj != 0:
+        lines.append("")
+        if lang == "ru":
+            if home_adj < -10:
+                lines.append(f"  📉 {home_team}: Ожидай меньше голов ({home_adj}%)")
+            elif home_adj > 5:
+                lines.append(f"  📈 {home_team}: Ожидай больше голов (+{home_adj}%)")
+
+            if away_adj < -10:
+                lines.append(f"  📉 {away_team}: Ожидай меньше голов ({away_adj}%)")
+            elif away_adj > 5:
+                lines.append(f"  📈 {away_team}: Ожидай больше голов (+{away_adj}%)")
+
+    return "\n".join(lines)
+
+
 def format_player_impact(home_impact: dict, away_impact: dict,
                          home_team: str, away_team: str, lang: str = "ru") -> str:
     """Format player impact analysis for display."""
@@ -5389,6 +5742,62 @@ ML_FEATURE_COLUMNS = {
     "away_new_coach": 0,           # 1 if away team has new coach (<5 matches)
     "home_coach_boost": 0,         # 0-15 boost from new coach effect
     "away_coach_boost": 0,         # 0-15 boost from new coach effect
+    # Lineup and injury features
+    "home_injuries": 0,            # Number of injured players
+    "away_injuries": 0,
+    "total_injuries": 0,
+    "home_lineup_confirmed": 0,    # 1 if lineup known
+    "away_lineup_confirmed": 0,
+    "home_injury_crisis": 0,       # 1 if 6+ injuries
+    "away_injury_crisis": 0,
+    "fatigue_risk": 0,             # 1 if any team is tired
+    # xG (Expected Goals) features - CRITICAL for totals
+    "home_xg_per_game": 1.3,
+    "away_xg_per_game": 1.0,
+    "home_xga_per_game": 1.0,
+    "away_xga_per_game": 1.3,
+    "home_xg_diff": 0,             # xG - actual goals (positive = underperforming)
+    "away_xg_diff": 0,
+    "total_xg_deviation": 0,
+    "xg_expected_total": 2.5,
+    "xg_expected_home": 1.3,
+    "xg_expected_away": 1.0,
+    "home_recent_xg": 1.3,         # Last 5 games xG
+    "away_recent_xg": 1.0,
+    "recent_xg_total": 2.3,
+    "home_unlucky": 0,             # 1 if xG_diff > 2 (should score more)
+    "away_unlucky": 0,
+    "home_lucky": 0,               # 1 if xG_diff < -2 (overperforming)
+    "away_lucky": 0,
+    "both_underperforming": 0,     # 1 if total xG deviation > 3
+    "both_overperforming": 0,
+    "xg_data_available": 0,
+    # Player Impact features - KEY for injuries of star players
+    "home_attack_modifier": 0,     # Negative = weaker attack
+    "away_attack_modifier": 0,
+    "home_defense_modifier": 0,
+    "away_defense_modifier": 0,
+    "home_goals_modifier": 0,      # Direct goals impact
+    "away_goals_modifier": 0,
+    "home_total_impact": 0,        # Total team impact %
+    "away_total_impact": 0,
+    "home_key_players_out": 0,     # Count of key players injured
+    "away_key_players_out": 0,
+    "home_star_out": 0,            # 1 if attack modifier < -25%
+    "away_star_out": 0,
+    "home_defense_crisis": 0,      # 1 if defense modifier < -25%
+    "away_defense_crisis": 0,
+    "player_impact_available": 0,
+    # Flat Track Bully features - players who score vs weak but not strong teams
+    "home_scoring_ratio": 1.0,     # bottom6/top6 scoring ratio (>2 = flat track bully team)
+    "away_scoring_ratio": 1.0,
+    "home_has_flat_track_bully": 0,  # 1 if team has flat track bullies
+    "away_has_flat_track_bully": 0,
+    "home_has_big_game_player": 0,   # 1 if team has big game players
+    "away_has_big_game_player": 0,
+    "home_scoring_adjustment": 0,    # Expected goals adjustment based on opponent
+    "away_scoring_adjustment": 0,
+    "flat_track_available": 0,
 }
 
 
@@ -5398,8 +5807,8 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                      congestion: dict = None, motivation: dict = None,
                      team_class: dict = None, coach_factor: dict = None,
                      lineups: dict = None, xg_data: dict = None,
-                     player_impact: dict = None) -> dict:
-    """Extract numerical features for ML model including all factors + player impact"""
+                     player_impact: dict = None, flat_track_context: dict = None) -> dict:
+    """Extract numerical features for ML model including all factors + player impact + flat track bully"""
     features = {}
 
     # Home team form features
@@ -5770,6 +6179,38 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["home_defense_crisis"] = 0
         features["away_defense_crisis"] = 0
         features["player_impact_available"] = 0
+
+    # Flat Track Bully features - players scoring vs weak teams but not strong
+    if flat_track_context and flat_track_context.get("available"):
+        home_analysis = flat_track_context.get("home_analysis", {})
+        away_analysis = flat_track_context.get("away_analysis", {})
+
+        # Scoring ratio (bottom6/top6 goals - ratio > 2 = flat track bully team)
+        features["home_scoring_ratio"] = home_analysis.get("scoring_ratio", 1.0)
+        features["away_scoring_ratio"] = away_analysis.get("scoring_ratio", 1.0)
+
+        # Team has flat track bullies / big game players
+        features["home_has_flat_track_bully"] = 1 if home_analysis.get("team_has_flat_track_bullies") else 0
+        features["away_has_flat_track_bully"] = 1 if away_analysis.get("team_has_flat_track_bullies") else 0
+        features["home_has_big_game_player"] = 1 if home_analysis.get("team_has_big_game_players") else 0
+        features["away_has_big_game_player"] = 1 if away_analysis.get("team_has_big_game_players") else 0
+
+        # Scoring adjustment based on opponent class
+        features["home_scoring_adjustment"] = flat_track_context.get("home_scoring_adjustment", 0)
+        features["away_scoring_adjustment"] = flat_track_context.get("away_scoring_adjustment", 0)
+
+        features["flat_track_available"] = 1
+        logger.debug(f"🎯 Flat track: home_ratio={features['home_scoring_ratio']:.2f}, away_ratio={features['away_scoring_ratio']:.2f}")
+    else:
+        features["home_scoring_ratio"] = 1.0
+        features["away_scoring_ratio"] = 1.0
+        features["home_has_flat_track_bully"] = 0
+        features["away_has_flat_track_bully"] = 0
+        features["home_has_big_game_player"] = 0
+        features["away_has_big_game_player"] = 0
+        features["home_scoring_adjustment"] = 0
+        features["away_scoring_adjustment"] = 0
+        features["flat_track_available"] = 0
 
     return features
 
@@ -10755,6 +11196,10 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
                 analysis_data += f"  {away}: {s['name']} - {s['goals']} голов ({s['goals_per_match']} за матч)\n"
             analysis_data += "\n"
 
+    # Save overall table positions for flat track bully analysis (before reset)
+    home_table_pos = home_pos  # Overall league table position
+    away_table_pos = away_pos  # Overall league table position
+
     # Home/Away standings from league table
     if standings:
         home_pos = None
@@ -10800,6 +11245,25 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     player_impact_context = format_player_impact(home_player_impact, away_player_impact, home, away, lang)
     if player_impact_context:
         analysis_data += player_impact_context
+        analysis_data += "\n\n"
+
+    # 🎯 FLAT TRACK BULLY ANALYSIS - Players who score vs weak but not strong teams
+    # Get opponent positions for flat track analysis (use saved table positions)
+    opponent_home_pos = away_table_pos if away_table_pos else 10  # Home team faces away team
+    opponent_away_pos = home_table_pos if home_table_pos else 10  # Away team faces home team
+
+    flat_track_context = get_flat_track_context(
+        home_team=home,
+        away_team=away,
+        home_id=home_id,
+        away_id=away_id,
+        opponent_home_pos=opponent_home_pos,
+        opponent_away_pos=opponent_away_pos
+    )
+
+    flat_track_output = format_flat_track_context(flat_track_context, home, away, lang)
+    if flat_track_output:
+        analysis_data += flat_track_output
         analysis_data += "\n\n"
 
     # Odds with VALUE calculation, line movements, and bookmaker info
@@ -10871,7 +11335,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML (referee, web news, congestion, motivation, coach, lineups, xG!)
+    # Extract features for ML (referee, web news, congestion, motivation, coach, lineups, xG, flat track!)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -10888,7 +11352,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         coach_factor=coach_factor,
         lineups=lineups,  # Injuries data for ML
         xg_data=xg_data,  # Real xG data for totals
-        player_impact=player_impact_data  # KEY PLAYER IMPACT!
+        player_impact=player_impact_data,  # KEY PLAYER IMPACT!
+        flat_track_context=flat_track_context  # Flat track bully analysis
     )
 
     # Get ML predictions if models are trained
