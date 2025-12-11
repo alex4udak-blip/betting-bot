@@ -10372,7 +10372,7 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Только для администраторов")
         return
 
-    await update.message.reply_text("🧠 Запускаю обучение на исторических данных...\nЭто может занять несколько минут.")
+    status_msg = await update.message.reply_text("🧠 Запускаю обучение на исторических данных...")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -10388,13 +10388,18 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     predictions = c.fetchall()
     conn.close()
 
+    total_count = len(predictions)
+
     if not predictions:
-        await update.message.reply_text("❌ Нет верифицированных прогнозов с ML фичами для обучения.")
+        await status_msg.edit_text("❌ Нет верифицированных прогнозов с ML фичами для обучения.")
         return
+
+    await status_msg.edit_text(f"🧠 Обучение на {total_count} прогнозах...\n\n⏳ Прогресс: 0%")
 
     processed = 0
     errors = 0
     patterns_updated = 0
+    last_update = 0
 
     for pred_id, bet_type, confidence, is_correct, features_json, league_code in predictions:
         try:
@@ -10416,6 +10421,19 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 patterns_updated += 1
 
             processed += 1
+
+            # Update progress every 50 predictions
+            if processed - last_update >= 50:
+                percent = int((processed / total_count) * 100)
+                try:
+                    await status_msg.edit_text(
+                        f"🧠 Обучение на {total_count} прогнозах...\n\n"
+                        f"⏳ Прогресс: {processed}/{total_count} ({percent}%)\n"
+                        f"📊 Паттернов: {patterns_updated}"
+                    )
+                except Exception:
+                    pass  # Ignore rate limit errors
+                last_update = processed
 
         except Exception as e:
             errors += 1
