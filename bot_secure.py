@@ -3925,8 +3925,9 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                      odds: dict, h2h: list, home_team: str, away_team: str,
                      referee_stats: dict = None, has_web_news: bool = False,
                      congestion: dict = None, motivation: dict = None,
-                     team_class: dict = None, coach_factor: dict = None) -> dict:
-    """Extract numerical features for ML model including congestion, motivation, team class, and coach"""
+                     team_class: dict = None, coach_factor: dict = None,
+                     lineups: dict = None) -> dict:
+    """Extract numerical features for ML model including congestion, motivation, team class, coach, and lineups"""
     features = {}
 
     # Home team form features
@@ -4161,6 +4162,33 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["away_new_coach"] = 0
         features["home_coach_boost"] = 0
         features["away_coach_boost"] = 0
+
+    # Lineups and injuries features (CRITICAL for prediction accuracy!)
+    if lineups:
+        home_injuries_list = lineups.get("home_injuries", [])
+        away_injuries_list = lineups.get("away_injuries", [])
+        home_lineup = lineups.get("home_lineup", [])
+        away_lineup = lineups.get("away_lineup", [])
+
+        features["home_injuries"] = len(home_injuries_list)
+        features["away_injuries"] = len(away_injuries_list)
+        features["total_injuries"] = len(home_injuries_list) + len(away_injuries_list)
+        features["home_lineup_confirmed"] = 1 if home_lineup else 0
+        features["away_lineup_confirmed"] = 1 if away_lineup else 0
+
+        # High injury count is a risk factor
+        features["home_injury_crisis"] = 1 if len(home_injuries_list) >= 6 else 0
+        features["away_injury_crisis"] = 1 if len(away_injuries_list) >= 6 else 0
+
+        logger.debug(f"🏥 Injuries extracted: home={len(home_injuries_list)}, away={len(away_injuries_list)}")
+    else:
+        features["home_injuries"] = 0
+        features["away_injuries"] = 0
+        features["total_injuries"] = 0
+        features["home_lineup_confirmed"] = 0
+        features["away_lineup_confirmed"] = 0
+        features["home_injury_crisis"] = 0
+        features["away_injury_crisis"] = 0
 
     return features
 
@@ -9235,7 +9263,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML (including referee, web news, congestion, motivation, coach)
+    # Extract features for ML (including referee, web news, congestion, motivation, coach, LINEUPS!)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -9249,7 +9277,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         congestion=congestion,
         motivation=motivation,
         team_class=team_class,
-        coach_factor=coach_factor
+        coach_factor=coach_factor,
+        lineups=lineups  # CRITICAL: Now includes injuries data for ML!
     )
 
     # Get ML predictions if models are trained
