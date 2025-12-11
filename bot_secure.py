@@ -9806,9 +9806,16 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚙️ **Админ-команды:**
 • /broadcast текст - Рассылка всем
-• /addpremium ID - Дать премиум
-• /forcecheck - Проверить ВСЕ pending predictions
-• /checkresults - Проверить свои результаты
+• /addpremium ID - Дать премиум (дни)
+• /removepremium ID - Убрать премиум
+• /userinfo ID - Инфо о юзере
+• /forcecheck - Проверить ВСЕ pending
+• /analyzeall - Анализ всех матчей
+• /mlstatus - Статус ML моделей
+• /mltrain - Обучить ML модели
+• /learnhistory - Обучить на истории
+• /accuracy - Детальный анализ точности
+• /debug - Отладочная информация
 
 🔧 **Система:**
 ├ Админов: {len(ADMIN_IDS)}
@@ -10349,6 +10356,98 @@ async def mltrain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"• {cat}: {info['accuracy']:.1%} точность\n"
     else:
         text = "❌ Недостаточно данных для обучения.\nНужно минимум 100 проверенных прогнозов на категорию."
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Learn from historical predictions - admin only.
+
+    Goes through all verified predictions and updates feature_error_patterns
+    to bootstrap the smart learning system.
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("🧠 Запускаю обучение на исторических данных...\nЭто может занять несколько минут.")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get all verified predictions with their ML features
+    c.execute("""SELECT p.id, p.bet_type, p.confidence, p.is_correct, p.ml_features_json, p.league_code
+                 FROM predictions p
+                 WHERE p.is_correct IS NOT NULL
+                 AND p.is_correct != 2
+                 AND p.ml_features_json IS NOT NULL
+                 ORDER BY p.created_at""")
+
+    predictions = c.fetchall()
+    conn.close()
+
+    if not predictions:
+        await update.message.reply_text("❌ Нет верифицированных прогнозов с ML фичами для обучения.")
+        return
+
+    processed = 0
+    errors = 0
+    patterns_updated = 0
+
+    for pred_id, bet_type, confidence, is_correct, features_json, league_code in predictions:
+        try:
+            if not features_json:
+                continue
+
+            features = json.loads(features_json)
+            bet_category = categorize_bet(bet_type)
+
+            if not bet_category:
+                continue
+
+            is_win = is_correct == 1
+
+            # Extract conditions and update patterns
+            conditions = extract_feature_conditions(features, bet_category)
+            for condition in conditions:
+                update_feature_pattern(bet_category, condition, is_win, confidence)
+                patterns_updated += 1
+
+            processed += 1
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Error processing prediction {pred_id}: {e}")
+
+    # Get stats about learned patterns
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT COUNT(*),
+                 SUM(CASE WHEN suggested_adjustment < -5 THEN 1 ELSE 0 END),
+                 SUM(CASE WHEN suggested_adjustment > 5 THEN 1 ELSE 0 END)
+                 FROM feature_error_patterns WHERE total_predictions >= 5""")
+    pattern_stats = c.fetchone()
+    conn.close()
+
+    total_patterns = pattern_stats[0] or 0
+    risky_patterns = pattern_stats[1] or 0
+    good_patterns = pattern_stats[2] or 0
+
+    text = f"""✅ **Обучение на истории завершено!**
+
+📊 **Обработано:**
+├ Прогнозов: {processed}
+├ Ошибок: {errors}
+└ Паттернов обновлено: {patterns_updated}
+
+🧠 **Выученные паттерны (≥5 примеров):**
+├ Всего: {total_patterns}
+├ 🔴 Рисковых (снижают conf): {risky_patterns}
+└ 🟢 Хороших (повышают conf): {good_patterns}
+
+Теперь система будет корректировать уверенность на основе выученных паттернов!"""
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -15152,6 +15251,7 @@ def main():
     app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
     app.add_handler(CommandHandler("mltrain", mltrain_cmd))
     app.add_handler(CommandHandler("train", mltrain_cmd))  # Alias for /mltrain
+    app.add_handler(CommandHandler("learnhistory", learnhistory_cmd))  # Learn from historical data
     app.add_handler(CommandHandler("accuracy", accuracy_cmd))  # Detailed accuracy analysis
 
     # Callbacks
