@@ -3586,6 +3586,483 @@ def calculate_kelly(probability: float, odds: float) -> float:
     return max(0, min(kelly / 4, 0.25))
 
 
+# ===== xG (EXPECTED GOALS) DATA SYSTEM =====
+# Real xG from statistics providers - CRITICAL for totals predictions
+
+# Team name mapping for Understat (they use specific names)
+UNDERSTAT_TEAM_NAMES = {
+    # Premier League
+    "Arsenal FC": "Arsenal", "Arsenal": "Arsenal",
+    "Aston Villa FC": "Aston Villa", "Aston Villa": "Aston Villa",
+    "AFC Bournemouth": "Bournemouth", "Bournemouth": "Bournemouth",
+    "Brentford FC": "Brentford", "Brentford": "Brentford",
+    "Brighton & Hove Albion FC": "Brighton", "Brighton": "Brighton",
+    "Chelsea FC": "Chelsea", "Chelsea": "Chelsea",
+    "Crystal Palace FC": "Crystal Palace", "Crystal Palace": "Crystal Palace",
+    "Everton FC": "Everton", "Everton": "Everton",
+    "Fulham FC": "Fulham", "Fulham": "Fulham",
+    "Ipswich Town FC": "Ipswich", "Ipswich Town": "Ipswich",
+    "Leicester City FC": "Leicester", "Leicester City": "Leicester",
+    "Liverpool FC": "Liverpool", "Liverpool": "Liverpool",
+    "Manchester City FC": "Manchester City", "Manchester City": "Manchester City",
+    "Manchester United FC": "Manchester United", "Manchester United": "Manchester United",
+    "Newcastle United FC": "Newcastle United", "Newcastle United": "Newcastle United",
+    "Nottingham Forest FC": "Nottingham Forest", "Nottingham Forest": "Nottingham Forest",
+    "Southampton FC": "Southampton", "Southampton": "Southampton",
+    "Tottenham Hotspur FC": "Tottenham", "Tottenham Hotspur": "Tottenham",
+    "West Ham United FC": "West Ham", "West Ham United": "West Ham",
+    "Wolverhampton Wanderers FC": "Wolverhampton Wanderers", "Wolves": "Wolverhampton Wanderers",
+    # La Liga
+    "FC Barcelona": "Barcelona", "Barcelona": "Barcelona",
+    "Real Madrid CF": "Real Madrid", "Real Madrid": "Real Madrid",
+    "Club Atlético de Madrid": "Atletico Madrid", "Atletico Madrid": "Atletico Madrid", "Atlético Madrid": "Atletico Madrid",
+    "Athletic Club": "Athletic Club", "Athletic Bilbao": "Athletic Club",
+    "Real Sociedad de Fútbol": "Real Sociedad", "Real Sociedad": "Real Sociedad",
+    "Real Betis Balompié": "Real Betis", "Real Betis": "Real Betis",
+    "Villarreal CF": "Villarreal", "Villarreal": "Villarreal",
+    "Sevilla FC": "Sevilla", "Sevilla": "Sevilla",
+    "Valencia CF": "Valencia", "Valencia": "Valencia",
+    "Getafe CF": "Getafe", "Getafe": "Getafe",
+    "RC Celta de Vigo": "Celta Vigo", "Celta Vigo": "Celta Vigo",
+    "RCD Espanyol de Barcelona": "Espanyol", "Espanyol": "Espanyol",
+    "CA Osasuna": "Osasuna", "Osasuna": "Osasuna",
+    "RCD Mallorca": "Mallorca", "Mallorca": "Mallorca",
+    "Deportivo Alavés": "Alaves", "Alaves": "Alaves",
+    "UD Las Palmas": "Las Palmas", "Las Palmas": "Las Palmas",
+    "Girona FC": "Girona", "Girona": "Girona",
+    "Rayo Vallecano de Madrid": "Rayo Vallecano", "Rayo Vallecano": "Rayo Vallecano",
+    "CD Leganés": "Leganes", "Leganes": "Leganes",
+    "Real Valladolid CF": "Valladolid", "Valladolid": "Valladolid",
+    # Serie A
+    "SSC Napoli": "Napoli", "Napoli": "Napoli",
+    "FC Internazionale Milano": "Inter", "Inter Milan": "Inter", "Inter": "Inter",
+    "AC Milan": "AC Milan", "Milan": "AC Milan",
+    "Juventus FC": "Juventus", "Juventus": "Juventus",
+    "Atalanta BC": "Atalanta", "Atalanta": "Atalanta",
+    "AS Roma": "Roma", "Roma": "Roma",
+    "SS Lazio": "Lazio", "Lazio": "Lazio",
+    "ACF Fiorentina": "Fiorentina", "Fiorentina": "Fiorentina",
+    "Bologna FC 1909": "Bologna", "Bologna": "Bologna",
+    "Torino FC": "Torino", "Torino": "Torino",
+    "Udinese Calcio": "Udinese", "Udinese": "Udinese",
+    "US Sassuolo Calcio": "Sassuolo", "Sassuolo": "Sassuolo",
+    "Empoli FC": "Empoli", "Empoli": "Empoli",
+    "US Salernitana 1919": "Salernitana", "Salernitana": "Salernitana",
+    "Hellas Verona FC": "Verona", "Verona": "Verona",
+    "US Lecce": "Lecce", "Lecce": "Lecce",
+    "Cagliari Calcio": "Cagliari", "Cagliari": "Cagliari",
+    "Genoa CFC": "Genoa", "Genoa": "Genoa",
+    "Frosinone Calcio": "Frosinone", "Frosinone": "Frosinone",
+    "Parma Calcio 1913": "Parma", "Parma": "Parma",
+    "Venezia FC": "Venezia", "Venezia": "Venezia",
+    "AC Monza": "Monza", "Monza": "Monza",
+    "Como 1907": "Como", "Como": "Como",
+    # Bundesliga
+    "FC Bayern München": "Bayern Munich", "Bayern Munich": "Bayern Munich", "Bayern München": "Bayern Munich",
+    "Borussia Dortmund": "Borussia Dortmund", "Dortmund": "Borussia Dortmund",
+    "RB Leipzig": "RasenBallsport Leipzig", "RB Leipzig": "RasenBallsport Leipzig",
+    "Bayer 04 Leverkusen": "Bayer Leverkusen", "Bayer Leverkusen": "Bayer Leverkusen",
+    "Eintracht Frankfurt": "Eintracht Frankfurt", "Frankfurt": "Eintracht Frankfurt",
+    "VfB Stuttgart": "Stuttgart", "Stuttgart": "Stuttgart",
+    "VfL Wolfsburg": "Wolfsburg", "Wolfsburg": "Wolfsburg",
+    "SC Freiburg": "Freiburg", "Freiburg": "Freiburg",
+    "TSG 1899 Hoffenheim": "Hoffenheim", "Hoffenheim": "Hoffenheim",
+    "1. FC Union Berlin": "Union Berlin", "Union Berlin": "Union Berlin",
+    "Borussia Mönchengladbach": "Borussia M.Gladbach", "Gladbach": "Borussia M.Gladbach",
+    "1. FSV Mainz 05": "Mainz 05", "Mainz": "Mainz 05",
+    "FC Augsburg": "Augsburg", "Augsburg": "Augsburg",
+    "SV Werder Bremen": "Werder Bremen", "Werder Bremen": "Werder Bremen",
+    "VfL Bochum 1848": "Bochum", "Bochum": "Bochum",
+    "1. FC Köln": "FC Cologne", "Köln": "FC Cologne", "Cologne": "FC Cologne",
+    "1. FC Heidenheim 1846": "Heidenheim", "Heidenheim": "Heidenheim",
+    "SV Darmstadt 98": "Darmstadt", "Darmstadt": "Darmstadt",
+    "FC St. Pauli": "St. Pauli", "St. Pauli": "St. Pauli",
+    "Holstein Kiel": "Holstein Kiel", "Kiel": "Holstein Kiel",
+    # Ligue 1
+    "Paris Saint-Germain FC": "Paris Saint Germain", "PSG": "Paris Saint Germain", "Paris Saint-Germain": "Paris Saint Germain",
+    "AS Monaco FC": "Monaco", "Monaco": "Monaco",
+    "Olympique de Marseille": "Marseille", "Marseille": "Marseille",
+    "Lille OSC": "Lille", "Lille": "Lille",
+    "Olympique Lyonnais": "Lyon", "Lyon": "Lyon",
+    "OGC Nice": "Nice", "Nice": "Nice",
+    "RC Lens": "Lens", "Lens": "Lens",
+    "Stade Rennais FC 1901": "Rennes", "Rennes": "Rennes",
+    "RC Strasbourg Alsace": "Strasbourg", "Strasbourg": "Strasbourg",
+    "Stade Brestois 29": "Brest", "Brest": "Brest",
+    "Montpellier HSC": "Montpellier", "Montpellier": "Montpellier",
+    "FC Nantes": "Nantes", "Nantes": "Nantes",
+    "Toulouse FC": "Toulouse", "Toulouse": "Toulouse",
+    "Stade de Reims": "Reims", "Reims": "Reims",
+    "FC Lorient": "Lorient", "Lorient": "Lorient",
+    "Clermont Foot 63": "Clermont Foot", "Clermont": "Clermont Foot",
+    "FC Metz": "Metz", "Metz": "Metz",
+    "Le Havre AC": "Le Havre", "Le Havre": "Le Havre",
+    "AJ Auxerre": "Auxerre", "Auxerre": "Auxerre",
+    "Angers SCO": "Angers", "Angers": "Angers",
+    "AS Saint-Étienne": "Saint-Etienne", "Saint-Étienne": "Saint-Etienne",
+}
+
+# League code to Understat league name
+UNDERSTAT_LEAGUES = {
+    "PL": "EPL",      # English Premier League
+    "PD": "La_liga",  # La Liga
+    "SA": "Serie_A",  # Serie A
+    "BL1": "Bundesliga",  # Bundesliga
+    "FL1": "Ligue_1",  # Ligue 1
+}
+
+# Cache for xG data (to avoid repeated requests)
+_xg_cache = {}
+_xg_cache_time = {}
+XG_CACHE_DURATION = 3600  # 1 hour cache
+
+
+async def fetch_team_xg_understat(team_name: str, league_code: str, season: int = None) -> dict:
+    """
+    Fetch real xG data for a team from Understat.
+
+    Returns dict with:
+    - xg_for: expected goals scored
+    - xg_against: expected goals conceded
+    - goals: actual goals scored
+    - goals_against: actual goals conceded
+    - xg_diff: xG - actual goals (positive = unlucky/should score more)
+    - xg_per_game: average xG per match
+    - npxg: non-penalty xG
+    """
+    result = {
+        "source": "understat",
+        "available": False,
+        "team": team_name,
+    }
+
+    if league_code not in UNDERSTAT_LEAGUES:
+        result["error"] = f"League {league_code} not supported by Understat"
+        return result
+
+    # Get Understat team name
+    understat_name = UNDERSTAT_TEAM_NAMES.get(team_name)
+    if not understat_name:
+        # Try to find partial match
+        for key, value in UNDERSTAT_TEAM_NAMES.items():
+            if team_name.lower() in key.lower() or key.lower() in team_name.lower():
+                understat_name = value
+                break
+
+    if not understat_name:
+        result["error"] = f"Team {team_name} not found in Understat mapping"
+        return result
+
+    # Check cache
+    cache_key = f"xg_{understat_name}_{league_code}"
+    if cache_key in _xg_cache:
+        cache_age = (datetime.now() - _xg_cache_time.get(cache_key, datetime.min)).total_seconds()
+        if cache_age < XG_CACHE_DURATION:
+            return _xg_cache[cache_key]
+
+    understat_league = UNDERSTAT_LEAGUES[league_code]
+    if not season:
+        season = datetime.now().year if datetime.now().month >= 8 else datetime.now().year - 1
+
+    try:
+        session = await get_http_session()
+
+        # Fetch league page which contains team xG data
+        url = f"https://understat.com/league/{understat_league}/{season}"
+
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as response:
+            if response.status != 200:
+                result["error"] = f"Understat returned {response.status}"
+                return result
+
+            html = await response.text()
+
+            # Extract teamsData JSON from page (it's embedded in script tags)
+            teams_match = re.search(r"var teamsData\s*=\s*JSON\.parse\('(.+?)'\)", html)
+            if not teams_match:
+                result["error"] = "Could not find teamsData in Understat page"
+                return result
+
+            # Decode the escaped JSON
+            teams_json = teams_match.group(1)
+            teams_json = teams_json.encode().decode('unicode_escape')
+            teams_data = json.loads(teams_json)
+
+            # Find our team
+            team_data = None
+            for team_id, data in teams_data.items():
+                if data.get("title", "").lower() == understat_name.lower():
+                    team_data = data
+                    break
+
+            if not team_data:
+                # Try partial match
+                for team_id, data in teams_data.items():
+                    title = data.get("title", "").lower()
+                    if understat_name.lower() in title or title in understat_name.lower():
+                        team_data = data
+                        break
+
+            if not team_data:
+                result["error"] = f"Team {understat_name} not found in Understat data"
+                return result
+
+            # Parse history to calculate totals
+            history = team_data.get("history", [])
+            if not history:
+                result["error"] = "No match history found"
+                return result
+
+            total_xg = 0
+            total_xga = 0
+            total_goals = 0
+            total_goals_against = 0
+            total_npxg = 0
+            total_npxga = 0
+            matches_played = len(history)
+
+            # Recent form (last 5 matches)
+            recent_xg = 0
+            recent_goals = 0
+            recent_xga = 0
+            recent_goals_against = 0
+            recent_matches = history[-5:] if len(history) >= 5 else history
+
+            for match in history:
+                total_xg += float(match.get("xG", 0))
+                total_xga += float(match.get("xGA", 0))
+                total_goals += int(match.get("scored", 0))
+                total_goals_against += int(match.get("missed", 0))
+                total_npxg += float(match.get("npxG", 0))
+                total_npxga += float(match.get("npxGA", 0))
+
+            for match in recent_matches:
+                recent_xg += float(match.get("xG", 0))
+                recent_xga += float(match.get("xGA", 0))
+                recent_goals += int(match.get("scored", 0))
+                recent_goals_against += int(match.get("missed", 0))
+
+            # Calculate metrics
+            result.update({
+                "available": True,
+                "matches_played": matches_played,
+                "xg_for": round(total_xg, 2),
+                "xg_against": round(total_xga, 2),
+                "goals": total_goals,
+                "goals_against": total_goals_against,
+                "npxg": round(total_npxg, 2),  # Non-penalty xG
+                "npxga": round(total_npxga, 2),
+                "xg_per_game": round(total_xg / matches_played, 2) if matches_played else 0,
+                "xga_per_game": round(total_xga / matches_played, 2) if matches_played else 0,
+                "goals_per_game": round(total_goals / matches_played, 2) if matches_played else 0,
+                # xG deviation: positive = underperforming (should score more)
+                "xg_diff": round(total_xg - total_goals, 2),
+                "xga_diff": round(total_xga - total_goals_against, 2),
+                # Recent form xG (last 5)
+                "recent_xg": round(recent_xg, 2),
+                "recent_xga": round(recent_xga, 2),
+                "recent_goals": recent_goals,
+                "recent_xg_per_game": round(recent_xg / len(recent_matches), 2) if recent_matches else 0,
+            })
+
+            # Add interpretation
+            xg_diff = result["xg_diff"]
+            if xg_diff > 3:
+                result["attacking_luck"] = "very_unlucky"
+                result["attack_trend"] = "likely_to_improve"
+            elif xg_diff > 1:
+                result["attacking_luck"] = "unlucky"
+                result["attack_trend"] = "should_improve"
+            elif xg_diff < -3:
+                result["attacking_luck"] = "very_lucky"
+                result["attack_trend"] = "likely_to_regress"
+            elif xg_diff < -1:
+                result["attacking_luck"] = "lucky"
+                result["attack_trend"] = "may_regress"
+            else:
+                result["attacking_luck"] = "normal"
+                result["attack_trend"] = "stable"
+
+            # Cache result
+            _xg_cache[cache_key] = result
+            _xg_cache_time[cache_key] = datetime.now()
+
+            logger.info(f"📊 xG fetched for {team_name}: xG={result['xg_for']}, Goals={result['goals']}, Diff={xg_diff}")
+
+            return result
+
+    except asyncio.TimeoutError:
+        result["error"] = "Understat request timed out"
+        return result
+    except Exception as e:
+        result["error"] = f"Understat fetch error: {str(e)}"
+        logger.error(f"xG fetch error for {team_name}: {e}")
+        return result
+
+
+async def get_match_xg_data(home_team: str, away_team: str, league_code: str) -> dict:
+    """
+    Get xG data for both teams in a match.
+
+    Returns comprehensive xG analysis including:
+    - Individual team xG stats
+    - Expected match total (based on real xG)
+    - Deviation analysis (who's over/underperforming)
+    - Totals betting insights
+    """
+    result = {
+        "available": False,
+        "home_xg": None,
+        "away_xg": None,
+        "expected_total": None,
+        "analysis": None
+    }
+
+    # Fetch xG for both teams concurrently
+    home_xg_task = fetch_team_xg_understat(home_team, league_code)
+    away_xg_task = fetch_team_xg_understat(away_team, league_code)
+
+    home_xg, away_xg = await asyncio.gather(home_xg_task, away_xg_task)
+
+    result["home_xg"] = home_xg
+    result["away_xg"] = away_xg
+
+    if home_xg.get("available") and away_xg.get("available"):
+        result["available"] = True
+
+        # Calculate expected goals for this match using xG data
+        # Home team attacking vs Away team defending (adjusted for home advantage)
+        home_attack = home_xg.get("xg_per_game", 1.3)
+        away_defense = away_xg.get("xga_per_game", 1.3)
+
+        away_attack = away_xg.get("xg_per_game", 1.0)
+        home_defense = home_xg.get("xga_per_game", 1.0)
+
+        # Expected goals formula: weighted average of attack strength and opponent defense weakness
+        # Home advantage: +10% to home attack
+        expected_home_goals = (home_attack * 1.1 * 0.6 + away_defense * 0.4)
+        expected_away_goals = (away_attack * 0.6 + home_defense * 0.4)
+
+        expected_total = expected_home_goals + expected_away_goals
+
+        result["expected_home_goals"] = round(expected_home_goals, 2)
+        result["expected_away_goals"] = round(expected_away_goals, 2)
+        result["expected_total"] = round(expected_total, 2)
+
+        # Analysis based on xG deviations
+        analysis = []
+
+        # Home team analysis
+        home_diff = home_xg.get("xg_diff", 0)
+        if home_diff > 2:
+            analysis.append(f"⚠️ {home_team} НЕДОЗАБИВАЕТ (xG diff: +{home_diff:.1f}) - ожидай больше голов!")
+        elif home_diff < -2:
+            analysis.append(f"📉 {home_team} перезабивает (xG diff: {home_diff:.1f}) - может регрессировать")
+
+        # Away team analysis
+        away_diff = away_xg.get("xg_diff", 0)
+        if away_diff > 2:
+            analysis.append(f"⚠️ {away_team} НЕДОЗАБИВАЕТ (xG diff: +{away_diff:.1f}) - ожидай больше голов!")
+        elif away_diff < -2:
+            analysis.append(f"📉 {away_team} перезабивает (xG diff: {away_diff:.1f}) - может регрессировать")
+
+        # Totals insight
+        home_recent_xg = home_xg.get("recent_xg_per_game", 1.3)
+        away_recent_xg = away_xg.get("recent_xg_per_game", 1.0)
+        recent_total = home_recent_xg + away_recent_xg
+
+        if recent_total > 3.0:
+            analysis.append(f"🔥 Высокий xG последних матчей: {recent_total:.1f} → склонность к OVER")
+        elif recent_total < 2.0:
+            analysis.append(f"🛡️ Низкий xG последних матчей: {recent_total:.1f} → склонность к UNDER")
+
+        # Combined deviation
+        total_deviation = home_diff + away_diff
+        if total_deviation > 3:
+            analysis.append(f"💎 ОБЕ команды недозабивают! Суммарно +{total_deviation:.1f} xG → СИЛЬНЫЙ OVER сигнал!")
+        elif total_deviation < -3:
+            analysis.append(f"⚡ ОБЕ команды перезабивают! Суммарно {total_deviation:.1f} xG → регрессия к UNDER")
+
+        result["analysis"] = analysis
+        result["total_xg_deviation"] = round(total_deviation, 2)
+        result["recent_xg_total"] = round(recent_total, 2)
+
+        logger.info(f"📊 Match xG: {home_team} vs {away_team} - Expected total: {expected_total:.2f}")
+
+    return result
+
+
+def format_xg_analysis(xg_data: dict, home_team: str, away_team: str, lang: str = "ru") -> str:
+    """Format xG analysis for display in match analysis."""
+    if not xg_data or not xg_data.get("available"):
+        return ""
+
+    lines = []
+
+    if lang == "ru":
+        lines.append("📊 **xG АНАЛИЗ (Expected Goals)**")
+    else:
+        lines.append("📊 **xG ANALYSIS (Expected Goals)**")
+
+    home_xg = xg_data.get("home_xg", {})
+    away_xg = xg_data.get("away_xg", {})
+
+    if home_xg.get("available"):
+        xg = home_xg.get("xg_for", 0)
+        goals = home_xg.get("goals", 0)
+        diff = home_xg.get("xg_diff", 0)
+        matches = home_xg.get("matches_played", 0)
+        xg_pg = home_xg.get("xg_per_game", 0)
+
+        diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+        trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+
+        lines.append(f"  {home_team}:")
+        lines.append(f"    xG: {xg:.1f} | Goals: {goals} | Diff: {diff_str} {trend}")
+        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} matches)")
+
+    if away_xg.get("available"):
+        xg = away_xg.get("xg_for", 0)
+        goals = away_xg.get("goals", 0)
+        diff = away_xg.get("xg_diff", 0)
+        matches = away_xg.get("matches_played", 0)
+        xg_pg = away_xg.get("xg_per_game", 0)
+
+        diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+        trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+
+        lines.append(f"  {away_team}:")
+        lines.append(f"    xG: {xg:.1f} | Goals: {goals} | Diff: {diff_str} {trend}")
+        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} matches)")
+
+    # Expected match totals
+    if xg_data.get("expected_total"):
+        exp_total = xg_data["expected_total"]
+        exp_home = xg_data.get("expected_home_goals", 0)
+        exp_away = xg_data.get("expected_away_goals", 0)
+
+        lines.append("")
+        if lang == "ru":
+            lines.append(f"  **Ожидаемые голы (по xG):**")
+            lines.append(f"    {home_team}: ~{exp_home:.1f}")
+            lines.append(f"    {away_team}: ~{exp_away:.1f}")
+            lines.append(f"    **ИТОГО: ~{exp_total:.1f}**")
+        else:
+            lines.append(f"  **Expected Goals (from xG):**")
+            lines.append(f"    {home_team}: ~{exp_home:.1f}")
+            lines.append(f"    {away_team}: ~{exp_away:.1f}")
+            lines.append(f"    **TOTAL: ~{exp_total:.1f}**")
+
+    # Analysis insights
+    analysis = xg_data.get("analysis", [])
+    if analysis:
+        lines.append("")
+        for insight in analysis:
+            lines.append(f"  {insight}")
+
+    return "\n".join(lines)
+
+
 # ===== IMPROVED EXPECTED GOALS CALCULATION =====
 # Uses home/away specific stats instead of overall averages
 
@@ -3926,8 +4403,8 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
                      referee_stats: dict = None, has_web_news: bool = False,
                      congestion: dict = None, motivation: dict = None,
                      team_class: dict = None, coach_factor: dict = None,
-                     lineups: dict = None) -> dict:
-    """Extract numerical features for ML model including congestion, motivation, team class, coach, and lineups"""
+                     lineups: dict = None, xg_data: dict = None) -> dict:
+    """Extract numerical features for ML model including congestion, motivation, team class, coach, lineups, and xG"""
     features = {}
 
     # Home team form features
@@ -4189,6 +4666,67 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
         features["away_lineup_confirmed"] = 0
         features["home_injury_crisis"] = 0
         features["away_injury_crisis"] = 0
+
+    # xG (Expected Goals) features - CRITICAL for totals predictions!
+    if xg_data and xg_data.get("available"):
+        home_xg = xg_data.get("home_xg", {})
+        away_xg = xg_data.get("away_xg", {})
+
+        # Per-game xG metrics
+        features["home_xg_per_game"] = home_xg.get("xg_per_game", 1.3)
+        features["away_xg_per_game"] = away_xg.get("xg_per_game", 1.0)
+        features["home_xga_per_game"] = home_xg.get("xga_per_game", 1.0)
+        features["away_xga_per_game"] = away_xg.get("xga_per_game", 1.3)
+
+        # xG deviation (positive = underperforming, likely to score more)
+        features["home_xg_diff"] = home_xg.get("xg_diff", 0)
+        features["away_xg_diff"] = away_xg.get("xg_diff", 0)
+        features["total_xg_deviation"] = xg_data.get("total_xg_deviation", 0)
+
+        # Expected total from real xG data
+        features["xg_expected_total"] = xg_data.get("expected_total", 2.5)
+        features["xg_expected_home"] = xg_data.get("expected_home_goals", 1.3)
+        features["xg_expected_away"] = xg_data.get("expected_away_goals", 1.0)
+
+        # Recent form xG (last 5 games - more predictive)
+        features["home_recent_xg"] = home_xg.get("recent_xg_per_game", 1.3)
+        features["away_recent_xg"] = away_xg.get("recent_xg_per_game", 1.0)
+        features["recent_xg_total"] = xg_data.get("recent_xg_total", 2.3)
+
+        # Luck indicators (for regression predictions)
+        features["home_unlucky"] = 1 if home_xg.get("xg_diff", 0) > 2 else 0
+        features["away_unlucky"] = 1 if away_xg.get("xg_diff", 0) > 2 else 0
+        features["home_lucky"] = 1 if home_xg.get("xg_diff", 0) < -2 else 0
+        features["away_lucky"] = 1 if away_xg.get("xg_diff", 0) < -2 else 0
+
+        # Combined signals
+        features["both_underperforming"] = 1 if xg_data.get("total_xg_deviation", 0) > 3 else 0
+        features["both_overperforming"] = 1 if xg_data.get("total_xg_deviation", 0) < -3 else 0
+
+        features["xg_data_available"] = 1
+        logger.debug(f"📊 xG features: home={features['home_xg_per_game']:.2f}, away={features['away_xg_per_game']:.2f}, total={features['xg_expected_total']:.2f}")
+    else:
+        # Default xG features when data not available
+        features["home_xg_per_game"] = 1.3
+        features["away_xg_per_game"] = 1.0
+        features["home_xga_per_game"] = 1.0
+        features["away_xga_per_game"] = 1.3
+        features["home_xg_diff"] = 0
+        features["away_xg_diff"] = 0
+        features["total_xg_deviation"] = 0
+        features["xg_expected_total"] = 2.5
+        features["xg_expected_home"] = 1.3
+        features["xg_expected_away"] = 1.0
+        features["home_recent_xg"] = 1.3
+        features["away_recent_xg"] = 1.0
+        features["recent_xg_total"] = 2.3
+        features["home_unlucky"] = 0
+        features["away_unlucky"] = 0
+        features["home_lucky"] = 0
+        features["away_lucky"] = 0
+        features["both_underperforming"] = 0
+        features["both_overperforming"] = 0
+        features["xg_data_available"] = 0
 
     return features
 
@@ -8985,6 +9523,9 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     lineups = await get_lineups(match_id) if match_id else None
     top_scorers = await get_top_scorers(comp_code, 15)
 
+    # 📊 xG DATA: Fetch real xG from Understat (top-5 leagues only)
+    xg_data = await get_match_xg_data(home, away, comp_code) if comp_code in UNDERSTAT_LEAGUES else {"available": False}
+
     # 🌐 WEB SEARCH: Get real-time news about injuries, lineups, team news
     web_news = await search_match_news(home, away, comp)
     # Get weather if we have venue
@@ -9072,6 +9613,11 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
             analysis_data += f"  📊 Метод: домашняя/гостевая статистика (точный)\n\n"
         else:
             analysis_data += f"  📊 Метод: общая статистика (приблизительный)\n\n"
+
+    # 📊 xG ANALYSIS - Real Expected Goals from statistics (CRITICAL for totals!)
+    xg_context = format_xg_analysis(xg_data, home, away, lang)
+    if xg_context:
+        analysis_data += xg_context + "\n\n"
 
     # H2H analysis with reliability warning
     if h2h:
@@ -9263,7 +9809,7 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         analysis_data += "\n"
 
     # ===== ML PREDICTIONS =====
-    # Extract features for ML (including referee, web news, congestion, motivation, coach, LINEUPS!)
+    # Extract features for ML (referee, web news, congestion, motivation, coach, lineups, xG!)
     ml_features = extract_features(
         home_form=home_form,
         away_form=away_form,
@@ -9278,7 +9824,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
         motivation=motivation,
         team_class=team_class,
         coach_factor=coach_factor,
-        lineups=lineups  # CRITICAL: Now includes injuries data for ML!
+        lineups=lineups,  # CRITICAL: Injuries data for ML!
+        xg_data=xg_data   # CRITICAL: Real xG data for totals predictions!
     )
 
     # Get ML predictions if models are trained
