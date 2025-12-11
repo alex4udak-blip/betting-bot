@@ -6459,6 +6459,45 @@ def train_all_models():
     return results
 
 
+async def train_all_models_async(progress_callback=None):
+    """Train models for all bet categories with progress updates.
+
+    Args:
+        progress_callback: async function(category, status, result) for progress updates
+
+    Returns:
+        dict with training results per category
+    """
+    categories = [
+        ("outcomes_home", "П1 (победа хозяев)"),
+        ("outcomes_away", "П2 (победа гостей)"),
+        ("outcomes_draw", "X (ничья)"),
+        ("totals_over", "ТБ 2.5 (тотал больше)"),
+        ("totals_under", "ТМ 2.5 (тотал меньше)"),
+        ("btts", "ОЗ (обе забьют)")
+    ]
+
+    results = {}
+
+    for i, (cat_code, cat_name) in enumerate(categories):
+        # Notify progress - starting category
+        if progress_callback:
+            await progress_callback(cat_name, "training", None, i + 1, len(categories))
+
+        # Run training in thread pool to avoid blocking event loop
+        result = await asyncio.to_thread(train_ml_model, cat_code)
+
+        if result:
+            results[cat_code] = result
+            if progress_callback:
+                await progress_callback(cat_name, "done", result, i + 1, len(categories))
+        else:
+            if progress_callback:
+                await progress_callback(cat_name, "no_data", None, i + 1, len(categories))
+
+    return results
+
+
 def ml_predict(features: dict, bet_category: str) -> Optional[dict]:
     """Get ML prediction for a bet category.
 
@@ -13443,25 +13482,96 @@ async def mlstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mltrain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Force train ML models - admin only"""
+    """Force train ML models - admin only with live progress updates"""
     user_id = update.effective_user.id
 
     if not is_admin(user_id):
         await update.message.reply_text("⛔ Только для администраторов")
         return
 
-    await update.message.reply_text("🔄 Запускаю обучение моделей...")
+    # Send initial message that we'll update with progress
+    status_msg = await update.message.reply_text(
+        "🔄 **Обучение ML моделей**\n\n"
+        "⏳ Подготовка...\n\n"
+        "_Это может занять несколько минут_",
+        parse_mode="Markdown"
+    )
 
-    results = train_all_models()
+    # Track progress for display
+    progress_lines = []
+    start_time = datetime.now()
 
+    async def progress_callback(cat_name: str, status: str, result: dict, current: int, total: int):
+        """Update status message with training progress"""
+        nonlocal progress_lines
+
+        if status == "training":
+            progress_lines.append(f"⏳ {cat_name}...")
+        elif status == "done":
+            # Remove "training" line and add completed
+            progress_lines = [l for l in progress_lines if cat_name not in l]
+            accuracy = result.get('accuracy', 0) * 100
+            samples = result.get('samples', 0)
+            progress_lines.append(f"✅ {cat_name}: {accuracy:.1f}% ({samples} примеров)")
+        elif status == "no_data":
+            progress_lines = [l for l in progress_lines if cat_name not in l]
+            progress_lines.append(f"⚠️ {cat_name}: мало данных")
+
+        # Build progress bar
+        filled = "█" * current
+        empty = "░" * (total - current)
+        progress_bar = f"[{filled}{empty}] {current}/{total}"
+
+        # Update message
+        elapsed = (datetime.now() - start_time).seconds
+        text = (
+            f"🔄 **Обучение ML моделей**\n\n"
+            f"{progress_bar}\n\n"
+            + "\n".join(progress_lines) +
+            f"\n\n_⏱ {elapsed} сек._"
+        )
+
+        try:
+            await status_msg.edit_text(text, parse_mode="Markdown")
+        except Exception:
+            pass  # Ignore edit errors (message unchanged)
+
+    # Run async training with progress
+    results = await train_all_models_async(progress_callback)
+
+    # Final summary
+    elapsed = (datetime.now() - start_time).seconds
     if results:
-        text = "✅ **Обучение завершено:**\n\n"
-        for cat, info in results.items():
-            text += f"• {cat}: {info['accuracy']:.1%} точность\n"
-    else:
-        text = "❌ Недостаточно данных для обучения.\nНужно минимум 100 проверенных прогнозов на категорию."
+        text = f"✅ **Обучение завершено за {elapsed} сек!**\n\n"
+        total_samples = 0
+        avg_accuracy = 0
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+        for cat, info in results.items():
+            cat_names = {
+                "outcomes_home": "П1",
+                "outcomes_away": "П2",
+                "outcomes_draw": "X",
+                "totals_over": "ТБ 2.5",
+                "totals_under": "ТМ 2.5",
+                "btts": "ОЗ"
+            }
+            name = cat_names.get(cat, cat)
+            text += f"• {name}: **{info['accuracy']:.1%}** ({info['samples']} примеров)\n"
+            total_samples += info['samples']
+            avg_accuracy += info['accuracy']
+
+        if results:
+            avg_accuracy = avg_accuracy / len(results) * 100
+            text += f"\n📊 Средняя точность: **{avg_accuracy:.1f}%**"
+            text += f"\n📚 Всего примеров: {total_samples}"
+    else:
+        text = (
+            "❌ **Недостаточно данных для обучения**\n\n"
+            f"Нужно минимум {ML_MIN_SAMPLES} проверенных прогнозов на категорию.\n\n"
+            "💡 Продолжайте использовать бота, данные накапливаются автоматически."
+        )
+
+    await status_msg.edit_text(text, parse_mode="Markdown")
 
 
 async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16954,6 +17064,202 @@ async def generate_smart_result_explanation(
         )
 
 
+async def generate_claude_result_explanation(
+    prediction_id: int,
+    match_data: dict,
+    bet_type: str,
+    is_correct: bool,
+    home_score: int,
+    away_score: int,
+    lang: str = "ru"
+) -> str:
+    """
+    Generate UNIQUE, AI-powered explanation for match result using Claude.
+
+    Unlike template-based explanations, this creates contextual analysis that:
+    - Explains the REAL reasons for the outcome (not just "1 goal short")
+    - Uses pre-match analytics (form, xG, H2H, injuries, motivation)
+    - Considers tactical and psychological factors
+    - Generates unique text for every match
+
+    Falls back to template-based explanation if Claude unavailable.
+    """
+    if not claude_client:
+        # No Claude API - use template-based explanation
+        return await generate_smart_result_explanation(
+            prediction_id, match_data, bet_type, is_correct,
+            home_score, away_score, lang
+        )
+
+    try:
+        home_team = match_data.get("homeTeam", {}).get("name", "Unknown")
+        away_team = match_data.get("awayTeam", {}).get("name", "Unknown")
+        total_goals = home_score + away_score
+        score_str = f"{home_score}:{away_score}"
+
+        # === 1. GET PREDICTION FEATURES FROM DB ===
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT p.confidence, p.ml_features_json, m.features_json, p.league_code,
+                   p.reasoning, p.raw_analysis
+            FROM predictions p
+            LEFT JOIN ml_training_data m ON m.prediction_id = p.id
+            WHERE p.id = ?
+        """, (prediction_id,))
+        row = c.fetchone()
+        conn.close()
+
+        features = {}
+        confidence = 70
+        league_code = ""
+        original_reasoning = ""
+        raw_analysis = ""
+
+        if row:
+            confidence = row[0] or 70
+            features_json = row[1] or row[2]
+            league_code = row[3] or ""
+            original_reasoning = row[4] or ""
+            raw_analysis = row[5] or ""
+            if features_json:
+                try:
+                    features = json.loads(features_json)
+                except:
+                    pass
+
+        # === 2. BUILD ANALYTICS CONTEXT ===
+        analytics_context = []
+
+        # Form analysis
+        home_form = features.get("home_form", 0)
+        away_form = features.get("away_form", 0)
+        if home_form or away_form:
+            analytics_context.append(f"Форма до матча: {home_team} {home_form}%, {away_team} {away_form}%")
+
+        # Positions
+        home_pos = features.get("home_position", 0)
+        away_pos = features.get("away_position", 0)
+        if home_pos or away_pos:
+            analytics_context.append(f"Позиции в таблице: {home_team} #{home_pos}, {away_team} #{away_pos}")
+
+        # xG (expected goals)
+        home_xg = features.get("home_xg", 0)
+        away_xg = features.get("away_xg", 0)
+        if home_xg or away_xg:
+            analytics_context.append(f"xG (ожидаемые голы): {home_team} {home_xg:.2f}, {away_team} {away_xg:.2f}")
+
+        # Goals averages
+        home_goals_avg = features.get("home_goals_scored_avg", 0)
+        away_goals_avg = features.get("away_goals_scored_avg", 0)
+        home_conceded_avg = features.get("home_goals_conceded_avg", 0)
+        away_conceded_avg = features.get("away_goals_conceded_avg", 0)
+        if home_goals_avg or away_goals_avg:
+            analytics_context.append(
+                f"Средние голы: {home_team} забивает {home_goals_avg:.1f}, пропускает {home_conceded_avg:.1f}; "
+                f"{away_team} забивает {away_goals_avg:.1f}, пропускает {away_conceded_avg:.1f}"
+            )
+
+        # H2H
+        h2h_home = features.get("h2h_home_wins", 0)
+        h2h_away = features.get("h2h_away_wins", 0)
+        h2h_draws = features.get("h2h_draws", 0)
+        if h2h_home or h2h_away or h2h_draws:
+            analytics_context.append(f"H2H последние встречи: {home_team} {h2h_home} побед, {away_team} {h2h_away} побед, ничьи {h2h_draws}")
+
+        # Injuries
+        home_injured = features.get("home_injured_impact", 0)
+        away_injured = features.get("away_injured_impact", 0)
+        if home_injured > 10 or away_injured > 10:
+            analytics_context.append(f"Травмы: влияние на {home_team} {home_injured}%, на {away_team} {away_injured}%")
+
+        # Home advantage
+        home_adv = features.get("home_advantage", 0)
+        if home_adv:
+            analytics_context.append(f"Фактор домашнего поля: {home_adv}%")
+
+        # Motivation
+        home_motivation = features.get("home_motivation_score", 0)
+        away_motivation = features.get("away_motivation_score", 0)
+        if home_motivation or away_motivation:
+            analytics_context.append(f"Мотивация: {home_team} {home_motivation}/10, {away_team} {away_motivation}/10")
+
+        # === 3. GET GOALSCORERS ===
+        goals_data = match_data.get("goals", [])
+        scorers_info = []
+        home_id = match_data.get("homeTeam", {}).get("id")
+
+        for goal in goals_data:
+            scorer = goal.get("scorer", {}).get("name", "")
+            minute = goal.get("minute", "")
+            team_id = goal.get("team", {}).get("id")
+            team_name = home_team if team_id == home_id else away_team
+            if scorer:
+                scorers_info.append(f"{scorer} ({team_name}, {minute}')")
+
+        # === 4. BUILD CLAUDE PROMPT ===
+        result_status = "✅ ЗАШЛА" if is_correct else "❌ НЕ ЗАШЛА"
+
+        prompt = f"""Ты - эксперт по футбольной аналитике. Объясни результат матча и почему ставка {'зашла' if is_correct else 'не зашла'}.
+
+МАТЧ: {home_team} vs {away_team}
+СЧЁТ: {score_str} (всего голов: {total_goals})
+
+СТАВКА: {bet_type}
+УВЕРЕННОСТЬ: {confidence}%
+РЕЗУЛЬТАТ: {result_status}
+
+АНАЛИТИКА ДО МАТЧА:
+{chr(10).join(analytics_context) if analytics_context else "Нет данных"}
+
+{"ГОЛЫ: " + ", ".join(scorers_info) if scorers_info else ""}
+
+{"НАШЕ ОБОСНОВАНИЕ ДО МАТЧА: " + original_reasoning[:500] if original_reasoning else ""}
+
+ЗАДАЧА:
+Напиши короткое (3-5 предложений) объяснение почему ставка {'сработала' if is_correct else 'не сработала'}.
+
+ВАЖНО:
+- НЕ пиши "не хватило одного гола" или "было близко" - это очевидно из счёта
+- Объясни РЕАЛЬНЫЕ причины: тактика, форма, ключевые игроки, мотивация
+- Если ставка не зашла - объясни что мы недооценили/переоценили
+- Если зашла - объясни какой фактор был решающим
+- Пиши кратко и по делу, без воды
+- Язык: {'русский' if lang == 'ru' else 'английский'}
+
+Формат ответа - только текст объяснения, без заголовков."""
+
+        # === 5. CALL CLAUDE API ===
+        message = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        claude_explanation = message.content[0].text.strip()
+
+        # === 6. FORMAT OUTPUT ===
+        header = "💡 **Анализ результата:**" if lang == "ru" else "💡 **Result Analysis:**"
+        status_emoji = "✅" if is_correct else "❌"
+
+        result = f"{header}\n{status_emoji} {bet_type} | {score_str}\n\n{claude_explanation}"
+
+        # Add goalscorers if available
+        if scorers_info and lang == "ru":
+            result += f"\n\n⚽ Голы: {', '.join(scorers_info[:4])}"
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Claude explanation error: {e}")
+        # Fallback to template-based explanation
+        return await generate_smart_result_explanation(
+            prediction_id, match_data, bet_type, is_correct,
+            home_score, away_score, lang
+        )
+
+
 async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
     """Background task to track odds for upcoming matches.
 
@@ -17186,7 +17492,8 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                     break
 
             if main_bet_type and main_is_correct is not None and main_pred_id:
-                explanation = await generate_smart_result_explanation(
+                # Use Claude-powered explanation for unique, contextual analysis
+                explanation = await generate_claude_result_explanation(
                     prediction_id=main_pred_id,
                     match_data=match,
                     bet_type=main_bet_type,
