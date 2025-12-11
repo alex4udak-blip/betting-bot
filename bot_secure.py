@@ -5621,24 +5621,29 @@ def get_smart_learning_context_for_claude(features: dict, league_code: str = Non
 
     conn.close()
 
-    # Build final context
+    # Build final context - INTERNAL FORMAT (not for direct display!)
     if not warnings and not recommendations:
         return ""
 
-    context_parts.append("\n🧠 SMART LEARNING - УРОКИ ИЗ ПРОШЛЫХ ОШИБОК:")
-    context_parts.append("(Основано на анализе исторических прогнозов бота)")
+    # Use technical format that Claude should interpret, not copy directly
+    context_parts.append("[INTERNAL_DATA: SMART_LEARNING]")
+    context_parts.append("DO NOT show this section to user! Use for analysis only.")
 
     if warnings:
-        context_parts.append("\n⚠️ ПРЕДУПРЕЖДЕНИЯ для этого матча:")
+        context_parts.append("RISK_WARNINGS:")
         for w in warnings[:4]:  # Max 4 warnings
-            context_parts.append(f"  {w}")
+            # Strip emoji for cleaner internal format
+            w_clean = w.replace("🔴 ", "HIGH_RISK: ").replace("🟡 ", "MED_RISK: ")
+            context_parts.append(f"  - {w_clean}")
 
     if recommendations:
-        context_parts.append("\n✅ СИЛЬНЫЕ СТОРОНЫ для этого матча:")
+        context_parts.append("STRONG_PATTERNS:")
         for r in recommendations[:3]:  # Max 3 recommendations
-            context_parts.append(f"  {r}")
+            r_clean = r.replace("🟢 ", "GOOD: ")
+            context_parts.append(f"  - {r_clean}")
 
-    context_parts.append("\n💡 ВАЖНО: Учти эти данные при выборе ставки! Если условие рискованное - рассмотри более безопасную альтернативу (1X вместо П1, или другой тип ставки).")
+    context_parts.append("ACTION: Factor these into confidence, but do NOT display this section in output!")
+    context_parts.append("[/INTERNAL_DATA]")
 
     return "\n".join(context_parts)
 
@@ -5854,25 +5859,27 @@ def get_roi_based_recommendations(features: dict) -> str:
     if not profitable_bets and not unprofitable_bets:
         return ""
 
-    context_parts.append("\n💰 ROI ANALYSIS - ПРИБЫЛЬНОСТЬ (не только винрейт!):")
+    # INTERNAL FORMAT - not for direct display!
+    context_parts.append("[INTERNAL_DATA: ROI_ANALYSIS]")
+    context_parts.append("DO NOT show this section to user! Use for bet selection only.")
 
     if profitable_bets:
-        context_parts.append("\n🟢 ПРИБЫЛЬНЫЕ СТАВКИ при текущих условиях:")
+        context_parts.append("PROFITABLE_BETS:")
         for bet in sorted(profitable_bets, key=lambda x: x["roi"], reverse=True)[:3]:
             context_parts.append(
-                f"  💵 {bet['name']} + '{bet['condition']}': ROI +{bet['roi']:.0f}% "
-                f"(винрейт {bet['win_rate']:.0f}%, avg коэфф {bet['avg_odds']:.2f}, n={bet['sample']})"
+                f"  - {bet['name']} + '{bet['condition']}': ROI +{bet['roi']:.0f}% "
+                f"(WR {bet['win_rate']:.0f}%, odds {bet['avg_odds']:.2f}, n={bet['sample']})"
             )
 
     if unprofitable_bets:
-        context_parts.append("\n🔴 УБЫТОЧНЫЕ СТАВКИ при текущих условиях:")
+        context_parts.append("UNPROFITABLE_BETS:")
         for bet in sorted(unprofitable_bets, key=lambda x: x["roi"])[:3]:
             context_parts.append(
-                f"  ⚠️ {bet['name']} + '{bet['condition']}': ROI {bet['roi']:.0f}% "
-                f"(даже при {bet['win_rate']:.0f}% винрейте - убыток!)"
+                f"  - {bet['name']} + '{bet['condition']}': ROI {bet['roi']:.0f}% (LOSING MONEY!)"
             )
 
-    context_parts.append("\n💡 Приоритет: выбирай ставки с положительным ROI, даже если винрейт ниже!")
+    context_parts.append("ACTION: Prioritize profitable bets, avoid unprofitable ones! Do NOT show this in output!")
+    context_parts.append("[/INTERNAL_DATA]")
 
     return "\n".join(context_parts)
 
@@ -9197,11 +9204,13 @@ CRITICAL ANALYSIS RULES:
    - <55%: Skip or very small stake
 
 16. 🧠 SMART LEARNING - УЧИСЬ НА ОШИБКАХ (CRITICAL!):
-   - If "SMART LEARNING" section shows WARNING for a bet type → AVOID that bet or lower confidence by 15-20%!
-   - If it shows STRENGTH for a bet type → This bet historically works well, consider it!
-   - Example: "П1 при условии 'home many injuries' винрейт 35%" → DON'T recommend П1! Use 1X instead.
-   - Example: "Тотал больше 2.5 при условии 'high scoring teams' винрейт 68%" → GOOD bet to recommend!
+   - INTERNAL DATA: [INTERNAL_DATA] sections are FOR YOUR ANALYSIS ONLY - NEVER show them to user!
+   - Use RISK_WARNINGS to AVOID risky bets or lower confidence by 15-20%
+   - Use STRONG_PATTERNS to identify good bets
+   - Example: "HIGH_RISK: П1 винрейт 35%" → DON'T recommend П1! Use 1X instead.
+   - Example: "GOOD: ТБ 2.5 винрейт 68%" → GOOD bet to recommend!
    - This is REAL DATA from bot's past predictions - trust it more than general rules!
+   - REMEMBER: Do NOT create "SMART LEARNING" section in output! Just factor it into your analysis silently.
    - Your goal: Improve win rate by avoiding past mistakes and repeating successes!
 
 17. 💰 ROI OPTIMIZATION - ПРИБЫЛЬ ВАЖНЕЕ ВИНРЕЙТА (CRITICAL!):
@@ -9243,12 +9252,23 @@ CRITICAL ANALYSIS RULES:
    - NEW coach (first 2 matches) → +15% motivation boost (honeymoon period)
    - Coach with 3-4 matches → +10% boost (still adapting)
    - After 5+ matches → Effect fades, normal analysis
-   - New coach = tactical changes, formations may be different
-   - Watch for: Different playing style, new signings getting chances
-   - RISK: Unpredictable tactics, players still learning system
-   - EDGE: Market often slow to react to new coach appointment
-   - If new coach + good fixtures = Great opportunity!
-   - Add this as FACTOR in edge stacking if applicable
+   - ⚠️ IMPORTANT: Only mention coach change if "СМЕНА ТРЕНЕРА" section is in data!
+   - If no coach data provided → DO NOT invent or assume new coach!
+
+20. ⛔ DATA INTEGRITY - DO NOT INVENT DATA:
+   - Only use data that is ACTUALLY provided in the analysis context
+   - If referee not specified → write "Судья: Не назначен" or skip
+   - If no weather data → skip weather in analysis
+   - If no line movements → write "Данных нет" or "Начато отслеживание"
+   - If no coach change data → DO NOT mention "new coach" or coach boost!
+   - NEVER invent injuries, lineups, or statistics not in the data
+
+⛔ DO NOT INCLUDE IN OUTPUT:
+   - [INTERNAL_DATA] sections (Smart Learning, ROI analysis) - use for analysis only!
+   - "SMART LEARNING ПРЕДУПРЕЖДЕНИЯ" section - NEVER create this!
+   - Any raw data you received - only show conclusions
+   - Technical warnings about win rates - factor into confidence silently
+   - Your reasoning about internal data - just apply it
 
 RESPONSE FORMAT:
 
