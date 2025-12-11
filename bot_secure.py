@@ -10317,6 +10317,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /mltrain - Обучить ML модели
 • /learnhistory - Обучить на истории
 • /accuracy - Детальный анализ точности
+• /roi - ROI статистика (прибыльность)
 • /debug - Отладочная информация
 
 🔧 **Система:**
@@ -10972,6 +10973,74 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 └ 🟢 Хороших (повышают conf): {good_patterns}
 
 Теперь система будет корректировать уверенность на основе выученных паттернов!"""
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def roi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show ROI statistics - admin only."""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    stats = get_overall_roi_stats()
+
+    # Format ROI with color
+    roi = stats["roi"]
+    if roi > 20:
+        roi_emoji = "🚀"
+    elif roi > 0:
+        roi_emoji = "🟢"
+    elif roi > -10:
+        roi_emoji = "🟡"
+    else:
+        roi_emoji = "🔴"
+
+    text = f"""💰 **ROI СТАТИСТИКА**
+
+📊 **Общие показатели:**
+├ Всего ставок: {stats['total_bets']}
+├ Побед: {stats['wins']} ({stats['win_rate']:.1f}%)
+├ Поражений: {stats['losses']}
+├ Средний коэфф: {stats['avg_odds']:.2f}
+├ Средний EV: {stats['avg_ev'] or 0:.1f}%
+└ {roi_emoji} **ROI: {roi:+.1f}%**
+
+📈 **ROI по категориям:**
+"""
+
+    for cat in stats["by_category"][:8]:
+        cat_roi = cat["roi"]
+        if cat_roi > 10:
+            cat_emoji = "🟢"
+        elif cat_roi > -10:
+            cat_emoji = "🟡"
+        else:
+            cat_emoji = "🔴"
+
+        cat_names = {
+            "outcomes_home": "П1",
+            "outcomes_away": "П2",
+            "outcomes_draw": "Ничья",
+            "totals_over": "ТБ 2.5",
+            "totals_under": "ТМ 2.5",
+            "btts": "Обе забьют",
+            "double_chance": "Двойной шанс",
+            "handicap": "Фора"
+        }
+        name = cat_names.get(cat["category"], cat["category"])
+
+        text += f"{cat_emoji} {name}: {cat_roi:+.1f}% ROI ({cat['win_rate']:.0f}% винрейт, n={cat['total']})\n"
+
+    text += f"""
+💡 **Понимание ROI:**
+• Положительный ROI = прибыль
+• 60% винрейт × 1.4 коэфф = -16% ROI (убыток!)
+• 45% винрейт × 2.5 коэфф = +12% ROI (прибыль!)
+
+🎯 Цель: ROI 30%+ при винрейте 55%+"""
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -15707,6 +15776,7 @@ def main():
     app.add_handler(CommandHandler("train", mltrain_cmd))  # Alias for /mltrain
     app.add_handler(CommandHandler("learnhistory", learnhistory_cmd))  # Learn from historical data
     app.add_handler(CommandHandler("accuracy", accuracy_cmd))  # Detailed accuracy analysis
+    app.add_handler(CommandHandler("roi", roi_cmd))  # ROI statistics
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
