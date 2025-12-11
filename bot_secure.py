@@ -4825,6 +4825,105 @@ def update_player_match_performance(player_id: int, player_name: str, team_id: i
         logger.error(f"Error updating player match performance: {e}")
 
 
+async def update_player_stats_from_finished_match(match_data: dict, league_code: str):
+    """
+    Extract goalscorers from finished match and update player_match_stats.
+    Called after match results are confirmed.
+
+    Football-data.org /matches/{id} returns goals in 'goals' array:
+    {
+        "goals": [
+            {"minute": 23, "scorer": {"id": 123, "name": "Player"}, "team": {"id": 1, "name": "Team"}},
+            ...
+        ]
+    }
+    """
+    try:
+        match_id = match_data.get("id")
+        if not match_id:
+            return
+
+        home_team = match_data.get("homeTeam", {})
+        away_team = match_data.get("awayTeam", {})
+        home_id = home_team.get("id")
+        away_id = away_team.get("id")
+        home_name = home_team.get("name", "")
+        away_name = away_team.get("name", "")
+
+        goals_data = match_data.get("goals", [])
+
+        if not goals_data or not home_id or not away_id:
+            return
+
+        # Get standings to determine positions
+        standings = await get_standings(league_code)
+
+        # Build position lookup from standings
+        team_positions = {}
+        if standings and standings.get("total"):
+            for idx, team in enumerate(standings["total"], 1):
+                tid = team.get("team", {}).get("id")
+                if tid:
+                    team_positions[tid] = idx
+
+        home_pos = team_positions.get(home_id, 10)
+        away_pos = team_positions.get(away_id, 10)
+
+        # Count goals per player
+        player_goals = {}  # {player_id: {"name": str, "team_id": int, "goals": int}}
+
+        for goal in goals_data:
+            scorer = goal.get("scorer", {})
+            player_id = scorer.get("id")
+            player_name = scorer.get("name", "Unknown")
+            team_info = goal.get("team", {})
+            team_id = team_info.get("id")
+
+            if not player_id or not team_id:
+                continue
+
+            if player_id not in player_goals:
+                player_goals[player_id] = {
+                    "name": player_name,
+                    "team_id": team_id,
+                    "goals": 0
+                }
+            player_goals[player_id]["goals"] += 1
+
+        # Update stats for each scorer
+        for player_id, data in player_goals.items():
+            team_id = data["team_id"]
+
+            # Determine opponent info based on which team scored
+            if team_id == home_id:
+                opponent_id = away_id
+                opponent_name = away_name
+                opponent_position = away_pos
+            else:
+                opponent_id = home_id
+                opponent_name = home_name
+                opponent_position = home_pos
+
+            update_player_match_performance(
+                player_id=player_id,
+                player_name=data["name"],
+                team_id=team_id,
+                match_id=match_id,
+                opponent_id=opponent_id,
+                opponent_name=opponent_name,
+                opponent_position=opponent_position,
+                goals=data["goals"],
+                assists=0,  # API doesn't provide assists in basic match data
+                league_code=league_code
+            )
+
+        if player_goals:
+            logger.info(f"📊 Updated stats for {len(player_goals)} goalscorers in match {match_id}")
+
+    except Exception as e:
+        logger.error(f"Error updating player stats from match: {e}")
+
+
 def get_flat_track_context(home_team: str, away_team: str, home_id: int, away_id: int,
                            opponent_home_pos: int, opponent_away_pos: int) -> dict:
     """
@@ -16740,6 +16839,11 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
             away_score = score.get("away", 0) or 0
             result = f"{home_score}-{away_score}"
 
+            # 📊 Update player stats from goalscorers (for Flat Track Bully analysis)
+            league_code_match = match.get("competition", {}).get("code", "")
+            if league_code_match:
+                await update_player_stats_from_finished_match(match, league_code_match)
+
             # Sort predictions: main first (rank=1), then alternatives
             preds.sort(key=lambda x: x.get("bet_rank", 1))
 
@@ -16840,6 +16944,11 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
             home_score = score.get("home", 0) or 0
             away_score = score.get("away", 0) or 0
             result = f"{home_score}-{away_score}"
+
+            # 📊 Update player stats from goalscorers (for Flat Track Bully analysis)
+            league_code_alert = match.get("competition", {}).get("code", "")
+            if league_code_alert:
+                await update_player_stats_from_finished_match(match, league_code_alert)
 
             is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
             db_value = 1 if is_correct is True else (0 if is_correct is False else 2)
