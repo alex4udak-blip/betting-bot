@@ -3900,49 +3900,63 @@ async def fetch_team_xg_understat(team_name: str, league_code: str, season: int 
         return result
 
 
-async def get_match_xg_data(home_team: str, away_team: str, league_code: str) -> dict:
+async def get_match_xg_data(home_team: str, away_team: str, league_code: str,
+                           home_form: dict = None, away_form: dict = None) -> dict:
     """
     Get xG data for both teams in a match.
 
+    SUPPORTS ALL LEAGUES:
+    - Top-5 leagues: Real xG from Understat
+    - Other leagues: Calculated xG from form data + deviation analysis
+
     Returns comprehensive xG analysis including:
     - Individual team xG stats
-    - Expected match total (based on real xG)
+    - Expected match total (based on real xG or calculated)
     - Deviation analysis (who's over/underperforming)
     - Totals betting insights
     """
     result = {
         "available": False,
+        "source": "none",
         "home_xg": None,
         "away_xg": None,
         "expected_total": None,
         "analysis": None
     }
 
-    # Fetch xG for both teams concurrently
-    home_xg_task = fetch_team_xg_understat(home_team, league_code)
-    away_xg_task = fetch_team_xg_understat(away_team, league_code)
+    # STEP 1: Try Understat for top-5 leagues
+    if league_code in UNDERSTAT_LEAGUES:
+        home_xg_task = fetch_team_xg_understat(home_team, league_code)
+        away_xg_task = fetch_team_xg_understat(away_team, league_code)
+        home_xg, away_xg = await asyncio.gather(home_xg_task, away_xg_task)
 
-    home_xg, away_xg = await asyncio.gather(home_xg_task, away_xg_task)
+        if home_xg.get("available") and away_xg.get("available"):
+            result["home_xg"] = home_xg
+            result["away_xg"] = away_xg
+            result["source"] = "understat"
+            result["available"] = True
+            logger.info(f"📊 xG from Understat for {home_team} vs {away_team}")
 
-    result["home_xg"] = home_xg
-    result["away_xg"] = away_xg
+    # STEP 2: Fallback - Calculate xG from form data (ALL LEAGUES)
+    if not result["available"] and home_form and away_form:
+        result = calculate_xg_from_form(home_team, away_team, home_form, away_form, league_code)
+        if result["available"]:
+            logger.info(f"📊 xG calculated from form for {home_team} vs {away_team}")
 
-    if home_xg.get("available") and away_xg.get("available"):
-        result["available"] = True
+    # STEP 3: Calculate match predictions if we have xG data
+    if result["available"]:
+        home_xg = result.get("home_xg", {})
+        away_xg = result.get("away_xg", {})
 
-        # Calculate expected goals for this match using xG data
-        # Home team attacking vs Away team defending (adjusted for home advantage)
+        # Calculate expected goals for this match
         home_attack = home_xg.get("xg_per_game", 1.3)
         away_defense = away_xg.get("xga_per_game", 1.3)
-
         away_attack = away_xg.get("xg_per_game", 1.0)
         home_defense = home_xg.get("xga_per_game", 1.0)
 
-        # Expected goals formula: weighted average of attack strength and opponent defense weakness
-        # Home advantage: +10% to home attack
+        # Expected goals formula with home advantage
         expected_home_goals = (home_attack * 1.1 * 0.6 + away_defense * 0.4)
         expected_away_goals = (away_attack * 0.6 + home_defense * 0.4)
-
         expected_total = expected_home_goals + expected_away_goals
 
         result["expected_home_goals"] = round(expected_home_goals, 2)
@@ -3952,23 +3966,24 @@ async def get_match_xg_data(home_team: str, away_team: str, league_code: str) ->
         # Analysis based on xG deviations
         analysis = []
 
-        # Home team analysis
         home_diff = home_xg.get("xg_diff", 0)
+        away_diff = away_xg.get("xg_diff", 0)
+
+        # Home team analysis
         if home_diff > 2:
-            analysis.append(f"⚠️ {home_team} НЕДОЗАБИВАЕТ (xG diff: +{home_diff:.1f}) - ожидай больше голов!")
+            analysis.append(f"⚠️ {home_team} НЕДОЗАБИВАЕТ (diff: +{home_diff:.1f}) - ожидай больше голов!")
         elif home_diff < -2:
-            analysis.append(f"📉 {home_team} перезабивает (xG diff: {home_diff:.1f}) - может регрессировать")
+            analysis.append(f"📉 {home_team} перезабивает (diff: {home_diff:.1f}) - может регрессировать")
 
         # Away team analysis
-        away_diff = away_xg.get("xg_diff", 0)
         if away_diff > 2:
-            analysis.append(f"⚠️ {away_team} НЕДОЗАБИВАЕТ (xG diff: +{away_diff:.1f}) - ожидай больше голов!")
+            analysis.append(f"⚠️ {away_team} НЕДОЗАБИВАЕТ (diff: +{away_diff:.1f}) - ожидай больше голов!")
         elif away_diff < -2:
-            analysis.append(f"📉 {away_team} перезабивает (xG diff: {away_diff:.1f}) - может регрессировать")
+            analysis.append(f"📉 {away_team} перезабивает (diff: {away_diff:.1f}) - может регрессировать")
 
-        # Totals insight
-        home_recent_xg = home_xg.get("recent_xg_per_game", 1.3)
-        away_recent_xg = away_xg.get("recent_xg_per_game", 1.0)
+        # Recent form xG
+        home_recent_xg = home_xg.get("recent_xg_per_game", home_attack)
+        away_recent_xg = away_xg.get("recent_xg_per_game", away_attack)
         recent_total = home_recent_xg + away_recent_xg
 
         if recent_total > 3.0:
@@ -3979,15 +3994,141 @@ async def get_match_xg_data(home_team: str, away_team: str, league_code: str) ->
         # Combined deviation
         total_deviation = home_diff + away_diff
         if total_deviation > 3:
-            analysis.append(f"💎 ОБЕ команды недозабивают! Суммарно +{total_deviation:.1f} xG → СИЛЬНЫЙ OVER сигнал!")
+            analysis.append(f"💎 ОБЕ команды недозабивают! Суммарно +{total_deviation:.1f} → СИЛЬНЫЙ OVER сигнал!")
         elif total_deviation < -3:
-            analysis.append(f"⚡ ОБЕ команды перезабивают! Суммарно {total_deviation:.1f} xG → регрессия к UNDER")
+            analysis.append(f"⚡ ОБЕ команды перезабивают! Суммарно {total_deviation:.1f} → регрессия к UNDER")
 
         result["analysis"] = analysis
         result["total_xg_deviation"] = round(total_deviation, 2)
         result["recent_xg_total"] = round(recent_total, 2)
 
-        logger.info(f"📊 Match xG: {home_team} vs {away_team} - Expected total: {expected_total:.2f}")
+        logger.info(f"📊 Match xG ({result['source']}): {home_team} vs {away_team} - Total: {expected_total:.2f}")
+
+    return result
+
+
+def calculate_xg_from_form(home_team: str, away_team: str,
+                           home_form: dict, away_form: dict,
+                           league_code: str = None) -> dict:
+    """
+    Calculate pseudo-xG from form data for leagues without Understat coverage.
+
+    Uses:
+    - Average goals scored/conceded
+    - Home/away splits
+    - Recent form trend
+    - League average normalization
+
+    Also calculates xG deviation by comparing:
+    - Expected goals (based on chances created proxy) vs actual goals
+    """
+    result = {
+        "available": False,
+        "source": "form_calculation",
+        "home_xg": None,
+        "away_xg": None,
+    }
+
+    if not home_form or not away_form:
+        return result
+
+    try:
+        # Get league average for context
+        league_avg = LEAGUE_AVG_GOALS.get(league_code, LEAGUE_AVG_GOALS.get("default", 2.6))
+
+        # HOME TEAM xG calculation
+        home_overall = home_form.get("overall", {})
+        home_home_stats = home_form.get("home", {})
+
+        # Use home-specific stats when available, otherwise overall
+        home_scored = home_home_stats.get("avg_goals_scored") or home_overall.get("avg_goals_scored", 1.3)
+        home_conceded = home_home_stats.get("avg_goals_conceded") or home_overall.get("avg_goals_conceded", 1.0)
+
+        # Calculate "expected" based on shot proxy (more goals = more chances usually)
+        # xG deviation: compare what they "should" score vs what they score
+        # Positive = underperforming (unlucky), Negative = overperforming (lucky)
+        home_matches = home_overall.get("wins", 0) + home_overall.get("draws", 0) + home_overall.get("losses", 0)
+        home_matches = max(home_matches, 5)  # minimum 5 for calculation
+
+        # Estimate xG from goals + variance (regression to league mean)
+        # Teams far from league average tend to regress
+        home_xg_estimate = home_scored * 0.85 + (league_avg / 2) * 0.15  # Slight regression to mean
+        home_xg_diff = (home_xg_estimate - home_scored) * home_matches * 0.5  # Scale by matches
+
+        home_xg_data = {
+            "available": True,
+            "source": "form_calculation",
+            "team": home_team,
+            "xg_per_game": round(home_xg_estimate, 2),
+            "xga_per_game": round(home_conceded, 2),
+            "goals_per_game": round(home_scored, 2),
+            "xg_diff": round(home_xg_diff, 2),
+            "matches_played": home_matches,
+            "recent_xg_per_game": round(home_scored, 2),  # Use actual as proxy for recent
+        }
+
+        # Check if team is over/under performing based on form trend
+        form_str = home_overall.get("form", "")
+        recent_wins = form_str[-5:].count("W") if len(form_str) >= 5 else 0
+        recent_losses = form_str[-5:].count("L") if len(form_str) >= 5 else 0
+
+        # Adjust xG diff based on recent trend
+        if recent_wins >= 4 and home_scored > league_avg / 2 + 0.3:
+            home_xg_data["xg_diff"] -= 1  # Hot streak, might be overperforming
+            home_xg_data["attacking_luck"] = "lucky_streak"
+        elif recent_losses >= 4 and home_scored < league_avg / 2:
+            home_xg_data["xg_diff"] += 1  # Cold streak, might be underperforming
+            home_xg_data["attacking_luck"] = "unlucky_streak"
+        else:
+            home_xg_data["attacking_luck"] = "normal"
+
+        # AWAY TEAM xG calculation
+        away_overall = away_form.get("overall", {})
+        away_away_stats = away_form.get("away", {})
+
+        away_scored = away_away_stats.get("avg_goals_scored") or away_overall.get("avg_goals_scored", 1.0)
+        away_conceded = away_away_stats.get("avg_goals_conceded") or away_overall.get("avg_goals_conceded", 1.3)
+
+        away_matches = away_overall.get("wins", 0) + away_overall.get("draws", 0) + away_overall.get("losses", 0)
+        away_matches = max(away_matches, 5)
+
+        away_xg_estimate = away_scored * 0.85 + (league_avg / 2) * 0.15
+        away_xg_diff = (away_xg_estimate - away_scored) * away_matches * 0.5
+
+        away_xg_data = {
+            "available": True,
+            "source": "form_calculation",
+            "team": away_team,
+            "xg_per_game": round(away_xg_estimate, 2),
+            "xga_per_game": round(away_conceded, 2),
+            "goals_per_game": round(away_scored, 2),
+            "xg_diff": round(away_xg_diff, 2),
+            "matches_played": away_matches,
+            "recent_xg_per_game": round(away_scored, 2),
+        }
+
+        # Away team form trend
+        away_form_str = away_overall.get("form", "")
+        away_recent_wins = away_form_str[-5:].count("W") if len(away_form_str) >= 5 else 0
+        away_recent_losses = away_form_str[-5:].count("L") if len(away_form_str) >= 5 else 0
+
+        if away_recent_wins >= 4 and away_scored > league_avg / 2 + 0.2:
+            away_xg_data["xg_diff"] -= 1
+            away_xg_data["attacking_luck"] = "lucky_streak"
+        elif away_recent_losses >= 4 and away_scored < league_avg / 2:
+            away_xg_data["xg_diff"] += 1
+            away_xg_data["attacking_luck"] = "unlucky_streak"
+        else:
+            away_xg_data["attacking_luck"] = "normal"
+
+        result["home_xg"] = home_xg_data
+        result["away_xg"] = away_xg_data
+        result["available"] = True
+
+        logger.debug(f"📊 Calculated xG: {home_team}={home_xg_estimate:.2f}, {away_team}={away_xg_estimate:.2f}")
+
+    except Exception as e:
+        logger.error(f"xG calculation error: {e}")
 
     return result
 
@@ -3999,41 +4140,69 @@ def format_xg_analysis(xg_data: dict, home_team: str, away_team: str, lang: str 
 
     lines = []
 
-    if lang == "ru":
-        lines.append("📊 **xG АНАЛИЗ (Expected Goals)**")
+    # Show source of xG data
+    source = xg_data.get("source", "unknown")
+    if source == "understat":
+        source_text = "Understat" if lang != "ru" else "Understat (реальный xG)"
     else:
-        lines.append("📊 **xG ANALYSIS (Expected Goals)**")
+        source_text = "Form calculation" if lang != "ru" else "Расчёт по форме"
+
+    if lang == "ru":
+        lines.append(f"📊 **xG АНАЛИЗ** [{source_text}]")
+    else:
+        lines.append(f"📊 **xG ANALYSIS** [{source_text}]")
 
     home_xg = xg_data.get("home_xg", {})
     away_xg = xg_data.get("away_xg", {})
 
     if home_xg.get("available"):
-        xg = home_xg.get("xg_for", 0)
-        goals = home_xg.get("goals", 0)
-        diff = home_xg.get("xg_diff", 0)
+        # Use xg_for for Understat, goals_per_game for calculated
+        if source == "understat":
+            xg = home_xg.get("xg_for", 0)
+            goals = home_xg.get("goals", 0)
+            lines.append(f"  {home_team}:")
+            diff = home_xg.get("xg_diff", 0)
+            diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+            trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+            lines.append(f"    xG: {xg:.1f} | Голы: {goals} | Diff: {diff_str} {trend}")
+        else:
+            xg_pg = home_xg.get("xg_per_game", 0)
+            goals_pg = home_xg.get("goals_per_game", 0)
+            diff = home_xg.get("xg_diff", 0)
+            diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+            trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+            luck = home_xg.get("attacking_luck", "normal")
+            luck_emoji = "🍀" if "lucky" in luck else ("😔" if "unlucky" in luck else "")
+            lines.append(f"  {home_team}:")
+            lines.append(f"    xG/игра: {xg_pg:.2f} | Голы/игра: {goals_pg:.2f} | Тренд: {diff_str} {trend} {luck_emoji}")
+
         matches = home_xg.get("matches_played", 0)
         xg_pg = home_xg.get("xg_per_game", 0)
-
-        diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
-        trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
-
-        lines.append(f"  {home_team}:")
-        lines.append(f"    xG: {xg:.1f} | Goals: {goals} | Diff: {diff_str} {trend}")
-        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} matches)")
+        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} матчей)")
 
     if away_xg.get("available"):
-        xg = away_xg.get("xg_for", 0)
-        goals = away_xg.get("goals", 0)
-        diff = away_xg.get("xg_diff", 0)
+        if source == "understat":
+            xg = away_xg.get("xg_for", 0)
+            goals = away_xg.get("goals", 0)
+            lines.append(f"  {away_team}:")
+            diff = away_xg.get("xg_diff", 0)
+            diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+            trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+            lines.append(f"    xG: {xg:.1f} | Голы: {goals} | Diff: {diff_str} {trend}")
+        else:
+            xg_pg = away_xg.get("xg_per_game", 0)
+            goals_pg = away_xg.get("goals_per_game", 0)
+            diff = away_xg.get("xg_diff", 0)
+            diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
+            trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
+            luck = away_xg.get("attacking_luck", "normal")
+            luck_emoji = "🍀" if "lucky" in luck else ("😔" if "unlucky" in luck else "")
+            lines.append(f"  {away_team}:")
+            lines.append(f"    xG/игра: {xg_pg:.2f} | Голы/игра: {goals_pg:.2f} | Тренд: {diff_str} {trend} {luck_emoji}")
+
         matches = away_xg.get("matches_played", 0)
         xg_pg = away_xg.get("xg_per_game", 0)
-
-        diff_str = f"+{diff:.1f}" if diff > 0 else f"{diff:.1f}"
-        trend = "↗️" if diff > 1 else ("↘️" if diff < -1 else "→")
-
-        lines.append(f"  {away_team}:")
-        lines.append(f"    xG: {xg:.1f} | Goals: {goals} | Diff: {diff_str} {trend}")
-        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} matches)")
+        lines.append(f"    xG/game: {xg_pg:.2f} ({matches} матчей)")
 
     # Expected match totals
     if xg_data.get("expected_total"):
@@ -4043,12 +4212,12 @@ def format_xg_analysis(xg_data: dict, home_team: str, away_team: str, lang: str 
 
         lines.append("")
         if lang == "ru":
-            lines.append(f"  **Ожидаемые голы (по xG):**")
+            lines.append(f"  **Прогноз голов (xG-модель):**")
             lines.append(f"    {home_team}: ~{exp_home:.1f}")
             lines.append(f"    {away_team}: ~{exp_away:.1f}")
             lines.append(f"    **ИТОГО: ~{exp_total:.1f}**")
         else:
-            lines.append(f"  **Expected Goals (from xG):**")
+            lines.append(f"  **Expected Goals (xG model):**")
             lines.append(f"    {home_team}: ~{exp_home:.1f}")
             lines.append(f"    {away_team}: ~{exp_away:.1f}")
             lines.append(f"    **TOTAL: ~{exp_total:.1f}**")
@@ -9523,8 +9692,8 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     lineups = await get_lineups(match_id) if match_id else None
     top_scorers = await get_top_scorers(comp_code, 15)
 
-    # 📊 xG DATA: Fetch real xG from Understat (top-5 leagues only)
-    xg_data = await get_match_xg_data(home, away, comp_code) if comp_code in UNDERSTAT_LEAGUES else {"available": False}
+    # 📊 xG DATA: Real xG from Understat (top-5) OR calculated from form (all 25 leagues)
+    xg_data = await get_match_xg_data(home, away, comp_code, home_form, away_form)
 
     # 🌐 WEB SEARCH: Get real-time news about injuries, lineups, team news
     web_news = await search_match_news(home, away, comp)
