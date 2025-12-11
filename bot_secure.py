@@ -1301,6 +1301,9 @@ def init_db():
         is_correct INTEGER,
         checked_at TIMESTAMP,
         ml_features_json TEXT,
+        expected_value REAL,
+        stake_percent REAL,
+        profit REAL,
         FOREIGN KEY (user_id) REFERENCES users(user_id)
     )''')
 
@@ -1448,6 +1451,37 @@ def init_db():
         c.execute("ALTER TABLE ml_training_data ADD COLUMN bet_rank INTEGER DEFAULT 1")
     except:
         pass
+
+    # ROI tracking columns
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN expected_value REAL")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN stake_percent REAL")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN profit REAL")
+    except:
+        pass
+
+    # ROI analytics table - tracks profitability by category and conditions
+    c.execute('''CREATE TABLE IF NOT EXISTS roi_analytics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        condition_key TEXT,
+        total_bets INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        total_staked REAL DEFAULT 0,
+        total_returned REAL DEFAULT 0,
+        roi_percent REAL DEFAULT 0,
+        avg_odds REAL DEFAULT 0,
+        avg_ev REAL DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(bet_category, condition_key)
+    )''')
 
     # 1win deposits tracking
     c.execute('''CREATE TABLE IF NOT EXISTS deposits_1win (
@@ -3155,10 +3189,14 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     # Serialize ml_features to JSON for smart learning
     ml_features_json = json.dumps(ml_features) if ml_features else None
 
+    # Calculate Expected Value and recommended stake
+    ev = calculate_expected_value(confidence, odds)
+    stake = calculate_kelly_stake(confidence, odds)
+
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code, ml_features_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code, ml_features_json))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code, ml_features_json, expected_value, stake_percent)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code, ml_features_json, ev, stake))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -5003,7 +5041,47 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
         if not is_win and conditions:
             logger.info(f"📚 Feature learning: {bet_category} failed with conditions: {', '.join(conditions)}")
 
-    # 6. Check if model needs retraining
+    # 6. NEW: Update ROI analytics - track PROFITABILITY not just win rate
+    # Get prediction details for ROI calculation
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""SELECT odds, expected_value, stake_percent
+                 FROM predictions WHERE id = ?""", (prediction_id,))
+    pred_row = c.fetchone()
+    conn.close()
+
+    if pred_row and bet_category:
+        odds, ev, stake = pred_row
+        if odds and odds > 1:
+            # Default stake to 1 unit if not set
+            stake = stake if stake and stake > 0 else 1.0
+
+            # Calculate and save profit
+            if is_win:
+                profit = stake * odds - stake
+            else:
+                profit = -stake
+
+            # Update prediction with profit
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("UPDATE predictions SET profit = ? WHERE id = ?", (profit, prediction_id))
+            conn.commit()
+            conn.close()
+
+            # Update ROI analytics for each condition
+            if features:
+                conditions = extract_feature_conditions(features, bet_category)
+                for condition in conditions:
+                    condition_key = get_condition_key(bet_category, condition)
+                    update_roi_analytics(bet_category, condition_key, is_win, odds, stake, ev or 0)
+
+                # Also update overall category ROI
+                update_roi_analytics(bet_category, "overall", is_win, odds, stake, ev or 0)
+
+            logger.info(f"💰 ROI updated: {bet_category} | {'WIN' if is_win else 'LOSS'} | profit={profit:+.2f} | EV={ev or 0:.1f}%")
+
+    # 7. Check if model needs retraining
     if bet_category and should_retrain_model(bet_category):
         logger.info(f"🔄 Triggering model retrain for {bet_category}")
         result = train_ml_model(bet_category)
@@ -5587,6 +5665,268 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
                 adjustments.append(f"  └─ {reason}")
 
     return confidence, adjustments
+
+
+# ===== ROI & EXPECTED VALUE TRACKING =====
+# Track profitability, not just win rate
+
+def calculate_expected_value(confidence: int, odds: float) -> float:
+    """Calculate Expected Value (EV) for a bet.
+
+    EV = (win_probability × odds) - 1
+    Positive EV = profitable in long run
+
+    Returns EV as percentage (e.g., 15.0 means +15% EV)
+    """
+    if not odds or odds <= 1:
+        return 0.0
+
+    win_prob = confidence / 100.0
+    ev = (win_prob * odds) - 1
+    return round(ev * 100, 2)  # Return as percentage
+
+
+def calculate_kelly_stake(confidence: int, odds: float, fraction: float = 0.25) -> float:
+    """Calculate Kelly Criterion stake percentage.
+
+    Kelly = (bp - q) / b
+    where b = odds - 1, p = win probability, q = 1 - p
+
+    Uses fractional Kelly (default 25%) for safer bankroll management.
+
+    Returns stake as percentage of bankroll.
+    """
+    if not odds or odds <= 1:
+        return 0.0
+
+    b = odds - 1
+    p = confidence / 100.0
+    q = 1 - p
+
+    kelly = (b * p - q) / b
+
+    if kelly <= 0:
+        return 0.0
+
+    # Apply fractional Kelly and cap at 10%
+    stake = min(kelly * fraction * 100, 10.0)
+    return round(stake, 2)
+
+
+def update_roi_analytics(bet_category: str, condition_key: str, is_win: bool,
+                        odds: float, stake: float, ev: float):
+    """Update ROI analytics after a prediction is verified.
+
+    Tracks total ROI by category and condition for learning.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Calculate profit/loss
+    if is_win:
+        returned = stake * odds
+        profit = returned - stake
+    else:
+        returned = 0
+        profit = -stake
+
+    # Get existing record
+    c.execute("""SELECT id, total_bets, wins, losses, total_staked, total_returned, avg_odds, avg_ev
+                 FROM roi_analytics
+                 WHERE bet_category = ? AND condition_key = ?""",
+              (bet_category, condition_key))
+    row = c.fetchone()
+
+    if row:
+        record_id, total_bets, wins, losses, total_staked, total_returned, avg_odds, avg_ev = row
+
+        # Update averages
+        new_total_bets = total_bets + 1
+        new_wins = wins + (1 if is_win else 0)
+        new_losses = losses + (0 if is_win else 1)
+        new_total_staked = total_staked + stake
+        new_total_returned = total_returned + returned
+        new_avg_odds = (avg_odds * total_bets + odds) / new_total_bets
+        new_avg_ev = (avg_ev * total_bets + ev) / new_total_bets
+
+        # Calculate ROI
+        roi = ((new_total_returned - new_total_staked) / new_total_staked * 100) if new_total_staked > 0 else 0
+
+        c.execute("""UPDATE roi_analytics SET
+                     total_bets = ?, wins = ?, losses = ?, total_staked = ?, total_returned = ?,
+                     roi_percent = ?, avg_odds = ?, avg_ev = ?, last_updated = CURRENT_TIMESTAMP
+                     WHERE id = ?""",
+                  (new_total_bets, new_wins, new_losses, new_total_staked, new_total_returned,
+                   roi, new_avg_odds, new_avg_ev, record_id))
+    else:
+        # Create new record
+        roi = ((returned - stake) / stake * 100) if stake > 0 else 0
+        c.execute("""INSERT INTO roi_analytics
+                     (bet_category, condition_key, total_bets, wins, losses, total_staked, total_returned, roi_percent, avg_odds, avg_ev)
+                     VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)""",
+                  (bet_category, condition_key, 1 if is_win else 0, 0 if is_win else 1,
+                   stake, returned, roi, odds, ev))
+
+    conn.commit()
+    conn.close()
+
+
+def get_roi_based_recommendations(features: dict) -> str:
+    """Get ROI-based recommendations for Claude prompt.
+
+    Shows which bet types/conditions are actually PROFITABLE, not just winning.
+    This is the key to 50%+ ROI.
+    """
+    if not features:
+        return ""
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    context_parts = []
+    profitable_bets = []
+    unprofitable_bets = []
+
+    # Get ROI data for each category
+    bet_categories = [
+        ("outcomes_home", "П1"),
+        ("outcomes_away", "П2"),
+        ("outcomes_draw", "Ничья"),
+        ("totals_over", "ТБ 2.5"),
+        ("totals_under", "ТМ 2.5"),
+        ("btts", "Обе забьют")
+    ]
+
+    for category, name in bet_categories:
+        conditions = extract_feature_conditions(features, category)
+
+        for condition in conditions:
+            condition_key = get_condition_key(category, condition)
+
+            c.execute("""SELECT total_bets, wins, roi_percent, avg_odds, avg_ev
+                         FROM roi_analytics
+                         WHERE condition_key = ? AND total_bets >= 5""",
+                      (condition_key,))
+            row = c.fetchone()
+
+            if row:
+                total, wins, roi, avg_odds, avg_ev = row
+                win_rate = wins / total * 100 if total > 0 else 0
+                condition_readable = condition.replace("_", " ")
+
+                if roi > 10:  # Profitable (ROI > 10%)
+                    profitable_bets.append({
+                        "name": name,
+                        "condition": condition_readable,
+                        "roi": roi,
+                        "win_rate": win_rate,
+                        "avg_odds": avg_odds,
+                        "sample": total
+                    })
+                elif roi < -15:  # Losing money (ROI < -15%)
+                    unprofitable_bets.append({
+                        "name": name,
+                        "condition": condition_readable,
+                        "roi": roi,
+                        "win_rate": win_rate,
+                        "sample": total
+                    })
+
+    conn.close()
+
+    if not profitable_bets and not unprofitable_bets:
+        return ""
+
+    context_parts.append("\n💰 ROI ANALYSIS - ПРИБЫЛЬНОСТЬ (не только винрейт!):")
+
+    if profitable_bets:
+        context_parts.append("\n🟢 ПРИБЫЛЬНЫЕ СТАВКИ при текущих условиях:")
+        for bet in sorted(profitable_bets, key=lambda x: x["roi"], reverse=True)[:3]:
+            context_parts.append(
+                f"  💵 {bet['name']} + '{bet['condition']}': ROI +{bet['roi']:.0f}% "
+                f"(винрейт {bet['win_rate']:.0f}%, avg коэфф {bet['avg_odds']:.2f}, n={bet['sample']})"
+            )
+
+    if unprofitable_bets:
+        context_parts.append("\n🔴 УБЫТОЧНЫЕ СТАВКИ при текущих условиях:")
+        for bet in sorted(unprofitable_bets, key=lambda x: x["roi"])[:3]:
+            context_parts.append(
+                f"  ⚠️ {bet['name']} + '{bet['condition']}': ROI {bet['roi']:.0f}% "
+                f"(даже при {bet['win_rate']:.0f}% винрейте - убыток!)"
+            )
+
+    context_parts.append("\n💡 Приоритет: выбирай ставки с положительным ROI, даже если винрейт ниже!")
+
+    return "\n".join(context_parts)
+
+
+def get_overall_roi_stats() -> dict:
+    """Get overall ROI statistics for admin dashboard."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Overall stats
+    c.execute("""SELECT
+                 COUNT(*) as total,
+                 SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins,
+                 SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as losses,
+                 AVG(odds) as avg_odds,
+                 AVG(expected_value) as avg_ev,
+                 AVG(confidence) as avg_confidence
+                 FROM predictions
+                 WHERE is_correct IS NOT NULL AND is_correct != 2
+                 AND odds IS NOT NULL AND odds > 1""")
+    overall = c.fetchone()
+
+    # Calculate theoretical ROI
+    total, wins, losses, avg_odds, avg_ev, avg_conf = overall if overall[0] else (0, 0, 0, 0, 0, 0)
+
+    if total > 0 and wins is not None:
+        # Simulated ROI if betting 1 unit per bet
+        total_staked = total
+        total_returned = wins * (avg_odds or 1.5)
+        roi = ((total_returned - total_staked) / total_staked * 100) if total_staked > 0 else 0
+        win_rate = wins / total * 100
+    else:
+        roi, win_rate, avg_ev = 0, 0, 0
+
+    # ROI by category
+    c.execute("""SELECT bet_category,
+                 COUNT(*) as total,
+                 SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as wins,
+                 AVG(odds) as avg_odds
+                 FROM predictions
+                 WHERE is_correct IS NOT NULL AND is_correct != 2
+                 AND bet_category IS NOT NULL AND odds > 1
+                 GROUP BY bet_category
+                 HAVING total >= 5
+                 ORDER BY total DESC""")
+    category_stats = []
+    for row in c.fetchall():
+        cat, cat_total, cat_wins, cat_avg_odds = row
+        cat_roi = ((cat_wins * cat_avg_odds - cat_total) / cat_total * 100) if cat_total > 0 else 0
+        cat_win_rate = cat_wins / cat_total * 100 if cat_total > 0 else 0
+        category_stats.append({
+            "category": cat,
+            "total": cat_total,
+            "wins": cat_wins,
+            "win_rate": cat_win_rate,
+            "avg_odds": cat_avg_odds,
+            "roi": cat_roi
+        })
+
+    conn.close()
+
+    return {
+        "total_bets": total or 0,
+        "wins": wins or 0,
+        "losses": losses or 0,
+        "win_rate": win_rate,
+        "roi": roi,
+        "avg_odds": avg_odds or 0,
+        "avg_ev": avg_ev or 0,
+        "by_category": sorted(category_stats, key=lambda x: x["roi"], reverse=True)
+    }
 
 
 # ===== USER PERSONALIZATION =====
@@ -8570,6 +8910,12 @@ async def analyze_match_enhanced(match: dict, user_settings: Optional[dict] = No
     if smart_learning_context:
         analysis_data += f"{smart_learning_context}\n\n"
 
+    # ===== ROI-BASED RECOMMENDATIONS =====
+    # Show which bets are actually PROFITABLE, not just winning
+    roi_context = get_roi_based_recommendations(ml_features)
+    if roi_context:
+        analysis_data += f"{roi_context}\n\n"
+
     # User settings for filtering
     filter_info = ""
     if user_settings:
@@ -8715,13 +9061,23 @@ CRITICAL ANALYSIS RULES:
    - This is REAL DATA from bot's past predictions - trust it more than general rules!
    - Your goal: Improve win rate by avoiding past mistakes and repeating successes!
 
-17. DIVERSIFY BET TYPES based on data:
+17. 💰 ROI OPTIMIZATION - ПРИБЫЛЬ ВАЖНЕЕ ВИНРЕЙТА (CRITICAL!):
+   - If "ROI ANALYSIS" section shows PROFITABLE bet → PRIORITIZE it even if win rate is lower!
+   - If it shows UNPROFITABLE bet → AVOID even if win rate is high (bad odds!)
+   - Example: "П1 + 'strong home': ROI +25%" → GREAT bet, recommend!
+   - Example: "П2 ROI -20% (even with 55% win rate)" → BAD bet, avoid!
+   - PROFIT = (win_rate × odds) - 1, not just win_rate!
+   - 45% win rate at 2.5 odds = +12.5% ROI (PROFITABLE!)
+   - 60% win rate at 1.4 odds = -16% ROI (LOSING MONEY!)
+   - Your goal: Maximize PROFIT, not just wins!
+
+18. DIVERSIFY BET TYPES based on data:
    - High home win rate → П1 or 1X
    - High expected goals → Totals
    - Both teams score often → BTTS
    - Close match → X2 or 1X (double chance)
 
-18. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
+19. 🚫 WHEN TO SAY "NO BET" (CRITICAL!):
    - No clear statistical edge → SKIP
    - Too many unknowns (injuries, rotation) → SKIP
    - Odds don't offer value → SKIP
