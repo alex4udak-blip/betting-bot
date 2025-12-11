@@ -16657,6 +16657,303 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
     return result.strip()
 
 
+async def generate_smart_result_explanation(
+    prediction_id: int,
+    match_data: dict,
+    bet_type: str,
+    is_correct: bool,
+    home_score: int,
+    away_score: int,
+    lang: str = "ru"
+) -> str:
+    """
+    Generate INTELLIGENT explanation for why a bet won or lost.
+
+    Uses:
+    - Original prediction features (form, standings, H2H, xG, etc.)
+    - Match statistics (shots, possession if available)
+    - Goalscorer data
+    - Comparison of expected vs actual outcome
+
+    Returns a smart, contextual explanation that helps user understand the result.
+    """
+    try:
+        home_team = match_data.get("homeTeam", {}).get("name", "")
+        away_team = match_data.get("awayTeam", {}).get("name", "")
+        home_short = home_team.split()[-1] if home_team else "Хозяева"
+        away_short = away_team.split()[-1] if away_team else "Гости"
+        total_goals = home_score + away_score
+        score_str = f"{home_score}:{away_score}"
+
+        # === 1. GET ORIGINAL PREDICTION DATA ===
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # Get prediction features
+        c.execute("""
+            SELECT p.confidence, p.ml_features_json, m.features_json, p.league_code
+            FROM predictions p
+            LEFT JOIN ml_training_data m ON m.prediction_id = p.id
+            WHERE p.id = ?
+        """, (prediction_id,))
+        row = c.fetchone()
+        conn.close()
+
+        features = {}
+        confidence = 70
+        league_code = ""
+
+        if row:
+            confidence = row[0] or 70
+            features_json = row[1] or row[2]
+            league_code = row[3] or ""
+            if features_json:
+                try:
+                    features = json.loads(features_json)
+                except:
+                    pass
+
+        # === 2. EXTRACT KEY PRE-MATCH DATA ===
+        home_form = features.get("home_form", 50)
+        away_form = features.get("away_form", 50)
+        home_pos = features.get("home_position", 10)
+        away_pos = features.get("away_position", 10)
+        home_xg = features.get("home_xg", 0)
+        away_xg = features.get("away_xg", 0)
+        h2h_home_wins = features.get("h2h_home_wins", 0)
+        h2h_away_wins = features.get("h2h_away_wins", 0)
+        home_goals_avg = features.get("home_goals_scored_avg", 1.5)
+        away_goals_avg = features.get("away_goals_scored_avg", 1.5)
+        home_injured_impact = features.get("home_injured_impact", 0)
+        away_injured_impact = features.get("away_injured_impact", 0)
+
+        # === 3. ANALYZE GOALSCORERS ===
+        goals_data = match_data.get("goals", [])
+        scorers_home = []
+        scorers_away = []
+        home_id = match_data.get("homeTeam", {}).get("id")
+
+        for goal in goals_data:
+            scorer_name = goal.get("scorer", {}).get("name", "")
+            minute = goal.get("minute", "")
+            team_id = goal.get("team", {}).get("id")
+
+            if scorer_name:
+                goal_info = f"{scorer_name} ({minute}')" if minute else scorer_name
+                if team_id == home_id:
+                    scorers_home.append(goal_info)
+                else:
+                    scorers_away.append(goal_info)
+
+        # === 4. BUILD SMART ANALYSIS ===
+        insights = []
+
+        # Multilingual headers
+        headers = {
+            "ru": ("💡 **Умный анализ результата:**", "✅ Почему зашло:", "❌ Почему не зашло:"),
+            "en": ("💡 **Smart Result Analysis:**", "✅ Why it hit:", "❌ Why it missed:"),
+            "pt": ("💡 **Análise Inteligente:**", "✅ Por que acertou:", "❌ Por que errou:"),
+            "es": ("💡 **Análisis Inteligente:**", "✅ Por qué acertó:", "❌ Por qué falló:"),
+            "id": ("💡 **Analisis Cerdas:**", "✅ Mengapa tepat:", "❌ Mengapa meleset:")
+        }
+
+        h = headers.get(lang, headers["en"])
+        main_header = h[0]
+        why_header = h[1] if is_correct else h[2]
+
+        bet_lower = bet_type.lower()
+
+        # --- TOTALS ANALYSIS ---
+        if "тб" in bet_lower or "тм" in bet_lower or "over" in bet_lower or "under" in bet_lower:
+            is_over = "тб" in bet_lower or "over" in bet_lower
+            expected_goals = home_xg + away_xg if (home_xg > 0 or away_xg > 0) else home_goals_avg + away_goals_avg
+
+            if lang == "ru":
+                insights.append(f"📊 Ожидаемые голы: {expected_goals:.1f} | Реально: {total_goals}")
+
+                if is_over and is_correct:
+                    if total_goals >= 4:
+                        insights.append(f"🔥 Голевой матч! {home_short} и {away_short} устроили перестрелку")
+                    elif home_form > 60 and away_form > 60:
+                        insights.append("📈 Обе команды в хорошей форме — атакующий футбол")
+                    if home_xg > 1.5 or away_xg > 1.5:
+                        insights.append(f"🎯 xG подтвердил: высокий потенциал голов")
+
+                elif is_over and not is_correct:
+                    if total_goals == 2:
+                        insights.append("😤 Не хватило всего 1 гола! Близко, но не зашло")
+                    if home_injured_impact > 20 or away_injured_impact > 20:
+                        insights.append("🏥 Травмы ключевых игроков повлияли на атаку")
+                    if expected_goals > 2.5 and total_goals <= 2:
+                        insights.append(f"📉 xG обманул: ожидали {expected_goals:.1f}, получили {total_goals}")
+
+                elif not is_over and is_correct:
+                    if total_goals <= 1:
+                        insights.append("🔒 Закрытый матч, команды играли на результат")
+                    if home_pos <= 5 or away_pos <= 5:
+                        insights.append("🏆 Топ-команды часто играют аккуратно друг с другом")
+
+                elif not is_over and not is_correct:
+                    if total_goals >= 4:
+                        insights.append(f"💥 Неожиданная перестрелка! {total_goals} голов")
+                    insights.append("⚠️ Статистика не учла мотивацию/форму в этом матче")
+            else:
+                # English fallback
+                insights.append(f"📊 Expected goals: {expected_goals:.1f} | Actual: {total_goals}")
+                if is_over and is_correct:
+                    insights.append("🔥 High-scoring match as predicted")
+                elif is_over and not is_correct:
+                    insights.append("📉 Lower than expected scoring")
+                elif not is_over and is_correct:
+                    insights.append("🔒 Defensive match as expected")
+                else:
+                    insights.append("💥 Unexpected goal fest")
+
+        # --- MATCH RESULT ANALYSIS (П1, П2, X) ---
+        elif "п1" in bet_lower or bet_type == "1" or "п2" in bet_lower or bet_type == "2" or "ничья" in bet_lower or bet_lower in ["х", "x"]:
+            home_won = home_score > away_score
+            away_won = away_score > home_score
+            draw = home_score == away_score
+
+            if lang == "ru":
+                insights.append(f"📊 Позиции: {home_short} #{home_pos} vs {away_short} #{away_pos}")
+                insights.append(f"📈 Форма: {home_short} {home_form}% | {away_short} {away_form}%")
+
+                # П1 analysis
+                if "п1" in bet_lower or bet_type == "1":
+                    if is_correct:
+                        if home_form > away_form:
+                            insights.append("✅ Форма хозяев была выше — логичная победа")
+                        if home_pos < away_pos:
+                            insights.append("✅ Разница в классе команд сработала")
+                        if h2h_home_wins > h2h_away_wins:
+                            insights.append(f"✅ H2H в пользу хозяев подтвердился")
+                    else:
+                        if away_won:
+                            if away_form > home_form:
+                                insights.append(f"⚠️ Форма гостей ({away_form}%) была выше — это был риск")
+                            else:
+                                insights.append(f"😮 {away_short} удивили — выиграли на выезде вопреки статистике")
+                        elif draw:
+                            insights.append(f"🤝 {home_short} не смогли дожать — ничья {score_str}")
+                            if away_pos <= 6:
+                                insights.append("⚠️ Против топ-команды ничья — нормальный результат")
+
+                # П2 analysis
+                elif "п2" in bet_lower or bet_type == "2":
+                    if is_correct:
+                        if away_form > home_form:
+                            insights.append("✅ Форма гостей была выше — заслуженная победа")
+                        if away_pos < home_pos:
+                            insights.append("✅ Класс гостей оказался решающим")
+                    else:
+                        if home_won:
+                            insights.append(f"🏠 Домашний фактор сработал для {home_short}")
+                        elif draw:
+                            insights.append(f"🤝 {away_short} не реализовали преимущество")
+
+                # Draw analysis
+                elif "ничья" in bet_lower or bet_lower in ["х", "x"]:
+                    if is_correct:
+                        if abs(home_form - away_form) < 15:
+                            insights.append("✅ Равные по силе команды — логичная ничья")
+                        if abs(home_pos - away_pos) <= 3:
+                            insights.append("✅ Близкие позиции в таблице = ничейный результат")
+                    else:
+                        winner = home_short if home_won else away_short
+                        insights.append(f"🏆 {winner} оказались сильнее в этот день")
+            else:
+                insights.append(f"📊 Positions: {home_short} #{home_pos} vs {away_short} #{away_pos}")
+                insights.append(f"📈 Form: {home_short} {home_form}% | {away_short} {away_form}%")
+
+        # --- BTTS ANALYSIS ---
+        elif "обе забьют" in bet_lower or "btts" in bet_lower:
+            both_scored = home_score > 0 and away_score > 0
+
+            if lang == "ru":
+                if is_correct and both_scored:
+                    insights.append(f"⚽ {home_short}: {home_score} гол(а) | {away_short}: {away_score} гол(а)")
+                    if home_goals_avg > 1.3 and away_goals_avg > 1.3:
+                        insights.append("✅ Обе команды результативны — статистика подтвердилась")
+                elif not is_correct:
+                    if home_score == 0:
+                        insights.append(f"🚫 {home_short} не забили — атака не сработала")
+                        if home_injured_impact > 15:
+                            insights.append("🏥 Травмы атакующих игроков повлияли")
+                    if away_score == 0:
+                        insights.append(f"🚫 {away_short} не забили на выезде")
+            else:
+                if is_correct:
+                    insights.append(f"⚽ Both teams scored as expected")
+                else:
+                    insights.append(f"🚫 One team failed to score")
+
+        # --- DOUBLE CHANCE ANALYSIS ---
+        elif "1x" in bet_lower or "x2" in bet_lower or "12" in bet_lower:
+            if lang == "ru":
+                if is_correct:
+                    insights.append("✅ Страховка сработала — безопасная ставка зашла")
+                else:
+                    insights.append("😱 Даже двойной шанс не спас — редкий случай")
+            else:
+                if is_correct:
+                    insights.append("✅ Safety bet paid off")
+                else:
+                    insights.append("😱 Even double chance couldn't save it")
+
+        # === 5. ADD GOALSCORER INFO ===
+        if scorers_home or scorers_away:
+            if lang == "ru":
+                if scorers_home:
+                    insights.append(f"⚽ Голы {home_short}: {', '.join(scorers_home)}")
+                if scorers_away:
+                    insights.append(f"⚽ Голы {away_short}: {', '.join(scorers_away)}")
+            else:
+                if scorers_home:
+                    insights.append(f"⚽ {home_short} goals: {', '.join(scorers_home)}")
+                if scorers_away:
+                    insights.append(f"⚽ {away_short} goals: {', '.join(scorers_away)}")
+
+        # === 6. ADD CONFIDENCE CONTEXT ===
+        if lang == "ru":
+            if is_correct and confidence >= 75:
+                insights.append(f"🎯 Уверенность была {confidence}% — анализ оправдался!")
+            elif not is_correct and confidence >= 75:
+                insights.append(f"📊 Уверенность {confidence}% не помогла — футбол непредсказуем")
+            elif not is_correct and confidence < 65:
+                insights.append(f"⚠️ Уверенность была {confidence}% — это был рискованный прогноз")
+        else:
+            if is_correct and confidence >= 75:
+                insights.append(f"🎯 {confidence}% confidence justified!")
+            elif not is_correct:
+                insights.append(f"📊 Despite {confidence}% confidence — football surprises")
+
+        # === 7. FORMAT OUTPUT ===
+        if not insights:
+            # Fallback to simple explanation
+            return generate_result_explanation(
+                bet_type, home_score, away_score, is_correct,
+                confidence, home_team, away_team, lang
+            )
+
+        result = f"{main_header}\n{why_header}\n\n"
+        for insight in insights[:6]:  # Max 6 insights
+            result += f"• {insight}\n"
+
+        return result.strip()
+
+    except Exception as e:
+        logger.error(f"Smart explanation error: {e}")
+        # Fallback to simple explanation
+        return generate_result_explanation(
+            bet_type, home_score, away_score, is_correct,
+            confidence if 'confidence' in dir() else 70,
+            home_team if 'home_team' in dir() else "",
+            away_team if 'away_team' in dir() else "",
+            lang
+        )
+
+
 async def track_upcoming_odds(context: ContextTypes.DEFAULT_TYPE):
     """Background task to track odds for upcoming matches.
 
@@ -16880,16 +17177,22 @@ async def check_predictions_results(context: ContextTypes.DEFAULT_TYPE):
                 else:
                     alt_lines.append(f"📌 {get_text('bet_alt', lang)}: {pred['bet_type']} {emoji}")
 
-            # Generate explanation for the main bet
+            # Generate SMART explanation for the main bet
             explanation = ""
-            if main_bet_type and main_is_correct is not None:
-                explanation = generate_result_explanation(
+            main_pred_id = None
+            for p in preds:
+                if p.get("bet_rank", 1) == 1:
+                    main_pred_id = p.get("id")
+                    break
+
+            if main_bet_type and main_is_correct is not None and main_pred_id:
+                explanation = await generate_smart_result_explanation(
+                    prediction_id=main_pred_id,
+                    match_data=match,
                     bet_type=main_bet_type,
+                    is_correct=main_is_correct is True,
                     home_score=home_score,
                     away_score=away_score,
-                    is_correct=main_is_correct is True,
-                    home_team=preds[0].get('home', ''),
-                    away_team=preds[0].get('away', ''),
                     lang=lang
                 )
 
