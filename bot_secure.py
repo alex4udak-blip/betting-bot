@@ -1300,6 +1300,7 @@ def init_db():
         result TEXT,
         is_correct INTEGER,
         checked_at TIMESTAMP,
+        ml_features_json TEXT,
         FOREIGN KEY (user_id) REFERENCES users(user_id)
     )''')
 
@@ -1429,6 +1430,10 @@ def init_db():
         pass
     try:
         c.execute("ALTER TABLE predictions ADD COLUMN league_code TEXT")
+    except:
+        pass
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN ml_features_json TEXT")
     except:
         pass
     try:
@@ -3147,10 +3152,13 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
 
         return existing_id  # Return existing prediction ID
 
+    # Serialize ml_features to JSON for smart learning
+    ml_features_json = json.dumps(ml_features) if ml_features else None
+
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code, ml_features_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code, ml_features_json))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -10378,12 +10386,16 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c = conn.cursor()
 
     # Get all verified predictions with their ML features
-    c.execute("""SELECT p.id, p.bet_type, p.confidence, p.is_correct, p.ml_features_json, p.league_code
+    # Use COALESCE to get features from predictions table or ml_training_data
+    c.execute("""SELECT p.id, p.bet_type, p.confidence, p.is_correct,
+                        COALESCE(p.ml_features_json, m.features_json) as features_json,
+                        p.league_code
                  FROM predictions p
+                 LEFT JOIN ml_training_data m ON m.prediction_id = p.id
                  WHERE p.is_correct IS NOT NULL
                  AND p.is_correct != 2
-                 AND p.ml_features_json IS NOT NULL
-                 ORDER BY p.created_at""")
+                 AND (p.ml_features_json IS NOT NULL OR m.features_json IS NOT NULL)
+                 ORDER BY p.predicted_at""")
 
     predictions = c.fetchall()
     conn.close()
