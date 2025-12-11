@@ -139,7 +139,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Избранное",
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
-        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит у партнёра — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
+        "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит в 1win — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -252,7 +252,7 @@ TRANSLATIONS = {
         # Premium page
         "premium_title": "💎 **ПРЕМИУМ ДОСТУП**",
         "premium_unlimited": "🎯 Безлимитные прогнозы с точностью 70%+",
-        "premium_option1_title": "**Вариант 1: Депозит у партнёра** 🎰",
+        "premium_option1_title": "**Вариант 1: Депозит в 1win** 🎰",
         "premium_option1_desc": "Сделай депозит — получи премиум автоматически!",
         "premium_option2_title": "**Вариант 2: Крипта (USDT/TON)** 💰",
         "premium_option2_crypto": "Выбери тариф ниже — оплата через @CryptoBot",
@@ -262,7 +262,7 @@ TRANSLATIONS = {
         "premium_earned": "Уже заработано: **{days} дней**",
         "premium_click_below": "Нажми кнопку ниже 👇",
         "premium_after_payment": "После оплаты — скинь скрин @{support}",
-        "premium_deposit_btn": "🎰 Депозит у партнёра",
+        "premium_deposit_btn": "🎰 Депозит в 1win",
         "premium_contact_btn": "💬 Написать @{support}",
         "premium_friends_btn": "👥 Бесплатно (друзья)",
         "premium_status": "✅ У тебя премиум до: {date}",
@@ -318,8 +318,8 @@ TRANSLATIONS = {
         "onboard_try_now": "Попробуй прямо сейчас 👇",
         "try_prediction_btn": "🎯 Попробовать прогноз",
         "where_to_bet": "🎰 **Где делать ставки:**",
-        "bet_partner_text": "Делай ставки у нашего партнёра — бонус на первый депозит!",
-        "open_1win_btn": "🎰 Открыть букмекера",
+        "bet_partner_text": "Делай ставки у нашего партнёра 1win — бонус +500% на первый депозит!",
+        "open_1win_btn": "🎰 Открыть 1win",
         # Hot match alert
         "hot_match_title": "🔥 **ГОРЯЧИЙ МАТЧ!**",
         "hot_match_starts": "⏰ Начало через {hours}ч",
@@ -342,7 +342,7 @@ TRANSLATIONS = {
         "favorites": "⭐ Favorites",
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
-        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit with our partner — get premium automatically.\n\n👇 Tap the button below:",
+        "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit on 1win — get premium automatically.\n\n👇 Tap the button below:",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -455,7 +455,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         # Premium page
         "premium_title": "💎 **PREMIUM ACCESS**",
         "premium_unlimited": "🎯 Unlimited predictions with 70%+ accuracy",
-        "premium_option1_title": "**Option 1: Partner deposit** 🎰",
+        "premium_option1_title": "**Option 1: Deposit on 1win** 🎰",
         "premium_option1_desc": "Make a deposit — get premium automatically!",
         "premium_option2_title": "**Option 2: Crypto (USDT/TON)** 💰",
         "premium_option2_crypto": "Choose plan below — pay via @CryptoBot",
@@ -465,7 +465,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "premium_earned": "Already earned: **{days} days**",
         "premium_click_below": "Click button below 👇",
         "premium_after_payment": "After payment — send screenshot to @{support}",
-        "premium_deposit_btn": "🎰 Partner deposit",
+        "premium_deposit_btn": "🎰 Deposit on 1win",
         "premium_contact_btn": "💬 Contact @{support}",
         "premium_friends_btn": "👥 Free (invite friends)",
         "premium_status": "✅ You have premium until: {date}",
@@ -515,8 +515,8 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "onboard_try_now": "Try it now 👇",
         "try_prediction_btn": "🎯 Try a prediction",
         "where_to_bet": "🎰 **Where to bet:**",
-        "bet_partner_text": "Bet with our partner — bonus on first deposit!",
-        "open_1win_btn": "🎰 Open bookmaker",
+        "bet_partner_text": "Bet with our partner 1win — +500% bonus on first deposit!",
+        "open_1win_btn": "🎰 Open 1win",
         "hot_match_title": "🔥 **HOT MATCH!**",
         "hot_match_starts": "⏰ Starts in {hours}h",
         "hot_match_confidence": "📊 Confidence: {percent}%",
@@ -537,7 +537,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
-        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito com nosso parceiro — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
+        "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito no 1win — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -650,7 +650,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         # Premium page
         "premium_title": "💎 **ACESSO PREMIUM**",
         "premium_unlimited": "🎯 Previsões ilimitadas com 70%+ de precisão",
-        "premium_option1_title": "**Opção 1: Depósito com parceiro** 🎰",
+        "premium_option1_title": "**Opção 1: Depósito no 1win** 🎰",
         "premium_option1_desc": "Faça um depósito — ganhe premium automaticamente!",
         "premium_option2_title": "**Opção 2: Cripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Escolha o plano abaixo — pague via @CryptoBot",
@@ -660,7 +660,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "premium_earned": "Já ganhou: **{days} dias**",
         "premium_click_below": "Clique no botão abaixo 👇",
         "premium_after_payment": "Após o pagamento — envie print para @{support}",
-        "premium_deposit_btn": "🎰 Depósito com parceiro",
+        "premium_deposit_btn": "🎰 Depósito no 1win",
         "premium_contact_btn": "💬 Contatar @{support}",
         "premium_friends_btn": "👥 Grátis (convide amigos)",
         "premium_status": "✅ Você tem premium até: {date}",
@@ -710,8 +710,8 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "onboard_try_now": "Tente agora 👇",
         "try_prediction_btn": "🎯 Testar previsão",
         "where_to_bet": "🎰 **Onde apostar:**",
-        "bet_partner_text": "Aposte com nosso parceiro — bônus no primeiro depósito!",
-        "open_1win_btn": "🎰 Abrir casa de apostas",
+        "bet_partner_text": "Aposte com nosso parceiro 1win — bônus +500% no primeiro depósito!",
+        "open_1win_btn": "🎰 Abrir 1win",
         "hot_match_title": "🔥 **JOGO QUENTE!**",
         "hot_match_starts": "⏰ Começa em {hours}h",
         "hot_match_confidence": "📊 Confiança: {percent}%",
@@ -732,7 +732,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "favorites": "⭐ Favoritos",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
-        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito con nuestro socio — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
+        "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito en 1win — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -845,7 +845,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         # Premium page
         "premium_title": "💎 **ACCESO PREMIUM**",
         "premium_unlimited": "🎯 Pronósticos ilimitados con 70%+ de precisión",
-        "premium_option1_title": "**Opción 1: Depósito con socio** 🎰",
+        "premium_option1_title": "**Opción 1: Depósito en 1win** 🎰",
         "premium_option1_desc": "¡Haz un depósito — obtén premium automáticamente!",
         "premium_option2_title": "**Opción 2: Cripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Elige el plan abajo — paga vía @CryptoBot",
@@ -855,7 +855,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "premium_earned": "Ya ganaste: **{days} días**",
         "premium_click_below": "Haz clic en el botón abajo 👇",
         "premium_after_payment": "Después del pago — envía captura a @{support}",
-        "premium_deposit_btn": "🎰 Depósito con socio",
+        "premium_deposit_btn": "🎰 Depósito en 1win",
         "premium_contact_btn": "💬 Contactar @{support}",
         "premium_friends_btn": "👥 Gratis (invita amigos)",
         "premium_status": "✅ Tienes premium hasta: {date}",
@@ -905,8 +905,8 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "onboard_try_now": "Pruébalo ahora 👇",
         "try_prediction_btn": "🎯 Probar pronóstico",
         "where_to_bet": "🎰 **Dónde apostar:**",
-        "bet_partner_text": "Apuesta con nuestro socio — ¡bono en primer depósito!",
-        "open_1win_btn": "🎰 Abrir casa de apuestas",
+        "bet_partner_text": "Apuesta con nuestro socio 1win — ¡bono +500% en primer depósito!",
+        "open_1win_btn": "🎰 Abrir 1win",
         "hot_match_title": "🔥 **¡PARTIDO CALIENTE!**",
         "hot_match_starts": "⏰ Empieza en {hours}h",
         "hot_match_confidence": "📊 Confianza: {percent}%",
@@ -927,7 +927,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "favorites": "⭐ Favorit",
         "settings": "⚙️ Pengaturan",
         "help_btn": "❓ Bantuan",
-        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit dengan mitra kami — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
+        "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit di 1win — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
         "place_bet": "🎰 Pasang taruhan",
         "no_matches": "Tidak ada pertandingan",
         "analyzing": "🔍 Menganalisis...",
@@ -1040,7 +1040,7 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         # Premium page
         "premium_title": "💎 **AKSES PREMIUM**",
         "premium_unlimited": "🎯 Prediksi tak terbatas dengan akurasi 70%+",
-        "premium_option1_title": "**Opsi 1: Deposit dengan mitra** 🎰",
+        "premium_option1_title": "**Opsi 1: Deposit di 1win** 🎰",
         "premium_option1_desc": "Lakukan deposit — dapatkan premium otomatis!",
         "premium_option2_title": "**Opsi 2: Kripto (USDT/TON)** 💰",
         "premium_option2_crypto": "Pilih paket di bawah — bayar via @CryptoBot",
@@ -1050,7 +1050,7 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "premium_earned": "Sudah diperoleh: **{days} hari**",
         "premium_click_below": "Klik tombol di bawah 👇",
         "premium_after_payment": "Setelah pembayaran — kirim screenshot ke @{support}",
-        "premium_deposit_btn": "🎰 Deposit dengan mitra",
+        "premium_deposit_btn": "🎰 Deposit di 1win",
         "premium_contact_btn": "💬 Hubungi @{support}",
         "premium_friends_btn": "👥 Gratis (undang teman)",
         "premium_status": "✅ Anda memiliki premium hingga: {date}",
@@ -1100,8 +1100,8 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "onboard_try_now": "Coba sekarang 👇",
         "try_prediction_btn": "🎯 Coba prediksi",
         "where_to_bet": "🎰 **Di mana bertaruh:**",
-        "bet_partner_text": "Taruhan dengan mitra kami — bonus pada deposit pertama!",
-        "open_1win_btn": "🎰 Buka bandar taruhan",
+        "bet_partner_text": "Taruhan dengan mitra kami 1win — bonus +500% pada deposit pertama!",
+        "open_1win_btn": "🎰 Buka 1win",
         "hot_match_title": "🔥 **PERTANDINGAN PANAS!**",
         "hot_match_starts": "⏰ Mulai dalam {hours}j",
         "hot_match_confidence": "📊 Kepercayaan: {percent}%",
@@ -1551,6 +1551,35 @@ def init_db():
         UNIQUE(league_code, bet_category)
     )''')
 
+    # Feature-based error patterns - learns WHEN specific bets fail
+    # Key insight: "П1 fails when injuries > 8 AND away_position < home_position"
+    c.execute('''CREATE TABLE IF NOT EXISTS feature_error_patterns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        feature_condition TEXT,
+        condition_key TEXT UNIQUE,
+        total_predictions INTEGER DEFAULT 0,
+        wins INTEGER DEFAULT 0,
+        losses INTEGER DEFAULT 0,
+        avg_confidence_when_failed REAL,
+        suggested_adjustment INTEGER DEFAULT 0,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+
+    # Smart adjustments - learned rules for confidence correction
+    c.execute('''CREATE TABLE IF NOT EXISTS smart_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_category TEXT,
+        condition_type TEXT,
+        condition_value TEXT,
+        adjustment_percent INTEGER,
+        sample_size INTEGER DEFAULT 0,
+        win_rate REAL,
+        is_active BOOLEAN DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(bet_category, condition_type, condition_value)
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -1669,7 +1698,7 @@ async def notify_admins_new_user(bot, user_id: int, username: str = None, langua
         "organic": "🌱",
         "referral": "👥",
         "ads": "📢",
-        "partner": "🎰"
+        "1win": "🎰"
     }.get(source, "📥")
 
     lang_flag = {
@@ -4955,7 +4984,18 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
     if league_code and bet_category:
         update_league_learning(league_code, bet_category, is_win, error_type)
 
-    # 5. Check if model needs retraining
+    # 5. NEW: Update feature-based error patterns (SMART LEARNING)
+    # This is the key to learning WHEN specific bets fail
+    if features and bet_category:
+        conditions = extract_feature_conditions(features, bet_category)
+        for condition in conditions:
+            update_feature_pattern(bet_category, condition, is_win, confidence)
+
+        # Log if we found significant risky conditions
+        if not is_win and conditions:
+            logger.info(f"📚 Feature learning: {bet_category} failed with conditions: {', '.join(conditions)}")
+
+    # 6. Check if model needs retraining
     if bet_category and should_retrain_model(bet_category):
         logger.info(f"🔄 Triggering model retrain for {bet_category}")
         result = train_ml_model(bet_category)
@@ -5082,6 +5122,301 @@ def get_learning_stats() -> dict:
     }
 
 
+# ===== SMART FEATURE-BASED LEARNING =====
+# System that learns WHEN specific bet types fail based on match features
+
+def extract_feature_conditions(features: dict, bet_category: str) -> list:
+    """Extract relevant feature conditions for a bet type.
+
+    Returns list of conditions like:
+    - "high_injuries" (injuries > 8)
+    - "away_higher_position" (away team higher in table)
+    - "low_home_form" (home win rate < 50%)
+    """
+    conditions = []
+
+    if not features:
+        return conditions
+
+    # Injury conditions
+    home_injuries = features.get("home_injuries", 0)
+    away_injuries = features.get("away_injuries", 0)
+    if home_injuries > 8:
+        conditions.append("home_many_injuries")
+    if away_injuries > 8:
+        conditions.append("away_many_injuries")
+
+    # Position/class conditions
+    position_diff = features.get("position_diff", 0)
+    if position_diff < -5:  # Away team much higher
+        conditions.append("away_higher_position")
+    elif position_diff > 5:  # Home team much higher
+        conditions.append("home_higher_position")
+
+    class_diff = features.get("class_diff", 0)
+    if class_diff < -1:
+        conditions.append("away_higher_class")
+    elif class_diff > 1:
+        conditions.append("home_higher_class")
+
+    # Form conditions
+    home_wins = features.get("home_wins", 0)
+    away_wins = features.get("away_wins", 0)
+    if home_wins < 2:  # Out of 5
+        conditions.append("poor_home_form")
+    if home_wins >= 4:
+        conditions.append("strong_home_form")
+    if away_wins < 2:
+        conditions.append("poor_away_form")
+    if away_wins >= 4:
+        conditions.append("strong_away_form")
+
+    # Goals conditions (for totals)
+    home_scored = features.get("home_scored", 0)
+    away_scored = features.get("away_scored", 0)
+    home_conceded = features.get("home_conceded", 0)
+    away_conceded = features.get("away_conceded", 0)
+
+    avg_goals = (home_scored + away_scored + home_conceded + away_conceded) / 4 if any([home_scored, away_scored]) else 0
+    if avg_goals < 1.0:
+        conditions.append("low_scoring_teams")
+    elif avg_goals > 2.0:
+        conditions.append("high_scoring_teams")
+
+    # H2H conditions
+    h2h_count = features.get("h2h_count", 0)
+    if h2h_count == 0:
+        conditions.append("no_h2h_data")
+
+    # Motivation/fatigue
+    home_rest_days = features.get("home_rest_days", 5)
+    away_rest_days = features.get("away_rest_days", 5)
+    if home_rest_days < 3:
+        conditions.append("home_tired")
+    if away_rest_days < 3:
+        conditions.append("away_tired")
+
+    # Cup match
+    is_cup = features.get("is_cup", 0)
+    if is_cup:
+        conditions.append("cup_match")
+
+    return conditions
+
+
+def get_condition_key(bet_category: str, condition: str) -> str:
+    """Generate unique key for bet_category + condition combination."""
+    return f"{bet_category}|{condition}"
+
+
+def update_feature_pattern(bet_category: str, condition: str, is_win: bool, confidence: int):
+    """Update feature-based error pattern after a result."""
+    condition_key = get_condition_key(bet_category, condition)
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""SELECT id, total_predictions, wins, losses, avg_confidence_when_failed
+                 FROM feature_error_patterns WHERE condition_key = ?""", (condition_key,))
+    row = c.fetchone()
+
+    if row:
+        total = row[1] + 1
+        wins = row[2] + (1 if is_win else 0)
+        losses = row[3] + (0 if is_win else 1)
+
+        # Track average confidence when failed (to understand overconfidence)
+        if not is_win:
+            old_avg = row[4] or confidence
+            old_losses = row[3]
+            new_avg = (old_avg * old_losses + confidence) / losses if losses > 0 else confidence
+        else:
+            new_avg = row[4]
+
+        # Calculate suggested adjustment based on win rate
+        win_rate = wins / total if total > 0 else 0.5
+        # If win rate is 40%, we should reduce confidence by ~10-15%
+        # If win rate is 60%, we can slightly boost by ~5%
+        suggested_adj = int((win_rate - 0.5) * 30)  # Range: -15 to +15
+        suggested_adj = max(-20, min(10, suggested_adj))  # More aggressive penalty, conservative boost
+
+        c.execute("""UPDATE feature_error_patterns
+                     SET total_predictions = ?, wins = ?, losses = ?,
+                         avg_confidence_when_failed = ?, suggested_adjustment = ?,
+                         last_updated = CURRENT_TIMESTAMP
+                     WHERE id = ?""",
+                  (total, wins, losses, new_avg, suggested_adj, row[0]))
+    else:
+        c.execute("""INSERT INTO feature_error_patterns
+                     (bet_category, feature_condition, condition_key, total_predictions,
+                      wins, losses, avg_confidence_when_failed, suggested_adjustment)
+                     VALUES (?, ?, ?, 1, ?, ?, ?, 0)""",
+                  (bet_category, condition, condition_key,
+                   1 if is_win else 0, 0 if is_win else 1,
+                   None if is_win else confidence))
+
+    conn.commit()
+    conn.close()
+
+
+def get_smart_adjustments(bet_category: str, features: dict) -> tuple:
+    """Get smart adjustments based on learned feature patterns.
+
+    Returns: (total_adjustment, list of applied adjustments with reasons)
+    """
+    conditions = extract_feature_conditions(features, bet_category)
+
+    if not conditions:
+        return 0, []
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    adjustments = []
+    total_adjustment = 0
+
+    for condition in conditions:
+        condition_key = get_condition_key(bet_category, condition)
+
+        c.execute("""SELECT wins, losses, suggested_adjustment, total_predictions
+                     FROM feature_error_patterns
+                     WHERE condition_key = ? AND total_predictions >= 5""",
+                  (condition_key,))
+        row = c.fetchone()
+
+        if row:
+            wins, losses, suggested_adj, total = row
+            win_rate = wins / total if total > 0 else 0.5
+
+            # Only apply adjustment if we have enough data and pattern is significant
+            if total >= 5 and abs(suggested_adj) >= 3:
+                # Weight by sample size (more samples = more confidence in adjustment)
+                weight = min(1.0, total / 20)  # Full weight at 20+ samples
+                weighted_adj = int(suggested_adj * weight)
+
+                if weighted_adj != 0:
+                    total_adjustment += weighted_adj
+                    direction = "⬇️" if weighted_adj < 0 else "⬆️"
+                    adjustments.append(f"{direction} {condition}: {weighted_adj:+d}% (win rate: {win_rate:.0%}, n={total})")
+
+    conn.close()
+
+    # Cap total adjustment
+    total_adjustment = max(-25, min(15, total_adjustment))
+
+    return total_adjustment, adjustments
+
+
+def get_risky_conditions(bet_category: str, features: dict) -> list:
+    """Check if current conditions are historically risky for this bet type.
+
+    Returns list of risky conditions with their stats.
+    """
+    conditions = extract_feature_conditions(features, bet_category)
+    risky = []
+
+    if not conditions:
+        return risky
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    for condition in conditions:
+        condition_key = get_condition_key(bet_category, condition)
+
+        c.execute("""SELECT wins, losses, total_predictions
+                     FROM feature_error_patterns
+                     WHERE condition_key = ? AND total_predictions >= 5""",
+                  (condition_key,))
+        row = c.fetchone()
+
+        if row:
+            wins, losses, total = row
+            win_rate = wins / total if total > 0 else 0.5
+
+            # Condition is risky if win rate < 45%
+            if win_rate < 0.45 and total >= 5:
+                risky.append({
+                    "condition": condition,
+                    "win_rate": win_rate,
+                    "sample_size": total,
+                    "wins": wins,
+                    "losses": losses
+                })
+
+    conn.close()
+
+    return sorted(risky, key=lambda x: x["win_rate"])
+
+
+def suggest_alternative_bet(bet_category: str, features: dict, risky_conditions: list) -> dict:
+    """Suggest a safer alternative bet based on risky conditions.
+
+    Returns dict with alternative suggestion or None.
+    """
+    if not risky_conditions:
+        return None
+
+    # Map risky outcomes to safer alternatives
+    alternatives = {
+        "outcomes_home": [
+            {"category": "double_chance_1x", "name": "1X (Double Chance)", "reason": "Safer - covers draw"},
+            {"category": "handicap_home", "name": "Home +1.5", "reason": "Safer - home can lose by 1"},
+        ],
+        "outcomes_away": [
+            {"category": "double_chance_x2", "name": "X2 (Double Chance)", "reason": "Safer - covers draw"},
+            {"category": "handicap_away", "name": "Away +1.5", "reason": "Safer - away can lose by 1"},
+        ],
+        "totals_over": [
+            {"category": "totals_over_1.5", "name": "Over 1.5", "reason": "Lower line - easier to hit"},
+            {"category": "btts", "name": "BTTS Yes", "reason": "Both teams scoring = goals"},
+        ],
+        "totals_under": [
+            {"category": "totals_under_3.5", "name": "Under 3.5", "reason": "Higher line - safer"},
+        ],
+    }
+
+    if bet_category in alternatives:
+        # Check which alternative has best historical performance
+        best_alt = None
+        best_win_rate = 0
+
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        for alt in alternatives[bet_category]:
+            # Check if alternative performs better with same conditions
+            total_wins = 0
+            total_preds = 0
+
+            for risky in risky_conditions:
+                alt_key = get_condition_key(alt["category"], risky["condition"])
+                c.execute("""SELECT wins, total_predictions FROM feature_error_patterns
+                             WHERE condition_key = ?""", (alt_key,))
+                row = c.fetchone()
+                if row and row[1] > 0:
+                    total_wins += row[0]
+                    total_preds += row[1]
+
+            if total_preds > 0:
+                alt_win_rate = total_wins / total_preds
+                if alt_win_rate > best_win_rate:
+                    best_win_rate = alt_win_rate
+                    best_alt = alt
+
+        conn.close()
+
+        if best_alt and best_win_rate > 0.5:
+            return {
+                "category": best_alt["category"],
+                "name": best_alt["name"],
+                "reason": best_alt["reason"],
+                "expected_win_rate": best_win_rate
+            }
+
+    return None
+
+
 def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dict) -> tuple:
     """Apply all learning adjustments to confidence.
 
@@ -5099,7 +5434,7 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             adjustments.append(f"calibration: {confidence}→{calibrated}")
             confidence = calibrated
 
-    # 2. Apply pattern adjustment
+    # 2. Apply pattern adjustment (basic patterns)
     if features:
         pattern_key = detect_pattern(features, bet_type)
         pattern_adj = get_pattern_adjustment(pattern_key)
@@ -5107,6 +5442,18 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             new_conf = max(30, min(95, confidence + pattern_adj))
             adjustments.append(f"pattern: {'+' if pattern_adj > 0 else ''}{pattern_adj}")
             confidence = new_conf
+
+    # 3. NEW: Apply smart feature-based adjustments
+    # This is the KEY improvement - learns from specific conditions that cause failures
+    if features and category:
+        smart_adj, smart_reasons = get_smart_adjustments(category, features)
+        if smart_adj != 0:
+            old_conf = confidence
+            confidence = max(30, min(95, confidence + smart_adj))
+            adjustments.append(f"smart_learning: {old_conf}→{confidence}")
+            # Add detailed reasons to log
+            for reason in smart_reasons:
+                adjustments.append(f"  └─ {reason}")
 
     return confidence, adjustments
 
@@ -8954,13 +9301,13 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"\n\n🎁 {get_text('referral_bonus_title', lang)}\n{get_text('referral_bonus_progress', lang).format(current=ref_bonus['progress'])}"
             keyboard = [
                 [InlineKeyboardButton("🎁 Получить бонус", callback_data="claim_ref_bonus")],
-                [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
                  InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
             ]
         else:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-                [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
                  InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
             ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -9020,7 +9367,7 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
         keyboard = [
-            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -10221,7 +10568,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11115,7 +11462,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11426,7 +11773,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not can_use:
             text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
             keyboard = [
-            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
             await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11481,7 +11828,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_use:
         text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
         keyboard = [
-            [InlineKeyboardButton("🎰 Partner", url=get_affiliate_link(user_id)),
+            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
              InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
         ]
         await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -11713,6 +12060,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         personal_advice = get_personalized_advice(user_id, bet_category, lang)
         if personal_advice:
             analysis = analysis + f"\n\n{personal_advice}"
+
+        # NEW: Smart Learning - Check for risky conditions and suggest alternatives
+        if ml_features and bet_category:
+            risky_conditions = get_risky_conditions(bet_category, ml_features)
+
+            if risky_conditions:
+                # Show warning about risky conditions
+                risky_labels = {
+                    "ru": "🧠 **УМНОЕ ОБУЧЕНИЕ:**",
+                    "en": "🧠 **SMART LEARNING:**",
+                    "pt": "🧠 **APRENDIZADO INTELIGENTE:**",
+                    "es": "🧠 **APRENDIZAJE INTELIGENTE:**",
+                    "id": "🧠 **PEMBELAJARAN PINTAR:**"
+                }
+
+                risky_texts = []
+                for risky in risky_conditions[:2]:  # Show max 2 conditions
+                    condition_names = {
+                        "home_many_injuries": {"ru": "много травм дома", "en": "many home injuries", "pt": "muitas lesões em casa", "es": "muchas lesiones locales", "id": "banyak cedera tuan rumah"},
+                        "away_many_injuries": {"ru": "много травм гостей", "en": "many away injuries", "pt": "muitas lesões visitantes", "es": "muchas lesiones visitantes", "id": "banyak cedera tamu"},
+                        "away_higher_position": {"ru": "гости выше в таблице", "en": "away higher in table", "pt": "visitante melhor colocado", "es": "visitante mejor posicionado", "id": "tamu lebih tinggi di tabel"},
+                        "away_higher_class": {"ru": "гости класснее", "en": "away team higher class", "pt": "visitante de classe superior", "es": "visitante de mayor clase", "id": "tamu kelas lebih tinggi"},
+                        "poor_home_form": {"ru": "слабая форма хозяев", "en": "poor home form", "pt": "má forma local", "es": "mala forma local", "id": "performa tuan rumah buruk"},
+                        "strong_away_form": {"ru": "сильная форма гостей", "en": "strong away form", "pt": "boa forma visitante", "es": "buena forma visitante", "id": "performa tamu kuat"},
+                        "cup_match": {"ru": "кубковый матч", "en": "cup match", "pt": "jogo de copa", "es": "partido de copa", "id": "pertandingan piala"},
+                        "no_h2h_data": {"ru": "нет истории встреч", "en": "no H2H history", "pt": "sem histórico H2H", "es": "sin historial H2H", "id": "tidak ada riwayat H2H"},
+                    }
+                    cond_name = condition_names.get(risky["condition"], {}).get(lang, risky["condition"])
+                    risky_texts.append(f"⚠️ {cond_name}: {risky['win_rate']:.0%} винрейт ({risky['sample_size']} ставок)")
+
+                if risky_texts:
+                    analysis = analysis + f"\n\n{risky_labels.get(lang, risky_labels['en'])}\n" + "\n".join(risky_texts)
+
+                # Suggest alternative if available
+                alt_suggestion = suggest_alternative_bet(bet_category, ml_features, risky_conditions)
+                if alt_suggestion:
+                    alt_labels = {
+                        "ru": f"💡 **Безопаснее:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "en": f"💡 **Safer:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "pt": f"💡 **Mais seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "es": f"💡 **Más seguro:** {alt_suggestion['name']} — {alt_suggestion['reason']}",
+                        "id": f"💡 **Lebih aman:** {alt_suggestion['name']} — {alt_suggestion['reason']}"
+                    }
+                    analysis = analysis + f"\n{alt_labels.get(lang, alt_labels['en'])}"
 
         # Extract league_code from features for learning system
         league_code = ml_features.get("league_code") if ml_features else None
