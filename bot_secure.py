@@ -3554,6 +3554,55 @@ def clean_duplicate_predictions() -> dict:
     }
 
 
+def clean_duplicate_favorites() -> dict:
+    """Remove duplicate entries from favorite_teams and favorite_leagues.
+
+    Keeps the oldest entry for each (user_id, team_name/league_code) pair.
+    Returns count of deleted duplicates.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    deleted_teams = 0
+    deleted_leagues = 0
+
+    # Clean duplicate favorite teams
+    try:
+        c.execute("""
+            DELETE FROM favorite_teams
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_teams GROUP BY user_id, team_name
+            )
+        """)
+        deleted_teams = c.rowcount
+    except Exception as e:
+        logger.warning(f"Error cleaning favorite_teams: {e}")
+
+    # Clean duplicate favorite leagues
+    try:
+        c.execute("""
+            DELETE FROM favorite_leagues
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_leagues GROUP BY user_id, league_code
+            )
+        """)
+        deleted_leagues = c.rowcount
+    except Exception as e:
+        logger.warning(f"Error cleaning favorite_leagues: {e}")
+
+    conn.commit()
+    conn.close()
+
+    if deleted_teams > 0 or deleted_leagues > 0:
+        logger.info(f"Cleaned favorites: {deleted_teams} team dups, {deleted_leagues} league dups")
+
+    return {
+        "deleted_teams": deleted_teams,
+        "deleted_leagues": deleted_leagues,
+        "total": deleted_teams + deleted_leagues
+    }
+
+
 def get_clean_stats() -> dict:
     """Get accuracy stats and detect TRUE duplicates.
 
@@ -13140,6 +13189,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /learnhistory - Обучить на истории
 • /accuracy - Детальный анализ точности
 • /roi - ROI статистика (прибыльность)
+• /cleanfavs - Очистить дубликаты избранного
 • /debug - Отладочная информация
 
 🔧 **Система:**
@@ -13549,6 +13599,33 @@ async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Премиум убран у юзера {target_id}")
     else:
         await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+
+
+async def cleanfavs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clean duplicate favorites - admin only.
+    Removes duplicate entries from favorite_teams and favorite_leagues tables.
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("🧹 Очищаю дубликаты в избранном...")
+
+    result = clean_duplicate_favorites()
+
+    if result["total"] > 0:
+        text = f"""✅ **Дубликаты избранного очищены!**
+
+├ Команд: {result['deleted_teams']}
+└ Лиг: {result['deleted_leagues']}
+
+Всего удалено: {result['total']} записей"""
+    else:
+        text = "✅ Дубликатов в избранном не найдено!"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16751,6 +16828,7 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                     try:
                         user_data = get_user(user_id)
                         lang = user_data.get("language", "ru") if user_data else "ru"
+                        user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
 
                         # Get localized reason
                         reason_key = f"reason_{lang}"
@@ -16763,12 +16841,15 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                         elif ml_status == "adjusted":
                             ml_indicator = f"\n📊 ML: {original_conf}% → {confidence}%"
 
+                        # Format match datetime for user's timezone
+                        match_dt_str = format_match_datetime(match_date_str, user_tz, lang) if match_date_str else ""
+
                         # Build localized alert message
                         alert_msg = f"""{get_text("live_alert_title", lang)}
 
 ⚽ **{home}** vs **{away}**
 🏆 {comp}
-⏰ {get_text("in_hours", lang).format(hours="1-3")}
+{match_dt_str}
 
 {get_text("bet", lang)} {bet_type}
 {get_text("confidence", lang)} {confidence}%{ml_indicator}
@@ -18533,20 +18614,16 @@ async def send_morning_alert(context: ContextTypes.DEFAULT_TYPE):
 
         is_big = any(t in home or t in away for t in big_teams)
         if is_big or main_match is None:
-            try:
-                match_time = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
-                main_match = {
-                    "home": home,
-                    "away": away,
-                    "time": match_time.strftime("%H:%M")
-                }
-                if is_big:
-                    break
-            except:
-                pass
+            main_match = {
+                "home": home,
+                "away": away,
+                "utc_date": utc_date  # Store for datetime formatting
+            }
+            if is_big:
+                break
 
     if not main_match:
-        main_match = {"home": "Top Team", "away": "Top Team", "time": "21:00"}
+        main_match = {"home": "Top Team", "away": "Top Team", "utc_date": ""}
 
     # Get all users
     try:
@@ -18567,9 +18644,17 @@ async def send_morning_alert(context: ContextTypes.DEFAULT_TYPE):
             continue
 
         try:
+            # Get user's timezone
+            user_data = get_user(user_id)
+            user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
+
+            # Format match datetime for user's timezone
+            match_dt_str = format_match_datetime(main_match.get("utc_date", ""), user_tz, lang)
+
             text = f"{get_text('morning_alert_title', lang).format(count=match_count)}\n\n"
             text += f"{get_text('morning_main_match', lang)}\n"
-            text += f"**{main_match['home']}** vs **{main_match['away']}** ({main_match['time']})\n\n"
+            text += f"**{main_match['home']}** vs **{main_match['away']}**\n"
+            text += f"{match_dt_str}\n\n" if match_dt_str else "\n"
             text += f"{get_text('morning_cta', lang)}"
 
             keyboard = [
@@ -18769,7 +18854,8 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
                     "home": home,
                     "away": away,
                     "hours": int(hours_until),
-                    "match_id": m.get("id")
+                    "match_id": m.get("id"),
+                    "utc_date": utc_date  # Store for datetime formatting
                 })
         except:
             continue
@@ -18786,14 +18872,18 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
         try:
             user_data = get_user(user_id)
             lang = user_data.get("language", "ru") if user_data else "ru"
+            user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
 
             for match in hot_matches[:1]:  # Only one match per cycle
                 if not should_send_notification(user_id, f"hot_match_{match['match_id']}", cooldown_hours=6):
                     continue
 
+                # Format match datetime for user's timezone
+                match_dt_str = format_match_datetime(match.get("utc_date", ""), user_tz, lang)
+
                 text = f"{get_text('hot_match_title', lang)}\n\n"
                 text += f"**{match['home']}** vs **{match['away']}**\n"
-                text += f"{get_text('hot_match_starts', lang).format(hours=match['hours'])}\n"
+                text += f"{match_dt_str}\n" if match_dt_str else ""
                 text += f"{get_text('hot_match_confidence', lang).format(percent=75)}\n\n"
                 text += f"{get_text('hot_match_cta', lang)}"
 
@@ -19815,6 +19905,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_cmd))
     app.add_handler(CommandHandler("addpremium", addpremium_cmd))
     app.add_handler(CommandHandler("removepremium", removepremium_cmd))
+    app.add_handler(CommandHandler("cleanfavs", cleanfavs_cmd))  # Clean duplicate favorites
     app.add_handler(CommandHandler("userinfo", userinfo_cmd))
     app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
     app.add_handler(CommandHandler("mltrain", mltrain_cmd))
