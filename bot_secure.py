@@ -326,6 +326,7 @@ TRANSLATIONS = {
         "hot_match_starts": "⏰ Начало через {hours}ч",
         "hot_match_confidence": "📊 Уверенность: {percent}%",
         "hot_match_cta": "Успей поставить!",
+        "analyze_match_btn": "🔍 Анализ матча",
         # Day names
         "day_monday": "Понедельник",
         "day_tuesday": "Вторник",
@@ -527,6 +528,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "hot_match_starts": "⏰ Starts in {hours}h",
         "hot_match_confidence": "📊 Confidence: {percent}%",
         "hot_match_cta": "Bet now!",
+        "analyze_match_btn": "🔍 Match Analysis",
         "day_monday": "Monday",
         "day_tuesday": "Tuesday",
         "day_wednesday": "Wednesday",
@@ -727,6 +729,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "hot_match_starts": "⏰ Começa em {hours}h",
         "hot_match_confidence": "📊 Confiança: {percent}%",
         "hot_match_cta": "Aposte agora!",
+        "analyze_match_btn": "🔍 Análise do Jogo",
         "day_monday": "Segunda",
         "day_tuesday": "Terça",
         "day_wednesday": "Quarta",
@@ -927,6 +930,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "hot_match_starts": "⏰ Empieza en {hours}h",
         "hot_match_confidence": "📊 Confianza: {percent}%",
         "hot_match_cta": "¡Apuesta ahora!",
+        "analyze_match_btn": "🔍 Análisis del Partido",
         "day_monday": "Lunes",
         "day_tuesday": "Martes",
         "day_wednesday": "Miércoles",
@@ -1127,6 +1131,7 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "hot_match_starts": "⏰ Mulai dalam {hours}j",
         "hot_match_confidence": "📊 Kepercayaan: {percent}%",
         "hot_match_cta": "Taruhan sekarang!",
+        "analyze_match_btn": "🔍 Analisis Pertandingan",
         "day_monday": "Senin",
         "day_tuesday": "Selasa",
         "day_wednesday": "Rabu",
@@ -15442,6 +15447,51 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         add_favorite_team(user_id, team_name)
         await query.answer(get_text("team_added", lang).format(name=team_name))
 
+    elif data.startswith("analyze_match_"):
+        # Analyze specific match (from hot match alerts)
+        match_id = data.replace("analyze_match_", "")
+
+        # Check daily limit (counts as analysis)
+        can_use, _, use_bonus = check_daily_limit(user_id)
+        if not can_use:
+            text = get_limit_text(lang)
+            keyboard = []
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
+            return
+
+        await query.edit_message_text(get_text("analyzing", lang))
+
+        # Fetch match by ID
+        try:
+            session = await get_http_session()
+            url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+            headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    match_data = await resp.json()
+                    matches = [match_data]  # Wrap in list for get_recommendations_enhanced
+                else:
+                    matches = []
+        except Exception as e:
+            logger.error(f"Error fetching match {match_id}: {e}")
+            matches = []
+
+        if matches:
+            user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+            recs = await get_recommendations_enhanced(matches, "Подробный анализ этого матча", user, lang=lang, user_tz=user_tz)
+            keyboard = []
+            bet_btn = get_bet_button(user_id, lang)
+            if bet_btn:
+                keyboard.append(bet_btn)
+            keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")])
+            increment_daily_usage(user_id)  # Count as usage
+            await query.edit_message_text(recs or get_text("no_matches", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await query.edit_message_text(get_text("no_matches", lang))
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler"""
@@ -19034,7 +19084,11 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
                 bet_btn = get_bet_button(user_id, lang, "place_bet_btn")
                 if bet_btn:
                     keyboard.append(bet_btn)
-                keyboard.append([InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")])
+                # Button to analyze THIS specific match (counts as daily usage)
+                keyboard.append([InlineKeyboardButton(
+                    get_text("analyze_match_btn", lang),
+                    callback_data=f"analyze_match_{match['match_id']}"
+                )])
 
                 await context.bot.send_message(
                     chat_id=user_id,
