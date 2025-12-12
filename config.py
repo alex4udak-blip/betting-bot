@@ -16,17 +16,27 @@ FOOTBALL_API_URL = "https://api.football-data.org/v4"
 ODDS_API_URL = "https://api.the-odds-api.com/v4"
 
 # ===== AFFILIATE & PAYMENTS =====
+# MASTER SWITCH: Set to False to hide all monetization (affiliate links, crypto, 1win)
+# When False, shows "Coming soon" placeholders instead
+MONETIZATION_ENABLED = os.getenv("MONETIZATION_ENABLED", "false").lower() == "true"
+
+# === PRESERVED ORIGINAL VALUES (uncomment MONETIZATION_ENABLED=true to activate) ===
 # 1WIN Affiliate Link (Universal Router - auto GEO redirect)
-AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
+_REAL_AFFILIATE_LINK = "https://1wfafs.life/?open=register&p=ex2m"
 
 # Crypto wallets for manual payment
-CRYPTO_WALLETS = {
+_REAL_CRYPTO_WALLETS = {
     "USDT_TRC20": os.getenv("CRYPTO_WALLET_USDT", "TYc8XA1kx4v3uSYjpRxbqjtM1gNYeV3rZC"),
     "TON": os.getenv("CRYPTO_WALLET_TON", "UQC5Du_luLDSdBudVJZ-BMLtnoUFHj5HgJ_fgF0YehshSwlL")
 }
 
-# CryptoBot API token (get from @CryptoBot -> Crypto Pay -> My Apps)
-CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
+# CryptoBot API token
+_REAL_CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
+
+# === ACTIVE VALUES (depend on MONETIZATION_ENABLED) ===
+AFFILIATE_LINK = _REAL_AFFILIATE_LINK if MONETIZATION_ENABLED else ""
+CRYPTO_WALLETS = _REAL_CRYPTO_WALLETS if MONETIZATION_ENABLED else {"USDT_TRC20": "", "TON": ""}
+CRYPTOBOT_TOKEN = _REAL_CRYPTOBOT_TOKEN if MONETIZATION_ENABLED else ""
 
 # Crypto prices (in USD)
 CRYPTO_PRICES = {

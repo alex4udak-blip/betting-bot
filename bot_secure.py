@@ -36,7 +36,7 @@ from config import (
     CRYPTOBOT_TOKEN, CRYPTO_PRICES, FREE_DAILY_LIMIT, ADMIN_IDS,
     SUPPORT_USERNAME, WEBHOOK_SECRET_1WIN, WEBHOOK_SECRET_CRYPTO,
     HTTP_TIMEOUT, WEB_SERVER_PORT, DB_PATH, ML_MODELS_DIR, ML_MIN_SAMPLES,
-    LOG_LEVEL, LOG_FORMAT, is_admin, validate_config
+    LOG_LEVEL, LOG_FORMAT, is_admin, validate_config, MONETIZATION_ENABLED
 )
 
 logging.basicConfig(format=LOG_FORMAT, level=getattr(logging, LOG_LEVEL))
@@ -140,6 +140,7 @@ TRANSLATIONS = {
         "settings": "⚙️ Настройки",
         "help_btn": "❓ Помощь",
         "daily_limit": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Получи безлимитный доступ!**\nСделай депозит в 1win — получи премиум автоматически.\n\n👇 Нажми на кнопку ниже:",
+        "daily_limit_simple": "⚠️ Достигнут лимит ({limit} прогнозов/день).\n\n💎 **Премиум скоро будет доступен!**\nМы работаем над системой оплаты.",
         "place_bet": "🎰 Поставить",
         "no_matches": "Матчей не найдено",
         "analyzing": "🔍 Анализирую...",
@@ -333,6 +334,10 @@ TRANSLATIONS = {
         "day_friday": "Пятница",
         "day_saturday": "Суббота",
         "day_sunday": "Воскресенье",
+        # Monetization placeholders (when disabled)
+        "premium_coming_soon": "🚀 Премиум скоро будет доступен!\n\nМы работаем над системой оплаты. Следите за обновлениями!",
+        "betting_coming_soon": "🎰 Партнёрская программа скоро!",
+        "place_bet_disabled": "📊 Сделать ставку",
     },
     "en": {
         "welcome": "👋 Hello! I'm an AI betting bot for football.\n\nUse the menu below or type a team name.",
@@ -343,6 +348,7 @@ TRANSLATIONS = {
         "settings": "⚙️ Settings",
         "help_btn": "❓ Help",
         "daily_limit": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Get unlimited access!**\nMake a deposit on 1win — get premium automatically.\n\n👇 Tap the button below:",
+        "daily_limit_simple": "⚠️ Daily limit reached ({limit} predictions).\n\n💎 **Premium coming soon!**\nWe're working on the payment system.",
         "place_bet": "🎰 Place bet",
         "no_matches": "No matches found",
         "analyzing": "🔍 Analyzing...",
@@ -528,6 +534,10 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "day_friday": "Friday",
         "day_saturday": "Saturday",
         "day_sunday": "Sunday",
+        # Monetization placeholders (when disabled)
+        "premium_coming_soon": "🚀 Premium coming soon!\n\nWe're working on the payment system. Stay tuned!",
+        "betting_coming_soon": "🎰 Betting partner coming soon!",
+        "place_bet_disabled": "📊 Place bet",
     },
     "pt": {
         "welcome": "👋 Olá! Sou um bot de apostas com IA para futebol.\n\nUse o menu ou digite o nome de um time.",
@@ -538,6 +548,7 @@ Just type a team name (e.g. *Barcelona*) or tap a button below!""",
         "settings": "⚙️ Config",
         "help_btn": "❓ Ajuda",
         "daily_limit": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Acesso ilimitado!**\nFaça um depósito no 1win — receba premium automaticamente.\n\n👇 Toque no botão abaixo:",
+        "daily_limit_simple": "⚠️ Limite diário atingido ({limit} previsões).\n\n💎 **Premium em breve!**\nEstamos trabalhando no sistema de pagamento.",
         "place_bet": "🎰 Apostar",
         "no_matches": "Nenhum jogo encontrado",
         "analyzing": "🔍 Analisando...",
@@ -723,6 +734,10 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "day_friday": "Sexta",
         "day_saturday": "Sábado",
         "day_sunday": "Domingo",
+        # Monetization placeholders (when disabled)
+        "premium_coming_soon": "🚀 Premium em breve!\n\nEstamos trabalhando no sistema de pagamento. Fique ligado!",
+        "betting_coming_soon": "🎰 Parceiro de apostas em breve!",
+        "place_bet_disabled": "📊 Fazer aposta",
     },
     "es": {
         "welcome": "👋 ¡Hola! Soy un bot de apuestas con IA para fútbol.\n\nUsa el menú o escribe el nombre de un equipo.",
@@ -733,6 +748,7 @@ Digite o nome de um time (ex: *Barcelona*) ou toque um botão abaixo!""",
         "settings": "⚙️ Ajustes",
         "help_btn": "❓ Ayuda",
         "daily_limit": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Acceso ilimitado!**\nHaz un depósito en 1win — obtén premium automáticamente.\n\n👇 Toca el botón abajo:",
+        "daily_limit_simple": "⚠️ Límite diario alcanzado ({limit} pronósticos).\n\n💎 **¡Premium próximamente!**\nEstamos trabajando en el sistema de pago.",
         "place_bet": "🎰 Apostar",
         "no_matches": "No se encontraron partidos",
         "analyzing": "🔍 Analizando...",
@@ -918,6 +934,10 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "day_friday": "Viernes",
         "day_saturday": "Sábado",
         "day_sunday": "Domingo",
+        # Monetization placeholders (when disabled)
+        "premium_coming_soon": "🚀 ¡Premium próximamente!\n\nEstamos trabajando en el sistema de pago. ¡Mantente atento!",
+        "betting_coming_soon": "🎰 ¡Socio de apuestas próximamente!",
+        "place_bet_disabled": "📊 Hacer apuesta",
     },
     "id": {
         "welcome": "👋 Halo! Saya bot taruhan AI untuk sepak bola.\n\nGunakan menu di bawah atau ketik nama tim.",
@@ -928,6 +948,7 @@ Escribe un equipo (ej: *Barcelona*) o toca un botón abajo!""",
         "settings": "⚙️ Pengaturan",
         "help_btn": "❓ Bantuan",
         "daily_limit": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Akses tak terbatas!**\nLakukan deposit di 1win — dapatkan premium otomatis.\n\n👇 Ketuk tombol di bawah:",
+        "daily_limit_simple": "⚠️ Batas harian tercapai ({limit} prediksi).\n\n💎 **Premium segera hadir!**\nKami sedang mengerjakan sistem pembayaran.",
         "place_bet": "🎰 Pasang taruhan",
         "no_matches": "Tidak ada pertandingan",
         "analyzing": "🔍 Menganalisis...",
@@ -1113,6 +1134,10 @@ Ketik nama tim (misal: *Barcelona*) atau tap tombol di bawah!""",
         "day_friday": "Jumat",
         "day_saturday": "Sabtu",
         "day_sunday": "Minggu",
+        # Monetization placeholders (when disabled)
+        "premium_coming_soon": "🚀 Premium segera hadir!\n\nKami sedang mengerjakan sistem pembayaran. Nantikan!",
+        "betting_coming_soon": "🎰 Mitra taruhan segera hadir!",
+        "place_bet_disabled": "📊 Pasang taruhan",
     }
 }
 
@@ -1131,6 +1156,45 @@ def get_main_keyboard(lang="ru"):
         [KeyboardButton(get_text("help_btn", lang))]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+
+def get_limit_text(lang: str = "ru") -> str:
+    """Get daily limit text - shows simple version without 1win when monetization disabled."""
+    if MONETIZATION_ENABLED:
+        return get_limit_text(lang)
+    else:
+        return get_text("daily_limit_simple", lang).format(limit=FREE_DAILY_LIMIT)
+
+
+def get_bet_button(user_id: int, lang: str = "ru", text_key: str = "place_bet") -> list:
+    """Get betting button row based on MONETIZATION_ENABLED.
+    Returns empty list if monetization is disabled.
+    text_key: translation key for button text (default: "place_bet", alt: "place_bet_btn")
+    """
+    if not MONETIZATION_ENABLED:
+        return []  # No button when disabled
+
+    affiliate_url = get_affiliate_link(user_id)
+    if affiliate_url:
+        return [InlineKeyboardButton(get_text(text_key, lang), url=affiliate_url)]
+    return []
+
+
+def get_premium_buttons(user_id: int, lang: str = "ru") -> list:
+    """Get premium/1win buttons based on MONETIZATION_ENABLED.
+    Returns empty list if monetization is disabled.
+    """
+    if not MONETIZATION_ENABLED:
+        return []  # No buttons when disabled
+
+    affiliate_url = get_affiliate_link(user_id)
+    if affiliate_url:
+        return [
+            InlineKeyboardButton(get_text("open_1win_btn", lang), url=affiliate_url),
+            InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")
+        ]
+    return []
+
 
 # Timezone mapping by language/country code
 LANGUAGE_TIMEZONE_MAP = {
@@ -2812,7 +2876,11 @@ def process_1win_postback(data: dict) -> dict:
 
 
 def get_affiliate_link(user_id: int) -> str:
-    """Generate affiliate link with user tracking."""
+    """Generate affiliate link with user tracking.
+    Returns None when MONETIZATION_ENABLED=False.
+    """
+    if not MONETIZATION_ENABLED or not AFFILIATE_LINK:
+        return None  # No link when monetization disabled
     # Base 1win affiliate link with sub1 parameter for tracking
     base_link = AFFILIATE_LINK.rstrip("/")
     if "?" in base_link:
@@ -12439,19 +12507,18 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check if user can claim referral bonus
         ref_bonus = check_referral_bonus_eligible(user_id)
         if ref_bonus["eligible"]:
-            text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
+            text = get_limit_text(lang)
             text += f"\n\n🎁 {get_text('referral_bonus_title', lang)}\n{get_text('referral_bonus_progress', lang).format(current=ref_bonus['progress'])}"
-            keyboard = [
-                [InlineKeyboardButton("🎁 Получить бонус", callback_data="claim_ref_bonus")],
-                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-                 InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-            ]
+            keyboard = [[InlineKeyboardButton("🎁 Получить бонус", callback_data="claim_ref_bonus")]]
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
         else:
-            text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [
-                [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-                 InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-            ]
+            text = get_limit_text(lang)
+            keyboard = []
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -12480,12 +12547,13 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if social_header:
             social_header += "\n"
 
-        # Add affiliate button with referral
-        keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today"),
-             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
-        ]
+        # Add affiliate button with referral (if monetization enabled)
+        keyboard = []
+        bet_btn = get_bet_button(user_id, lang)
+        if bet_btn:
+            keyboard.append(bet_btn)
+        keyboard.append([InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today"),
+             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")])
         increment_daily_usage(user_id)
         try:
             await status.edit_text(social_header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -12507,12 +12575,12 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check daily limit
     can_use, remaining, use_bonus = check_daily_limit(user_id)
     if not can_use:
-        text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-        ]
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        text = get_limit_text(lang)
+        keyboard = []
+        premium_btns = get_premium_buttons(user_id, lang)
+        if premium_btns:
+            keyboard.append(premium_btns)
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
         return
 
     status = await update.message.reply_text(get_text("sure_searching", lang))
@@ -12534,11 +12602,12 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             accuracy_text = f"\n{get_text('social_accuracy', lang).format(accuracy=social_stats['accuracy'])}\n"
 
         header = f"🎯 **УВЕРЕННЫЕ СТАВКИ (75%+)**{accuracy_text}\n"
-        keyboard = [
-            [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend"),
-             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")]
-        ]
+        keyboard = []
+        bet_btn = get_bet_button(user_id, lang)
+        if bet_btn:
+            keyboard.append(bet_btn)
+        keyboard.append([InlineKeyboardButton("📊 Все ставки", callback_data="cmd_recommend"),
+             InlineKeyboardButton(get_text("referral_btn", lang), callback_data="cmd_referral")])
         increment_daily_usage(user_id)
         await status.edit_text(header + recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
@@ -12608,6 +12677,24 @@ async def premium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
     lang = user.get("language", "ru") if user else "ru"
+
+    # Check if monetization is disabled - show "coming soon"
+    if not MONETIZATION_ENABLED:
+        coming_soon_text = get_text("premium_coming_soon", lang)
+        keyboard = [[InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]]
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                coming_soon_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                coming_soon_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        return
 
     # Get user's geo for personalized prices
     user_geo = get_user_geo(user_id)
@@ -13838,10 +13925,13 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             [InlineKeyboardButton(get_text("try_prediction_btn", selected_lang), callback_data="cmd_recommend")],
             [InlineKeyboardButton(get_text("today", selected_lang), callback_data="cmd_today"),
              InlineKeyboardButton(get_text("live_alerts", selected_lang), callback_data="cmd_live")],
-            [InlineKeyboardButton(get_text("open_1win_btn", selected_lang), url=get_affiliate_link(user_id))],
-            [InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats"),
-             InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")]
         ]
+        # Add 1win button only if monetization enabled
+        affiliate_url = get_affiliate_link(user_id)
+        if affiliate_url:
+            keyboard.append([InlineKeyboardButton(get_text("open_1win_btn", selected_lang), url=affiliate_url)])
+        keyboard.append([InlineKeyboardButton(get_text("stats", selected_lang), callback_data="cmd_stats"),
+             InlineKeyboardButton(get_text("help", selected_lang), callback_data="cmd_help")])
 
         await query.edit_message_text(
             welcome_text,
@@ -13969,22 +14059,23 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         # Check limit
         can_use, _, use_bonus = check_daily_limit(user_id)
         if not can_use:
-            text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-        ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            text = get_limit_text(lang)
+            keyboard = []
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
             return
 
         await query.edit_message_text(get_text("analyzing", lang))
         matches = await get_matches(days=7)
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
-            keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-                [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
-            ]
+            keyboard = []
+            bet_btn = get_bet_button(user_id, lang)
+            if bet_btn:
+                keyboard.append(bet_btn)
+            keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")])
             increment_daily_usage(user_id)
             await query.edit_message_text(recs or get_text("no_matches", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
@@ -14863,12 +14954,12 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         # Check limit
         can_use, _, use_bonus = check_daily_limit(user_id)
         if not can_use:
-            text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-        ]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            text = get_limit_text(lang)
+            keyboard = []
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
             return
 
         context_type = data.replace("rec_", "")
@@ -14883,15 +14974,16 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         if matches:
             recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
-            keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-                [InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")]
-            ]
+            keyboard = []
+            bet_btn = get_bet_button(user_id, lang)
+            if bet_btn:
+                keyboard.append(bet_btn)
+            keyboard.append([InlineKeyboardButton(get_text("back", lang), callback_data="cmd_start")])
             increment_daily_usage(user_id)
             await query.edit_message_text(recs or get_text("no_matches", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await query.edit_message_text(get_text("no_matches", lang))
-    
+
     # Settings changes
     elif data == "set_min_odds":
         keyboard = [
@@ -15174,12 +15266,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check limit
         can_use, _, use_bonus = check_daily_limit(user_id)
         if not can_use:
-            text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-            keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-        ]
-            await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            text = get_limit_text(lang)
+            keyboard = []
+            premium_btns = get_premium_buttons(user_id, lang)
+            if premium_btns:
+                keyboard.append(premium_btns)
+            await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
             return
 
         await status.edit_text(get_text("analyzing_bets", lang))
@@ -15189,10 +15281,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
         if recs:
-            keyboard = [
-                [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-                [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")]
-            ]
+            keyboard = []
+            bet_btn = get_bet_button(user_id, lang)
+            if bet_btn:
+                keyboard.append(bet_btn)
+            keyboard.append([InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")])
             increment_daily_usage(user_id)
             await status.edit_text(recs, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
@@ -15229,12 +15322,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check limit first
     can_use, _, use_bonus = check_daily_limit(user_id)
     if not can_use:
-        text = get_text("daily_limit", lang).format(limit=FREE_DAILY_LIMIT)
-        keyboard = [
-            [InlineKeyboardButton("🎰 1win", url=get_affiliate_link(user_id)),
-             InlineKeyboardButton("💳 Crypto", callback_data="cmd_premium")]
-        ]
-        await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        text = get_limit_text(lang)
+        keyboard = []
+        premium_btns = get_premium_buttons(user_id, lang)
+        if premium_btns:
+            keyboard.append(premium_btns)
+        await status.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
         return
 
     await status.edit_text(get_text("searching_match", lang))
@@ -15472,12 +15565,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     header = f"⚽ **{home}** vs **{away}**\n🏆 {comp}\n{'─'*30}\n\n"
 
-    keyboard = [
-        [InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))],
-        [InlineKeyboardButton(f"⭐ {home}", callback_data=f"fav_team_{home}"),
-         InlineKeyboardButton(f"⭐ {away}", callback_data=f"fav_team_{away}")],
-        [InlineKeyboardButton("📊 Ещё рекомендации", callback_data="cmd_recommend")]
-    ]
+    keyboard = []
+    bet_btn = get_bet_button(user_id, lang)
+    if bet_btn:
+        keyboard.append(bet_btn)
+    keyboard.append([InlineKeyboardButton(f"⭐ {home}", callback_data=f"fav_team_{home}"),
+         InlineKeyboardButton(f"⭐ {away}", callback_data=f"fav_team_{away}")])
+    keyboard.append([InlineKeyboardButton("📊 Ещё рекомендации", callback_data="cmd_recommend")])
 
     # Try Markdown first, fallback to plain text if parsing fails
     try:
@@ -16544,12 +16638,15 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
 {get_text("odds", lang)} ~{odds_val}
 {get_text("reason", lang)} {reason}"""
 
-                        keyboard = [[InlineKeyboardButton(get_text("place_bet", lang), url=get_affiliate_link(user_id))]]
+                        keyboard = []
+                        bet_btn = get_bet_button(user_id, lang)
+                        if bet_btn:
+                            keyboard.append(bet_btn)
 
                         await context.bot.send_message(
                             chat_id=user_id,
                             text=alert_msg,
-                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None,
                             parse_mode="Markdown"
                         )
 
@@ -17874,10 +17971,11 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
             lang = user_data.get("language", "ru") if user_data else "ru"
 
             text = f"{get_text('daily_digest_title', lang)}\n\n{recs}"
-            keyboard = [
-                [InlineKeyboardButton(get_text("place_bet_btn", lang), url=get_affiliate_link(user_id))],
-                [InlineKeyboardButton(get_text("all_matches_btn", lang), callback_data="cmd_today")]
-            ]
+            keyboard = []
+            bet_btn = get_bet_button(user_id, lang, "place_bet_btn")
+            if bet_btn:
+                keyboard.append(bet_btn)
+            keyboard.append([InlineKeyboardButton(get_text("all_matches_btn", lang), callback_data="cmd_today")])
             await context.bot.send_message(
                 chat_id=user_id,
                 text=text,
@@ -18043,10 +18141,10 @@ async def send_evening_digest(context: ContextTypes.DEFAULT_TYPE):
             text += f"{get_text('evening_tomorrow_count', lang).format(count=tomorrow_count)}\n"
             text += f"{get_text('evening_cta', lang)}"
 
-            keyboard = [
-                [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")],
-                [InlineKeyboardButton(get_text("place_bet_btn", lang), url=get_affiliate_link(user_id))]
-            ]
+            keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
+            bet_btn = get_bet_button(user_id, lang, "place_bet_btn")
+            if bet_btn:
+                keyboard.append(bet_btn)
 
             await context.bot.send_message(
                 chat_id=user_id,
@@ -18197,10 +18295,10 @@ async def send_inactive_user_alerts(context: ContextTypes.DEFAULT_TYPE):
             text += f"{get_text('inactive_streak', lang).format(streak=streak)}\n\n"
             text += f"{get_text('inactive_cta', lang)}"
 
-            keyboard = [
-                [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")],
-                [InlineKeyboardButton(get_text("place_bet_btn", lang), url=get_affiliate_link(user_id))]
-            ]
+            keyboard = [[InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]]
+            bet_btn = get_bet_button(user_id, lang, "place_bet_btn")
+            if bet_btn:
+                keyboard.append(bet_btn)
 
             await context.bot.send_message(
                 chat_id=user_id,
@@ -18359,10 +18457,11 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
                 text += f"{get_text('hot_match_confidence', lang).format(percent=75)}\n\n"
                 text += f"{get_text('hot_match_cta', lang)}"
 
-                keyboard = [
-                    [InlineKeyboardButton(get_text("place_bet_btn", lang), url=get_affiliate_link(user_id))],
-                    [InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")]
-                ]
+                keyboard = []
+                bet_btn = get_bet_button(user_id, lang, "place_bet_btn")
+                if bet_btn:
+                    keyboard.append(bet_btn)
+                keyboard.append([InlineKeyboardButton(get_text("recommendations", lang), callback_data="cmd_recommend")])
 
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -18458,8 +18557,11 @@ async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: 
             [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
             [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today"),
              InlineKeyboardButton(get_text("live_alerts", lang), callback_data="cmd_live")],
-            [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
         ]
+        # Add 1win button only if monetization enabled
+        affiliate_url = get_affiliate_link(user_id)
+        if affiliate_url:
+            keyboard.append([InlineKeyboardButton(get_text("open_1win_btn", lang), url=affiliate_url)])
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -18587,8 +18689,11 @@ async def send_inactive_user_reminder(context: ContextTypes.DEFAULT_TYPE, user_i
         keyboard = [
             [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
             [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
-            [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
         ]
+        # Add 1win button only if monetization enabled
+        affiliate_url = get_affiliate_link(user_id)
+        if affiliate_url:
+            keyboard.append([InlineKeyboardButton(get_text("open_1win_btn", lang), url=affiliate_url)])
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -18721,8 +18826,11 @@ async def send_reengagement_alerts(context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [
                     [InlineKeyboardButton(get_text("try_prediction_btn", lang), callback_data="cmd_recommend")],
                     [InlineKeyboardButton(get_text("today", lang), callback_data="cmd_today")],
-                    [InlineKeyboardButton(get_text("open_1win_btn", lang), url=get_affiliate_link(user_id))]
                 ]
+                # Add 1win button only if monetization enabled
+                affiliate_url = get_affiliate_link(user_id)
+                if affiliate_url:
+                    keyboard.append([InlineKeyboardButton(get_text("open_1win_btn", lang), url=affiliate_url)])
 
                 await context.bot.send_message(
                     chat_id=user_id,
