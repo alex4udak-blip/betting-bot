@@ -15913,9 +15913,8 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status_msg = await update.message.reply_text(
-        "🔄 **Принудительная проверка результатов**\n\n"
-        "⏳ Собираю pending predictions...",
-        parse_mode="Markdown"
+        "🔄 Принудительная проверка результатов\n\n"
+        "⏳ Собираю pending predictions..."
     )
 
     # Get pending predictions (same as auto job)
@@ -15938,14 +15937,16 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             key = (pred["user_id"], pred["match_id"])
             grouped[key].append(pred)
 
-    await status_msg.edit_text(
-        f"🔄 **Принудительная проверка результатов**\n\n"
-        f"📊 Найдено: {len(pending)} predictions\n"
-        f"├ Групп (user+match): {len(grouped)}\n"
-        f"└ Без match_id: {no_match_id}\n\n"
-        f"⏳ Проверяю матчи...",
-        parse_mode="Markdown"
-    )
+    try:
+        await status_msg.edit_text(
+            f"🔄 Принудительная проверка результатов\n\n"
+            f"📊 Найдено: {len(pending)} predictions\n"
+            f"├ Групп (user+match): {len(grouped)}\n"
+            f"└ Без match_id: {no_match_id}\n\n"
+            f"⏳ Проверяю матчи..."
+        )
+    except Exception:
+        pass
 
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     match_results = {}
@@ -16078,12 +16079,14 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Progress update
         if processed > 0 and processed % 20 == 0:
-            await status_msg.edit_text(
-                f"🔄 **Проверка результатов**\n\n"
-                f"⏳ Обработано: {processed}\n"
-                f"📤 Уведомлений: {notified}",
-                parse_mode="Markdown"
-            )
+            try:
+                await status_msg.edit_text(
+                    f"🔄 Проверка результатов\n\n"
+                    f"⏳ Обработано: {processed}\n"
+                    f"📤 Уведомлений: {notified}"
+                )
+            except Exception:
+                pass
 
     final_text = f"""✅ Проверка завершена!
 
