@@ -12167,13 +12167,14 @@ RULES:
 3. Cup matches = higher upset risk, lower confidence
 4. Consider VALUE: confidence × odds > 1.0
 5. If warnings present - adjust confidence accordingly
-{f'6. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
+6. CRITICAL: You MUST include the 📅 line with date/time for EVERY match! Copy the date/time exactly from the match data.
+{f'7. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
 
-FORMAT (include match time from the data):
+FORMAT (STRICTLY follow this format, including the 📅 line with date/time):
 🔥 **ТОП СТАВКИ:**
 
-1️⃣ **[Home] vs [Away]** ({comp})
-   📅 [Match time from data - copy exactly]
+1️⃣ **[Home] vs [Away]** ([Competition])
+   📅 [REQUIRED: Copy the exact date/time from match data, e.g. "📅 Сегодня 21:00"]
    ⚡ [Bet type] @ ~X.XX
    📊 Уверенность: X%
    📝 [1-2 sentences why]
@@ -13698,19 +13699,63 @@ async def cleanfavs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Только для администраторов")
         return
 
-    await update.message.reply_text("🧹 Очищаю дубликаты в избранном...")
+    # Get status BEFORE cleanup
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
 
+    # Count total favorite entries
+    c.execute("SELECT COUNT(*) FROM favorite_teams")
+    total_teams = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM favorite_leagues")
+    total_leagues = c.fetchone()[0]
+
+    # Count unique entries (without duplicates)
+    c.execute("SELECT COUNT(*) FROM (SELECT DISTINCT user_id, team_name FROM favorite_teams)")
+    unique_teams = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM (SELECT DISTINCT user_id, league_code FROM favorite_leagues)")
+    unique_leagues = c.fetchone()[0]
+
+    # Count users with favorites
+    c.execute("SELECT COUNT(DISTINCT user_id) FROM favorite_teams")
+    users_with_teams = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT user_id) FROM favorite_leagues")
+    users_with_leagues = c.fetchone()[0]
+
+    conn.close()
+
+    dup_teams = total_teams - unique_teams
+    dup_leagues = total_leagues - unique_leagues
+
+    status_text = f"""🔍 **Статус избранного ДО очистки:**
+
+📊 **Команды:**
+├ Всего записей: {total_teams}
+├ Уникальных: {unique_teams}
+├ Дубликатов: {dup_teams}
+└ Юзеров с командами: {users_with_teams}
+
+📊 **Лиги:**
+├ Всего записей: {total_leagues}
+├ Уникальных: {unique_leagues}
+├ Дубликатов: {dup_leagues}
+└ Юзеров с лигами: {users_with_leagues}
+
+🧹 Очищаю..."""
+
+    await update.message.reply_text(status_text, parse_mode="Markdown")
+
+    # Run cleanup
     result = clean_duplicate_favorites()
 
     if result["total"] > 0:
-        text = f"""✅ **Дубликаты избранного очищены!**
+        text = f"""✅ **Дубликаты очищены!**
 
-├ Команд: {result['deleted_teams']}
-└ Лиг: {result['deleted_leagues']}
+├ Удалено команд: {result['deleted_teams']}
+└ Удалено лиг: {result['deleted_leagues']}
 
 Всего удалено: {result['total']} записей"""
     else:
-        text = "✅ Дубликатов в избранном не найдено!"
+        text = "✅ Дубликатов не найдено! База чистая."
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
