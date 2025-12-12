@@ -1311,6 +1311,53 @@ def get_tz_offset_str(user_tz="Europe/Moscow"):
         return "UTC"
 
 
+def format_match_datetime(utc_date_str: str, user_tz: str = "Europe/Moscow", lang: str = "ru") -> str:
+    """Format match datetime for user's timezone.
+
+    Args:
+        utc_date_str: ISO format UTC datetime string (from API)
+        user_tz: User's timezone string
+        lang: Language for day/month names
+
+    Returns:
+        Formatted string like "📅 Сегодня 19:30" or "📅 15 дек, 21:00"
+    """
+    try:
+        # Parse UTC time
+        utc_time = datetime.fromisoformat(utc_date_str.replace("Z", "+00:00"))
+
+        # Convert to user timezone
+        user_zone = ZoneInfo(user_tz)
+        local_time = utc_time.astimezone(user_zone)
+        now_local = datetime.now(user_zone)
+
+        # Format time
+        time_str = local_time.strftime("%H:%M")
+
+        # Check if today/tomorrow
+        if local_time.date() == now_local.date():
+            day_label = {"ru": "Сегодня", "en": "Today", "pt": "Hoje", "es": "Hoy", "id": "Hari ini"}.get(lang, "Today")
+            return f"📅 {day_label} {time_str}"
+        elif local_time.date() == (now_local + timedelta(days=1)).date():
+            day_label = {"ru": "Завтра", "en": "Tomorrow", "pt": "Amanhã", "es": "Mañana", "id": "Besok"}.get(lang, "Tomorrow")
+            return f"📅 {day_label} {time_str}"
+        else:
+            # Format with date
+            month_names = {
+                "ru": ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+                "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+                "pt": ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"],
+                "es": ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
+                "id": ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+            }
+            months = month_names.get(lang, month_names["en"])
+            month = months[local_time.month - 1]
+            return f"📅 {local_time.day} {month}, {time_str}"
+    except Exception as e:
+        logger.warning(f"Error formatting match time: {e}")
+        return ""
+
+
 # ===== DATABASE =====
 
 def init_db():
@@ -1825,6 +1872,13 @@ def migrate_database():
             logger.info(f"Removed {deleted_leagues} duplicate favorite leagues")
     except Exception as e:
         logger.warning(f"Could not clean favorite_leagues duplicates: {e}")
+
+    # Add match_time column to predictions for smart result checking
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN match_time TEXT")
+        logger.info("Added match_time column to predictions")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     conn.commit()
     conn.close()
@@ -3341,12 +3395,13 @@ def parse_alternative_bets(analysis: str) -> list:
     return alternatives[:3]  # Max 3 alternatives
 
 
-def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1, league_code=None):
+def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, ml_features=None, bet_rank=1, league_code=None, match_time=None):
     """Save prediction to database with category and ML features.
 
     Args:
         bet_rank: 1 = main bet, 2+ = alternatives
         league_code: League code for learning system (e.g. "PL", "SA", "BL1")
+        match_time: ISO format datetime string when match starts (for smart result checking)
 
     Duplicate rules:
     - Main bet (rank=1): Only ONE main bet per match allowed (regardless of bet_type)
@@ -3417,9 +3472,9 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     stake = calculate_kelly_stake(confidence, odds)
 
     c.execute("""INSERT INTO predictions
-                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code, ml_features_json, expected_value, stake_percent)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code, ml_features_json, ev, stake))
+                 (user_id, match_id, home_team, away_team, bet_type, bet_category, confidence, odds, bet_rank, league_code, ml_features_json, expected_value, stake_percent, match_time)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (user_id, match_id, home, away, bet_type, category, confidence, odds, bet_rank, league_code, ml_features_json, ev, stake, match_time))
     prediction_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -3434,19 +3489,29 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     return prediction_id
 
 def get_pending_predictions():
-    """Get predictions that haven't been checked yet"""
+    """Get predictions that haven't been checked yet.
+
+    Sorted by match_time (oldest first) for smart result checking -
+    matches that should have ended get checked first.
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank
+    c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank, match_time
                  FROM predictions
                  WHERE is_correct IS NULL
-                 AND predicted_at > datetime('now', '-7 days')""")
+                 AND predicted_at > datetime('now', '-7 days')
+                 ORDER BY
+                    CASE WHEN match_time IS NOT NULL
+                         THEN match_time
+                         ELSE predicted_at
+                    END ASC""")
     rows = c.fetchall()
     conn.close()
 
     return [{"id": r[0], "user_id": r[1], "match_id": r[2], "home": r[3],
              "away": r[4], "bet_type": r[5], "confidence": r[6], "odds": r[7],
-             "bet_rank": r[8] if len(r) > 8 else 1} for r in rows]
+             "bet_rank": r[8] if len(r) > 8 else 1,
+             "match_time": r[9] if len(r) > 9 else None} for r in rows]
 
 def update_prediction_result(pred_id, result, is_correct):
     """Update prediction with result and ML training data + trigger learning"""
@@ -3554,6 +3619,55 @@ def clean_duplicate_predictions() -> dict:
         "deleted": deleted_count,
         "matches_affected": affected_matches,
         "orphaned_ml_cleaned": orphaned_ml
+    }
+
+
+def clean_duplicate_favorites() -> dict:
+    """Remove duplicate entries from favorite_teams and favorite_leagues.
+
+    Keeps the oldest entry for each (user_id, team_name/league_code) pair.
+    Returns count of deleted duplicates.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    deleted_teams = 0
+    deleted_leagues = 0
+
+    # Clean duplicate favorite teams
+    try:
+        c.execute("""
+            DELETE FROM favorite_teams
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_teams GROUP BY user_id, team_name
+            )
+        """)
+        deleted_teams = c.rowcount
+    except Exception as e:
+        logger.warning(f"Error cleaning favorite_teams: {e}")
+
+    # Clean duplicate favorite leagues
+    try:
+        c.execute("""
+            DELETE FROM favorite_leagues
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_leagues GROUP BY user_id, league_code
+            )
+        """)
+        deleted_leagues = c.rowcount
+    except Exception as e:
+        logger.warning(f"Error cleaning favorite_leagues: {e}")
+
+    conn.commit()
+    conn.close()
+
+    if deleted_teams > 0 or deleted_leagues > 0:
+        logger.info(f"Cleaned favorites: {deleted_teams} team dups, {deleted_leagues} league dups")
+
+    return {
+        "deleted_teams": deleted_teams,
+        "deleted_leagues": deleted_leagues,
+        "total": deleted_teams + deleted_leagues
     }
 
 
@@ -11947,11 +12061,13 @@ async def get_recommendations_enhanced(matches: list, user_query: str = "",
                                        user_settings: Optional[dict] = None,
                                        league_filter: Optional[str] = None,
                                        lang: str = "ru",
-                                       min_confidence: int = 0) -> Optional[str]:
+                                       min_confidence: int = 0,
+                                       user_tz: str = "Europe/Moscow") -> Optional[str]:
     """Enhanced recommendations with user preferences (ASYNC)
 
     Args:
         min_confidence: Minimum confidence threshold (0 = no filter, 75 = only high confidence)
+        user_tz: User's timezone for displaying match times
     """
 
     logger.info(f"Getting recommendations for {len(matches) if matches else 0} matches")
@@ -11987,6 +12103,7 @@ async def get_recommendations_enhanced(matches: list, user_query: str = "",
         comp = m.get("competition", {}).get("name", "?")
         home_id = m.get("homeTeam", {}).get("id")
         away_id = m.get("awayTeam", {}).get("id")
+        utc_date = m.get("utcDate", "")
 
         home_form = await get_team_form(home_id) if home_id else None
         away_form = await get_team_form(away_id) if away_id else None
@@ -11994,7 +12111,12 @@ async def get_recommendations_enhanced(matches: list, user_query: str = "",
         # Get warnings
         warnings = get_match_warnings(m, home_form, away_form, lang)
 
+        # Format match time for user's timezone
+        match_time = format_match_datetime(utc_date, user_tz, lang) if utc_date else ""
+
         match_info = f"{home} vs {away} ({comp})"
+        if match_time:
+            match_info += f"\n  {match_time}"
         if warnings:
             match_info += f"\n  ⚠️ " + ", ".join(warnings)
         if home_form:
@@ -12047,10 +12169,11 @@ RULES:
 5. If warnings present - adjust confidence accordingly
 {f'6. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
 
-FORMAT:
+FORMAT (include match time from the data):
 🔥 **ТОП СТАВКИ:**
 
 1️⃣ **[Home] vs [Away]** ({comp})
+   📅 [Match time from data - copy exactly]
    ⚡ [Bet type] @ ~X.XX
    📊 Уверенность: X%
    📝 [1-2 sentences why]
@@ -12638,7 +12761,8 @@ async def recommend_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     user_query = update.message.text or ""
-    recs = await get_recommendations_enhanced(matches, user_query, user, lang=lang)
+    user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+    recs = await get_recommendations_enhanced(matches, user_query, user, lang=lang, user_tz=user_tz)
     
     if recs:
         # Add social proof header
@@ -12698,7 +12822,8 @@ async def sure_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(get_text("no_matches", lang))
         return
 
-    recs = await get_recommendations_enhanced(matches, "", user, lang=lang, min_confidence=75)
+    user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+    recs = await get_recommendations_enhanced(matches, "", user, lang=lang, min_confidence=75, user_tz=user_tz)
 
     if recs:
         # Add social proof
@@ -13151,6 +13276,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /learnhistory - Обучить на истории
 • /accuracy - Детальный анализ точности
 • /roi - ROI статистика (прибыльность)
+• /cleanfavs - Очистить дубликаты избранного
 • /debug - Отладочная информация
 
 🔧 **Система:**
@@ -13560,6 +13686,33 @@ async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Премиум убран у юзера {target_id}")
     else:
         await update.message.reply_text(f"❌ Юзер {target_id} не найден")
+
+
+async def cleanfavs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clean duplicate favorites - admin only.
+    Removes duplicate entries from favorite_teams and favorite_leagues tables.
+    """
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    await update.message.reply_text("🧹 Очищаю дубликаты в избранном...")
+
+    result = clean_duplicate_favorites()
+
+    if result["total"] > 0:
+        text = f"""✅ **Дубликаты избранного очищены!**
+
+├ Команд: {result['deleted_teams']}
+└ Лиг: {result['deleted_leagues']}
+
+Всего удалено: {result['total']} записей"""
+    else:
+        text = "✅ Дубликатов в избранном не найдено!"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -14179,7 +14332,8 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         await query.edit_message_text(get_text("analyzing", lang))
         matches = await get_matches(days=7)
         if matches:
-            recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
+            user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+            recs = await get_recommendations_enhanced(matches, "", user, lang=lang, user_tz=user_tz)
             keyboard = []
             bet_btn = get_bet_button(user_id, lang)
             if bet_btn:
@@ -15082,7 +15236,8 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             matches = await get_matches(context_type, days=14)
 
         if matches:
-            recs = await get_recommendations_enhanced(matches, "", user, lang=lang)
+            user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+            recs = await get_recommendations_enhanced(matches, "", user, lang=lang, user_tz=user_tz)
             keyboard = []
             bet_btn = get_bet_button(user_id, lang)
             if bet_btn:
@@ -15396,7 +15551,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not matches:
             await status.edit_text(get_text("no_matches", lang))
             return
-        recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang)
+        user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
+        recs = await get_recommendations_enhanced(matches, user_text, user, league, lang=lang, user_tz=user_tz)
         if recs:
             keyboard = []
             bet_btn = get_bet_button(user_id, lang)
@@ -15643,8 +15799,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         league_code = ml_features.get("league_code") if ml_features else None
 
         # Save MAIN prediction (bet_rank=1) with ML features
+        match_time = match.get("utcDate") if match else None
         save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
-                        ml_features=ml_features, bet_rank=1, league_code=league_code)
+                        ml_features=ml_features, bet_rank=1, league_code=league_code, match_time=match_time)
         increment_daily_usage(user_id)
         logger.info(f"Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%, odds={odds_value}, league={league_code}")
 
@@ -15674,7 +15831,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 alt_conf = adjusted_alt_conf
 
             save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
-                            ml_features=ml_features, bet_rank=bet_rank, league_code=league_code)
+                            ml_features=ml_features, bet_rank=bet_rank, league_code=league_code, match_time=match_time)
             logger.info(f"Saved ALT{alt_idx+1}: {home} vs {away}, {alt_type}, {alt_conf}%, odds={alt_odds}")
 
     except Exception as e:
@@ -16345,7 +16502,8 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         match_id = match.get("id")
         comp = match.get("competition", {}).get("name", "?")
         comp_code = match.get("competition", {}).get("code", "")
-        match_time = match.get("utcDate", "")[:16].replace("T", " ")
+        match_utc_date = match.get("utcDate", "")  # Full ISO format for DB
+        match_time = match_utc_date[:16].replace("T", " ") if match_utc_date else ""  # Display format
 
         try:
             # Run full analysis with ML features
@@ -16422,7 +16580,7 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # === SAVE MAIN PREDICTION ===
                 try:
                     save_prediction(user_id, match_id, home, away, bet_type, confidence, odds_value,
-                                    ml_features=ml_features, bet_rank=1, league_code=league_code)
+                                    ml_features=ml_features, bet_rank=1, league_code=league_code, match_time=match_utc_date)
                     results["main_saved"] += 1
                     logger.info(f"[BATCH] Saved MAIN: {home} vs {away}, {bet_type}, {confidence}%")
                 except Exception as e:
@@ -16436,7 +16594,7 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         bet_rank = alt_idx + 2
                         save_prediction(user_id, match_id, home, away, alt_type, alt_conf, alt_odds,
-                                        ml_features=ml_features, bet_rank=bet_rank, league_code=league_code)
+                                        ml_features=ml_features, bet_rank=bet_rank, league_code=league_code, match_time=match_utc_date)
                         results["alts_saved"] += 1
                     except Exception as e:
                         logger.error(f"[BATCH] Error saving alt: {e}")
@@ -16764,6 +16922,7 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                     try:
                         user_data = get_user(user_id)
                         lang = user_data.get("language", "ru") if user_data else "ru"
+                        user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
 
                         # Get localized reason
                         reason_key = f"reason_{lang}"
@@ -16776,12 +16935,15 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                         elif ml_status == "adjusted":
                             ml_indicator = f"\n📊 ML: {original_conf}% → {confidence}%"
 
+                        # Format match datetime for user's timezone
+                        match_dt_str = format_match_datetime(match_date_str, user_tz, lang) if match_date_str else ""
+
                         # Build localized alert message
                         alert_msg = f"""{get_text("live_alert_title", lang)}
 
 ⚽ **{home}** vs **{away}**
 🏆 {comp}
-⏰ {get_text("in_hours", lang).format(hours="1-3")}
+{match_dt_str}
 
 {get_text("bet", lang)} {bet_type}
 {get_text("confidence", lang)} {confidence}%{ml_indicator}
@@ -16805,7 +16967,7 @@ If no good bet exists (low confidence OR odds too low), respond: {{"alert": fals
                         if match_id:
                             league_code = ml_features.get("league_code") if ml_features else None
                             save_prediction(0, match_id, home, away, bet_type, confidence, odds_val,
-                                            ml_features=ml_features, bet_rank=1, league_code=league_code)
+                                            ml_features=ml_features, bet_rank=1, league_code=league_code, match_time=match_date_str)
                             logger.info(f"Live alert saved to BOT stats: {home} vs {away}, {bet_type}, league={league_code}")
                     except Exception as e:
                         logger.error(f"Failed to send to {user_id}: {e}")
@@ -18316,7 +18478,8 @@ async def send_daily_digest(context: ContextTypes.DEFAULT_TYPE):
     if not matches:
         return
 
-    recs = await get_recommendations_enhanced(matches, "daily digest")
+    # Use Moscow timezone for digest (most common user timezone)
+    recs = await get_recommendations_enhanced(matches, "daily digest", user_tz="Europe/Moscow")
 
     if not recs:
         return
@@ -18549,20 +18712,16 @@ async def send_morning_alert(context: ContextTypes.DEFAULT_TYPE):
 
         is_big = any(t in home or t in away for t in big_teams)
         if is_big or main_match is None:
-            try:
-                match_time = datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
-                main_match = {
-                    "home": home,
-                    "away": away,
-                    "time": match_time.strftime("%H:%M")
-                }
-                if is_big:
-                    break
-            except:
-                pass
+            main_match = {
+                "home": home,
+                "away": away,
+                "utc_date": utc_date  # Store for datetime formatting
+            }
+            if is_big:
+                break
 
     if not main_match:
-        main_match = {"home": "Top Team", "away": "Top Team", "time": "21:00"}
+        main_match = {"home": "Top Team", "away": "Top Team", "utc_date": ""}
 
     # Get all users
     try:
@@ -18583,9 +18742,17 @@ async def send_morning_alert(context: ContextTypes.DEFAULT_TYPE):
             continue
 
         try:
+            # Get user's timezone
+            user_data = get_user(user_id)
+            user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
+
+            # Format match datetime for user's timezone
+            match_dt_str = format_match_datetime(main_match.get("utc_date", ""), user_tz, lang)
+
             text = f"{get_text('morning_alert_title', lang).format(count=match_count)}\n\n"
             text += f"{get_text('morning_main_match', lang)}\n"
-            text += f"**{main_match['home']}** vs **{main_match['away']}** ({main_match['time']})\n\n"
+            text += f"**{main_match['home']}** vs **{main_match['away']}**\n"
+            text += f"{match_dt_str}\n\n" if match_dt_str else "\n"
             text += f"{get_text('morning_cta', lang)}"
 
             keyboard = [
@@ -18785,7 +18952,8 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
                     "home": home,
                     "away": away,
                     "hours": int(hours_until),
-                    "match_id": m.get("id")
+                    "match_id": m.get("id"),
+                    "utc_date": utc_date  # Store for datetime formatting
                 })
         except:
             continue
@@ -18802,14 +18970,18 @@ async def send_hot_match_alerts(context: ContextTypes.DEFAULT_TYPE):
         try:
             user_data = get_user(user_id)
             lang = user_data.get("language", "ru") if user_data else "ru"
+            user_tz = user_data.get("timezone", "Europe/Moscow") if user_data else "Europe/Moscow"
 
             for match in hot_matches[:1]:  # Only one match per cycle
                 if not should_send_notification(user_id, f"hot_match_{match['match_id']}", cooldown_hours=6):
                     continue
 
+                # Format match datetime for user's timezone
+                match_dt_str = format_match_datetime(match.get("utc_date", ""), user_tz, lang)
+
                 text = f"{get_text('hot_match_title', lang)}\n\n"
                 text += f"**{match['home']}** vs **{match['away']}**\n"
-                text += f"{get_text('hot_match_starts', lang).format(hours=match['hours'])}\n"
+                text += f"{match_dt_str}\n" if match_dt_str else ""
                 text += f"{get_text('hot_match_confidence', lang).format(percent=75)}\n\n"
                 text += f"{get_text('hot_match_cta', lang)}"
 
@@ -19841,6 +20013,7 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_cmd))
     app.add_handler(CommandHandler("addpremium", addpremium_cmd))
     app.add_handler(CommandHandler("removepremium", removepremium_cmd))
+    app.add_handler(CommandHandler("cleanfavs", cleanfavs_cmd))  # Clean duplicate favorites
     app.add_handler(CommandHandler("userinfo", userinfo_cmd))
     app.add_handler(CommandHandler("mlstatus", mlstatus_cmd))
     app.add_handler(CommandHandler("mltrain", mltrain_cmd))
@@ -19864,7 +20037,7 @@ def main():
     job_queue = app.job_queue
     job_queue.run_repeating(check_live_matches, interval=600, first=120)
     job_queue.run_repeating(send_daily_digest, interval=7200, first=300)
-    job_queue.run_repeating(check_predictions_results, interval=1200, first=300)  # Every 20 min
+    job_queue.run_repeating(check_predictions_results, interval=600, first=180)  # Every 10 min (was 20)
     job_queue.run_repeating(track_upcoming_odds, interval=1800, first=300)  # Every 30 min - track odds for line movements
     job_queue.run_repeating(update_key_players_job, interval=43200, first=600)  # Every 12 hours - update player impact DB
     job_queue.run_repeating(train_ensemble_models_job, interval=86400, first=900)  # Every 24 hours - train ensemble ML
