@@ -12000,6 +12000,22 @@ FORMAT:
 
 # ===== TELEGRAM HANDLERS =====
 
+async def myid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user's Telegram ID - useful for admin setup"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "N/A"
+
+    text = f"""🆔 **Твой Telegram ID:**
+`{user_id}`
+
+👤 Username: @{username}
+
+📋 Скопируй ID и добавь в ADMIN_IDS переменную окружения,
+или в config.py для админских команд."""
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command - first launch with language selection or regular menu"""
     user = update.effective_user
@@ -19459,6 +19475,7 @@ def main():
     
     # Commands
     app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("myid", myid_cmd))  # Get Telegram user ID
     app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("recommend", recommend_cmd))
