@@ -1767,7 +1767,40 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    # Run migrations for existing databases
+    migrate_database()
+
     logger.info("Database initialized")
+
+
+def migrate_database():
+    """Add missing columns to existing tables (for database upgrades)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Check and add missing columns to player_stats table
+    player_stats_columns = [
+        ("goals_vs_top6", "INTEGER DEFAULT 0"),
+        ("goals_vs_mid", "INTEGER DEFAULT 0"),
+        ("goals_vs_bottom6", "INTEGER DEFAULT 0"),
+        ("games_vs_top6", "INTEGER DEFAULT 0"),
+        ("games_vs_mid", "INTEGER DEFAULT 0"),
+        ("games_vs_bottom6", "INTEGER DEFAULT 0"),
+        ("is_big_game_player", "BOOLEAN DEFAULT 0"),
+        ("is_flat_track_bully", "BOOLEAN DEFAULT 0"),
+    ]
+
+    for col_name, col_type in player_stats_columns:
+        try:
+            c.execute(f"ALTER TABLE player_stats ADD COLUMN {col_name} {col_type}")
+            logger.info(f"Added column {col_name} to player_stats")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    conn.commit()
+    conn.close()
+
 
 def get_user(user_id):
     """Get user settings"""
@@ -16363,10 +16396,17 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Update progress every 5 matches
         if (i + 1) % 5 == 0 or i == total - 1:
             pct = int((i + 1) / total * 100)
+            # Escape team names for Telegram
+            home_safe = home.replace("_", " ").replace("*", "")[:30]
+            away_safe = away.replace("_", " ").replace("*", "")[:30]
             try:
-                await progress_msg.edit_text(f"⏳ Прогресс: {pct}% ({i+1}/{total})\n├ Сохранено: {results['main_saved']} main + {results['alts_saved']} alts\n└ Последний: {home} vs {away}")
-            except:
-                pass
+                await progress_msg.edit_text(
+                    f"⏳ Прогресс: {pct}% ({i+1}/{total})\n"
+                    f"├ Сохранено: {results['main_saved']} main + {results['alts_saved']} alts\n"
+                    f"└ Последний: {home_safe} vs {away_safe}"
+                )
+            except Exception as e:
+                logger.warning(f"Progress update failed: {e}")
 
         # Delay between analyses to avoid rate limiting
         if i < total - 1:
@@ -17183,6 +17223,256 @@ def generate_result_explanation(bet_type: str, home_score: int, away_score: int,
     return result.strip()
 
 
+# Result explanation translations for user-facing messages
+RESULT_TRANSLATIONS = {
+    "ru": {
+        # Headers
+        "smart_analysis": "💡 **Умный анализ результата:**",
+        "why_hit": "✅ Почему зашло:",
+        "why_missed": "❌ Почему не зашло:",
+        # Totals
+        "expected_goals": "📊 Ожидаемые голы: {expected} | Реально: {actual}",
+        "high_scoring": "🔥 Голевой матч! {home} и {away} устроили перестрелку",
+        "both_good_form": "📈 Обе команды в хорошей форме — атакующий футбол",
+        "xg_confirmed": "🎯 xG подтвердил: высокий потенциал голов",
+        "one_goal_short": "😤 Не хватило всего 1 гола! Близко, но не зашло",
+        "injuries_attack": "🏥 Травмы ключевых игроков повлияли на атаку",
+        "xg_misled": "📉 xG обманул: ожидали {expected}, получили {actual}",
+        "closed_match": "🔒 Закрытый матч, команды играли на результат",
+        "top_teams_careful": "🏆 Топ-команды часто играют аккуратно друг с другом",
+        "unexpected_goals": "💥 Неожиданная перестрелка! {total} голов",
+        "stats_missed": "⚠️ Статистика не учла мотивацию/форму в этом матче",
+        # Match result
+        "positions": "📊 Позиции: {home} #{pos1} vs {away} #{pos2}",
+        "form": "📈 Форма: {home} {form1}% | {away} {form2}%",
+        "home_form_won": "✅ Форма хозяев была выше — логичная победа",
+        "class_difference": "✅ Разница в классе команд сработала",
+        "h2h_confirmed": "✅ H2H в пользу хозяев подтвердился",
+        "away_form_risk": "⚠️ Форма гостей ({form}%) была выше — это был риск",
+        "away_surprised": "😮 {team} удивили — выиграли на выезде вопреки статистике",
+        "draw_could_not": "🤝 {team} не смогли дожать — ничья {score}",
+        "draw_vs_top": "⚠️ Против топ-команды ничья — нормальный результат",
+        "away_form_won": "✅ Форма гостей была выше — заслуженная победа",
+        "away_class_won": "✅ Класс гостей оказался решающим",
+        "home_factor": "🏠 Домашний фактор сработал для {team}",
+        "away_no_realize": "🤝 {team} не реализовали преимущество",
+        "equal_teams_draw": "✅ Равные по силе команды — логичная ничья",
+        "close_positions_draw": "✅ Близкие позиции в таблице = ничейный результат",
+        "winner_stronger": "🏆 {team} оказались сильнее в этот день",
+        # BTTS
+        "btts_both_scored": "⚽ {home}: {goals1} гол(а) | {away}: {goals2} гол(а)",
+        "btts_stats_confirmed": "✅ Обе команды результативны — статистика подтвердилась",
+        "btts_no_goal": "🚫 {team} не забили — атака не сработала",
+        "btts_injuries": "🏥 Травмы атакующих игроков повлияли",
+        "btts_away_no_goal": "🚫 {team} не забили на выезде",
+        # Double chance
+        "dc_safety_worked": "✅ Страховка сработала — безопасная ставка зашла",
+        "dc_even_failed": "😱 Даже двойной шанс не спас — редкий случай",
+        # Scorers/Injuries
+        "goals_team": "⚽ Голы {team}: {scorers}",
+        "injury_impact": "🏥 У {team} серьёзные потери из-за травм ({impact}% влияние)",
+        # Claude analysis
+        "claude_analysis": "💡 **Анализ результата:**",
+        "goals_label": "⚽ Голы",
+        # Defaults
+        "home_default": "Хозяева",
+        "away_default": "Гости",
+    },
+    "en": {
+        "smart_analysis": "💡 **Smart Result Analysis:**",
+        "why_hit": "✅ Why it hit:",
+        "why_missed": "❌ Why it missed:",
+        "expected_goals": "📊 Expected goals: {expected} | Actual: {actual}",
+        "high_scoring": "🔥 High-scoring match! {home} and {away} traded blows",
+        "both_good_form": "📈 Both teams in good form — attacking football",
+        "xg_confirmed": "🎯 xG confirmed: high goal potential",
+        "one_goal_short": "😤 Just 1 goal short! Close but no cigar",
+        "injuries_attack": "🏥 Key player injuries affected attack",
+        "xg_misled": "📉 xG misleading: expected {expected}, got {actual}",
+        "closed_match": "🔒 Closed match, teams played for result",
+        "top_teams_careful": "🏆 Top teams often play cautiously against each other",
+        "unexpected_goals": "💥 Unexpected goal fest! {total} goals",
+        "stats_missed": "⚠️ Stats missed motivation/form factor in this match",
+        "positions": "📊 Positions: {home} #{pos1} vs {away} #{pos2}",
+        "form": "📈 Form: {home} {form1}% | {away} {form2}%",
+        "home_form_won": "✅ Home team's form was higher — logical win",
+        "class_difference": "✅ Class difference between teams paid off",
+        "h2h_confirmed": "✅ H2H advantage for home team confirmed",
+        "away_form_risk": "⚠️ Away form ({form}%) was higher — this was risky",
+        "away_surprised": "😮 {team} surprised — won away against the odds",
+        "draw_could_not": "🤝 {team} couldn't close it out — draw {score}",
+        "draw_vs_top": "⚠️ Draw vs top team — normal result",
+        "away_form_won": "✅ Away form was higher — deserved win",
+        "away_class_won": "✅ Away team's class was decisive",
+        "home_factor": "🏠 Home advantage worked for {team}",
+        "away_no_realize": "🤝 {team} failed to capitalize",
+        "equal_teams_draw": "✅ Equal teams — logical draw",
+        "close_positions_draw": "✅ Close table positions = draw result",
+        "winner_stronger": "🏆 {team} were stronger on the day",
+        "btts_both_scored": "⚽ {home}: {goals1} goal(s) | {away}: {goals2} goal(s)",
+        "btts_stats_confirmed": "✅ Both teams prolific — stats confirmed",
+        "btts_no_goal": "🚫 {team} failed to score — attack misfired",
+        "btts_injuries": "🏥 Attacking player injuries had impact",
+        "btts_away_no_goal": "🚫 {team} blanked away from home",
+        "dc_safety_worked": "✅ Safety bet paid off",
+        "dc_even_failed": "😱 Even double chance couldn't save it — rare case",
+        "goals_team": "⚽ {team} goals: {scorers}",
+        "injury_impact": "🏥 {team} had significant injury losses ({impact}% impact)",
+        "claude_analysis": "💡 **Result Analysis:**",
+        "goals_label": "⚽ Goals",
+        "home_default": "Home",
+        "away_default": "Away",
+    },
+    "pt": {
+        "smart_analysis": "💡 **Análise Inteligente:**",
+        "why_hit": "✅ Por que acertou:",
+        "why_missed": "❌ Por que errou:",
+        "expected_goals": "📊 Gols esperados: {expected} | Real: {actual}",
+        "high_scoring": "🔥 Jogo de muitos gols! {home} e {away} fizeram uma batalha",
+        "both_good_form": "📈 Ambas equipes em boa forma — futebol ofensivo",
+        "xg_confirmed": "🎯 xG confirmou: alto potencial de gols",
+        "one_goal_short": "😤 Faltou só 1 gol! Perto mas não deu",
+        "injuries_attack": "🏥 Lesões de jogadores-chave afetaram o ataque",
+        "xg_misled": "📉 xG enganou: esperava {expected}, teve {actual}",
+        "closed_match": "🔒 Jogo fechado, equipes jogaram pelo resultado",
+        "top_teams_careful": "🏆 Times de topo costumam jogar com cuidado entre si",
+        "unexpected_goals": "💥 Festival de gols inesperado! {total} gols",
+        "stats_missed": "⚠️ Estatísticas não capturaram motivação/forma neste jogo",
+        "positions": "📊 Posições: {home} #{pos1} vs {away} #{pos2}",
+        "form": "📈 Forma: {home} {form1}% | {away} {form2}%",
+        "home_form_won": "✅ Forma do mandante era melhor — vitória lógica",
+        "class_difference": "✅ Diferença de qualidade entre equipes funcionou",
+        "h2h_confirmed": "✅ H2H favorável ao mandante confirmado",
+        "away_form_risk": "⚠️ Forma visitante ({form}%) era melhor — foi arriscado",
+        "away_surprised": "😮 {team} surpreendeu — venceu fora contra as probabilidades",
+        "draw_could_not": "🤝 {team} não conseguiu fechar — empate {score}",
+        "draw_vs_top": "⚠️ Empate contra time de topo — resultado normal",
+        "away_form_won": "✅ Forma visitante era melhor — vitória merecida",
+        "away_class_won": "✅ Qualidade do visitante foi decisiva",
+        "home_factor": "🏠 Fator casa funcionou para {team}",
+        "away_no_realize": "🤝 {team} não aproveitou a vantagem",
+        "equal_teams_draw": "✅ Times iguais — empate lógico",
+        "close_positions_draw": "✅ Posições próximas na tabela = resultado de empate",
+        "winner_stronger": "🏆 {team} foi mais forte no dia",
+        "btts_both_scored": "⚽ {home}: {goals1} gol(s) | {away}: {goals2} gol(s)",
+        "btts_stats_confirmed": "✅ Ambos times produtivos — estatísticas confirmadas",
+        "btts_no_goal": "🚫 {team} não marcou — ataque falhou",
+        "btts_injuries": "🏥 Lesões de atacantes tiveram impacto",
+        "btts_away_no_goal": "🚫 {team} não marcou fora de casa",
+        "dc_safety_worked": "✅ Aposta segura funcionou",
+        "dc_even_failed": "😱 Nem chance dupla salvou — caso raro",
+        "goals_team": "⚽ Gols {team}: {scorers}",
+        "injury_impact": "🏥 {team} teve perdas significativas por lesões ({impact}% impacto)",
+        "claude_analysis": "💡 **Análise do Resultado:**",
+        "goals_label": "⚽ Gols",
+        "home_default": "Mandante",
+        "away_default": "Visitante",
+    },
+    "es": {
+        "smart_analysis": "💡 **Análisis Inteligente:**",
+        "why_hit": "✅ Por qué acertó:",
+        "why_missed": "❌ Por qué falló:",
+        "expected_goals": "📊 Goles esperados: {expected} | Real: {actual}",
+        "high_scoring": "🔥 ¡Partido de muchos goles! {home} y {away} se enfrentaron",
+        "both_good_form": "📈 Ambos equipos en buena forma — fútbol ofensivo",
+        "xg_confirmed": "🎯 xG confirmó: alto potencial de goles",
+        "one_goal_short": "😤 ¡Faltó solo 1 gol! Cerca pero no alcanzó",
+        "injuries_attack": "🏥 Lesiones de jugadores clave afectaron el ataque",
+        "xg_misled": "📉 xG engañó: esperaba {expected}, obtuvo {actual}",
+        "closed_match": "🔒 Partido cerrado, equipos jugaron por el resultado",
+        "top_teams_careful": "🏆 Los equipos top suelen jugar con cuidado entre sí",
+        "unexpected_goals": "💥 ¡Festival de goles inesperado! {total} goles",
+        "stats_missed": "⚠️ Las estadísticas no capturaron la motivación/forma",
+        "positions": "📊 Posiciones: {home} #{pos1} vs {away} #{pos2}",
+        "form": "📈 Forma: {home} {form1}% | {away} {form2}%",
+        "home_form_won": "✅ La forma del local era mejor — victoria lógica",
+        "class_difference": "✅ La diferencia de clase entre equipos funcionó",
+        "h2h_confirmed": "✅ H2H favorable al local confirmado",
+        "away_form_risk": "⚠️ Forma visitante ({form}%) era mejor — fue arriesgado",
+        "away_surprised": "😮 {team} sorprendió — ganó fuera contra todo pronóstico",
+        "draw_could_not": "🤝 {team} no pudo cerrar — empate {score}",
+        "draw_vs_top": "⚠️ Empate contra equipo top — resultado normal",
+        "away_form_won": "✅ Forma visitante era mejor — victoria merecida",
+        "away_class_won": "✅ La clase del visitante fue decisiva",
+        "home_factor": "🏠 El factor local funcionó para {team}",
+        "away_no_realize": "🤝 {team} no aprovechó la ventaja",
+        "equal_teams_draw": "✅ Equipos iguales — empate lógico",
+        "close_positions_draw": "✅ Posiciones cercanas en la tabla = empate",
+        "winner_stronger": "🏆 {team} fue más fuerte en el día",
+        "btts_both_scored": "⚽ {home}: {goals1} gol(es) | {away}: {goals2} gol(es)",
+        "btts_stats_confirmed": "✅ Ambos equipos productivos — estadísticas confirmadas",
+        "btts_no_goal": "🚫 {team} no marcó — el ataque falló",
+        "btts_injuries": "🏥 Las lesiones de atacantes tuvieron impacto",
+        "btts_away_no_goal": "🚫 {team} no marcó de visitante",
+        "dc_safety_worked": "✅ La apuesta segura funcionó",
+        "dc_even_failed": "😱 Ni la doble oportunidad salvó — caso raro",
+        "goals_team": "⚽ Goles {team}: {scorers}",
+        "injury_impact": "🏥 {team} tuvo pérdidas significativas por lesiones ({impact}% impacto)",
+        "claude_analysis": "💡 **Análisis del Resultado:**",
+        "goals_label": "⚽ Goles",
+        "home_default": "Local",
+        "away_default": "Visitante",
+    },
+    "id": {
+        "smart_analysis": "💡 **Analisis Cerdas:**",
+        "why_hit": "✅ Mengapa tepat:",
+        "why_missed": "❌ Mengapa meleset:",
+        "expected_goals": "📊 Gol diharapkan: {expected} | Aktual: {actual}",
+        "high_scoring": "🔥 Pertandingan banyak gol! {home} dan {away} saling serang",
+        "both_good_form": "📈 Kedua tim dalam form bagus — sepakbola menyerang",
+        "xg_confirmed": "🎯 xG mengkonfirmasi: potensi gol tinggi",
+        "one_goal_short": "😤 Kurang 1 gol saja! Dekat tapi tidak masuk",
+        "injuries_attack": "🏥 Cedera pemain kunci mempengaruhi serangan",
+        "xg_misled": "📉 xG menyesatkan: diharapkan {expected}, dapat {actual}",
+        "closed_match": "🔒 Pertandingan tertutup, tim bermain untuk hasil",
+        "top_teams_careful": "🏆 Tim top sering bermain hati-hati satu sama lain",
+        "unexpected_goals": "💥 Festival gol tak terduga! {total} gol",
+        "stats_missed": "⚠️ Statistik tidak menangkap motivasi/form di pertandingan ini",
+        "positions": "📊 Posisi: {home} #{pos1} vs {away} #{pos2}",
+        "form": "📈 Form: {home} {form1}% | {away} {form2}%",
+        "home_form_won": "✅ Form tuan rumah lebih tinggi — kemenangan logis",
+        "class_difference": "✅ Perbedaan kelas antar tim berhasil",
+        "h2h_confirmed": "✅ H2H menguntungkan tuan rumah terkonfirmasi",
+        "away_form_risk": "⚠️ Form tamu ({form}%) lebih tinggi — ini berisiko",
+        "away_surprised": "😮 {team} mengejutkan — menang tandang melawan odds",
+        "draw_could_not": "🤝 {team} tidak bisa menutup — seri {score}",
+        "draw_vs_top": "⚠️ Seri lawan tim top — hasil normal",
+        "away_form_won": "✅ Form tamu lebih tinggi — kemenangan layak",
+        "away_class_won": "✅ Kelas tim tamu yang menentukan",
+        "home_factor": "🏠 Keuntungan kandang bekerja untuk {team}",
+        "away_no_realize": "🤝 {team} gagal memanfaatkan",
+        "equal_teams_draw": "✅ Tim setara — seri logis",
+        "close_positions_draw": "✅ Posisi klasemen dekat = hasil seri",
+        "winner_stronger": "🏆 {team} lebih kuat hari ini",
+        "btts_both_scored": "⚽ {home}: {goals1} gol | {away}: {goals2} gol",
+        "btts_stats_confirmed": "✅ Kedua tim produktif — statistik terkonfirmasi",
+        "btts_no_goal": "🚫 {team} gagal mencetak gol — serangan meleset",
+        "btts_injuries": "🏥 Cedera penyerang berdampak",
+        "btts_away_no_goal": "🚫 {team} tidak mencetak gol di kandang lawan",
+        "dc_safety_worked": "✅ Taruhan aman berhasil",
+        "dc_even_failed": "😱 Bahkan peluang ganda tidak bisa menyelamatkan — kasus langka",
+        "goals_team": "⚽ Gol {team}: {scorers}",
+        "injury_impact": "🏥 {team} mengalami kerugian signifikan karena cedera ({impact}% dampak)",
+        "claude_analysis": "💡 **Analisis Hasil:**",
+        "goals_label": "⚽ Gol",
+        "home_default": "Tuan Rumah",
+        "away_default": "Tamu",
+    }
+}
+
+
+def get_result_text(key: str, lang: str = "ru", **kwargs) -> str:
+    """Get translated result explanation text with formatting"""
+    translations = RESULT_TRANSLATIONS.get(lang, RESULT_TRANSLATIONS.get("en", RESULT_TRANSLATIONS["ru"]))
+    text = translations.get(key, RESULT_TRANSLATIONS["ru"].get(key, key))
+    if kwargs:
+        try:
+            return text.format(**kwargs)
+        except KeyError:
+            return text
+    return text
+
+
 async def generate_smart_result_explanation(
     prediction_id: int,
     match_data: dict,
@@ -17206,8 +17496,8 @@ async def generate_smart_result_explanation(
     try:
         home_team = match_data.get("homeTeam", {}).get("name", "")
         away_team = match_data.get("awayTeam", {}).get("name", "")
-        home_short = home_team.split()[-1] if home_team else "Хозяева"
-        away_short = away_team.split()[-1] if away_team else "Гости"
+        home_short = home_team.split()[-1] if home_team else get_result_text("home_default", lang)
+        away_short = away_team.split()[-1] if away_team else get_result_text("away_default", lang)
         total_goals = home_score + away_score
         score_str = f"{home_score}:{away_score}"
 
@@ -17274,18 +17564,9 @@ async def generate_smart_result_explanation(
         # === 4. BUILD SMART ANALYSIS ===
         insights = []
 
-        # Multilingual headers
-        headers = {
-            "ru": ("💡 **Умный анализ результата:**", "✅ Почему зашло:", "❌ Почему не зашло:"),
-            "en": ("💡 **Smart Result Analysis:**", "✅ Why it hit:", "❌ Why it missed:"),
-            "pt": ("💡 **Análise Inteligente:**", "✅ Por que acertou:", "❌ Por que errou:"),
-            "es": ("💡 **Análisis Inteligente:**", "✅ Por qué acertó:", "❌ Por qué falló:"),
-            "id": ("💡 **Analisis Cerdas:**", "✅ Mengapa tepat:", "❌ Mengapa meleset:")
-        }
-
-        h = headers.get(lang, headers["en"])
-        main_header = h[0]
-        why_header = h[1] if is_correct else h[2]
+        # Use translated headers
+        main_header = get_result_text("smart_analysis", lang)
+        why_header = get_result_text("why_hit" if is_correct else "why_missed", lang)
 
         bet_lower = bet_type.lower()
 
@@ -17294,46 +17575,34 @@ async def generate_smart_result_explanation(
             is_over = "тб" in bet_lower or "over" in bet_lower
             expected_goals = home_xg + away_xg if (home_xg > 0 or away_xg > 0) else home_goals_avg + away_goals_avg
 
-            if lang == "ru":
-                insights.append(f"📊 Ожидаемые голы: {expected_goals:.1f} | Реально: {total_goals}")
+            insights.append(get_result_text("expected_goals", lang, expected=f"{expected_goals:.1f}", actual=total_goals))
 
-                if is_over and is_correct:
-                    if total_goals >= 4:
-                        insights.append(f"🔥 Голевой матч! {home_short} и {away_short} устроили перестрелку")
-                    elif home_form > 60 and away_form > 60:
-                        insights.append("📈 Обе команды в хорошей форме — атакующий футбол")
-                    if home_xg > 1.5 or away_xg > 1.5:
-                        insights.append(f"🎯 xG подтвердил: высокий потенциал голов")
+            if is_over and is_correct:
+                if total_goals >= 4:
+                    insights.append(get_result_text("high_scoring", lang, home=home_short, away=away_short))
+                elif home_form > 60 and away_form > 60:
+                    insights.append(get_result_text("both_good_form", lang))
+                if home_xg > 1.5 or away_xg > 1.5:
+                    insights.append(get_result_text("xg_confirmed", lang))
 
-                elif is_over and not is_correct:
-                    if total_goals == 2:
-                        insights.append("😤 Не хватило всего 1 гола! Близко, но не зашло")
-                    if home_injured_impact > 20 or away_injured_impact > 20:
-                        insights.append("🏥 Травмы ключевых игроков повлияли на атаку")
-                    if expected_goals > 2.5 and total_goals <= 2:
-                        insights.append(f"📉 xG обманул: ожидали {expected_goals:.1f}, получили {total_goals}")
+            elif is_over and not is_correct:
+                if total_goals == 2:
+                    insights.append(get_result_text("one_goal_short", lang))
+                if home_injured_impact > 20 or away_injured_impact > 20:
+                    insights.append(get_result_text("injuries_attack", lang))
+                if expected_goals > 2.5 and total_goals <= 2:
+                    insights.append(get_result_text("xg_misled", lang, expected=f"{expected_goals:.1f}", actual=total_goals))
 
-                elif not is_over and is_correct:
-                    if total_goals <= 1:
-                        insights.append("🔒 Закрытый матч, команды играли на результат")
-                    if home_pos <= 5 or away_pos <= 5:
-                        insights.append("🏆 Топ-команды часто играют аккуратно друг с другом")
+            elif not is_over and is_correct:
+                if total_goals <= 1:
+                    insights.append(get_result_text("closed_match", lang))
+                if home_pos <= 5 or away_pos <= 5:
+                    insights.append(get_result_text("top_teams_careful", lang))
 
-                elif not is_over and not is_correct:
-                    if total_goals >= 4:
-                        insights.append(f"💥 Неожиданная перестрелка! {total_goals} голов")
-                    insights.append("⚠️ Статистика не учла мотивацию/форму в этом матче")
-            else:
-                # English fallback
-                insights.append(f"📊 Expected goals: {expected_goals:.1f} | Actual: {total_goals}")
-                if is_over and is_correct:
-                    insights.append("🔥 High-scoring match as predicted")
-                elif is_over and not is_correct:
-                    insights.append("📉 Lower than expected scoring")
-                elif not is_over and is_correct:
-                    insights.append("🔒 Defensive match as expected")
-                else:
-                    insights.append("💥 Unexpected goal fest")
+            elif not is_over and not is_correct:
+                if total_goals >= 4:
+                    insights.append(get_result_text("unexpected_goals", lang, total=total_goals))
+                insights.append(get_result_text("stats_missed", lang))
 
         # --- MATCH RESULT ANALYSIS (П1, П2, X) ---
         elif "п1" in bet_lower or bet_type == "1" or "п2" in bet_lower or bet_type == "2" or "ничья" in bet_lower or bet_lower in ["х", "x"]:
@@ -17341,118 +17610,94 @@ async def generate_smart_result_explanation(
             away_won = away_score > home_score
             draw = home_score == away_score
 
-            if lang == "ru":
-                insights.append(f"📊 Позиции: {home_short} #{home_pos} vs {away_short} #{away_pos}")
-                insights.append(f"📈 Форма: {home_short} {home_form}% | {away_short} {away_form}%")
+            # Only show positions/form if we have real data (not defaults)
+            has_real_data = (home_pos != 10 or away_pos != 10) and (home_form != 50 or away_form != 50)
+            if has_real_data:
+                if home_pos != 10 or away_pos != 10:
+                    insights.append(get_result_text("positions", lang, home=home_short, away=away_short, pos1=home_pos, pos2=away_pos))
+                if home_form != 50 or away_form != 50:
+                    insights.append(get_result_text("form", lang, home=home_short, away=away_short, form1=home_form, form2=away_form))
 
-                # П1 analysis
-                if "п1" in bet_lower or bet_type == "1":
-                    if is_correct:
-                        if home_form > away_form:
-                            insights.append("✅ Форма хозяев была выше — логичная победа")
-                        if home_pos < away_pos:
-                            insights.append("✅ Разница в классе команд сработала")
-                        if h2h_home_wins > h2h_away_wins:
-                            insights.append(f"✅ H2H в пользу хозяев подтвердился")
-                    else:
-                        if away_won:
-                            if away_form > home_form:
-                                insights.append(f"⚠️ Форма гостей ({away_form}%) была выше — это был риск")
-                            else:
-                                insights.append(f"😮 {away_short} удивили — выиграли на выезде вопреки статистике")
-                        elif draw:
-                            insights.append(f"🤝 {home_short} не смогли дожать — ничья {score_str}")
-                            if away_pos <= 6:
-                                insights.append("⚠️ Против топ-команды ничья — нормальный результат")
-
-                # П2 analysis
-                elif "п2" in bet_lower or bet_type == "2":
-                    if is_correct:
+            # П1 analysis
+            if "п1" in bet_lower or bet_type == "1":
+                if is_correct:
+                    if home_form > away_form:
+                        insights.append(get_result_text("home_form_won", lang))
+                    if home_pos < away_pos:
+                        insights.append(get_result_text("class_difference", lang))
+                    if h2h_home_wins > h2h_away_wins:
+                        insights.append(get_result_text("h2h_confirmed", lang))
+                else:
+                    if away_won:
                         if away_form > home_form:
-                            insights.append("✅ Форма гостей была выше — заслуженная победа")
-                        if away_pos < home_pos:
-                            insights.append("✅ Класс гостей оказался решающим")
-                    else:
-                        if home_won:
-                            insights.append(f"🏠 Домашний фактор сработал для {home_short}")
-                        elif draw:
-                            insights.append(f"🤝 {away_short} не реализовали преимущество")
+                            insights.append(get_result_text("away_form_risk", lang, form=away_form))
+                        else:
+                            insights.append(get_result_text("away_surprised", lang, team=away_short))
+                    elif draw:
+                        insights.append(get_result_text("draw_could_not", lang, team=home_short, score=score_str))
+                        if away_pos <= 6:
+                            insights.append(get_result_text("draw_vs_top", lang))
 
-                # Draw analysis
-                elif "ничья" in bet_lower or bet_lower in ["х", "x"]:
-                    if is_correct:
-                        if abs(home_form - away_form) < 15:
-                            insights.append("✅ Равные по силе команды — логичная ничья")
-                        if abs(home_pos - away_pos) <= 3:
-                            insights.append("✅ Близкие позиции в таблице = ничейный результат")
-                    else:
-                        winner = home_short if home_won else away_short
-                        insights.append(f"🏆 {winner} оказались сильнее в этот день")
-            else:
-                insights.append(f"📊 Positions: {home_short} #{home_pos} vs {away_short} #{away_pos}")
-                insights.append(f"📈 Form: {home_short} {home_form}% | {away_short} {away_form}%")
+            # П2 analysis
+            elif "п2" in bet_lower or bet_type == "2":
+                if is_correct:
+                    if away_form > home_form:
+                        insights.append(get_result_text("away_form_won", lang))
+                    if away_pos < home_pos:
+                        insights.append(get_result_text("away_class_won", lang))
+                else:
+                    if home_won:
+                        insights.append(get_result_text("home_factor", lang, team=home_short))
+                    elif draw:
+                        insights.append(get_result_text("away_no_realize", lang, team=away_short))
+
+            # Draw analysis
+            elif "ничья" in bet_lower or bet_lower in ["х", "x"]:
+                if is_correct:
+                    # Only show insights if we have real data
+                    if (home_form != 50 or away_form != 50) and abs(home_form - away_form) < 15:
+                        insights.append(get_result_text("equal_teams_draw", lang))
+                    if (home_pos != 10 or away_pos != 10) and abs(home_pos - away_pos) <= 3:
+                        insights.append(get_result_text("close_positions_draw", lang))
+                else:
+                    winner = home_short if home_won else away_short
+                    insights.append(get_result_text("winner_stronger", lang, team=winner))
 
         # --- BTTS ANALYSIS ---
         elif "обе забьют" in bet_lower or "btts" in bet_lower:
             both_scored = home_score > 0 and away_score > 0
 
-            if lang == "ru":
-                if is_correct and both_scored:
-                    insights.append(f"⚽ {home_short}: {home_score} гол(а) | {away_short}: {away_score} гол(а)")
-                    if home_goals_avg > 1.3 and away_goals_avg > 1.3:
-                        insights.append("✅ Обе команды результативны — статистика подтвердилась")
-                elif not is_correct:
-                    if home_score == 0:
-                        insights.append(f"🚫 {home_short} не забили — атака не сработала")
-                        if home_injured_impact > 15:
-                            insights.append("🏥 Травмы атакующих игроков повлияли")
-                    if away_score == 0:
-                        insights.append(f"🚫 {away_short} не забили на выезде")
-            else:
-                if is_correct:
-                    insights.append(f"⚽ Both teams scored as expected")
-                else:
-                    insights.append(f"🚫 One team failed to score")
+            if is_correct and both_scored:
+                insights.append(get_result_text("btts_both_scored", lang, home=home_short, away=away_short, goals1=home_score, goals2=away_score))
+                if home_goals_avg > 1.3 and away_goals_avg > 1.3:
+                    insights.append(get_result_text("btts_stats_confirmed", lang))
+            elif not is_correct:
+                if home_score == 0:
+                    insights.append(get_result_text("btts_no_goal", lang, team=home_short))
+                    if home_injured_impact > 15:
+                        insights.append(get_result_text("btts_injuries", lang))
+                if away_score == 0:
+                    insights.append(get_result_text("btts_away_no_goal", lang, team=away_short))
 
         # --- DOUBLE CHANCE ANALYSIS ---
         elif "1x" in bet_lower or "x2" in bet_lower or "12" in bet_lower:
-            if lang == "ru":
-                if is_correct:
-                    insights.append("✅ Страховка сработала — безопасная ставка зашла")
-                else:
-                    insights.append("😱 Даже двойной шанс не спас — редкий случай")
+            if is_correct:
+                insights.append(get_result_text("dc_safety_worked", lang))
             else:
-                if is_correct:
-                    insights.append("✅ Safety bet paid off")
-                else:
-                    insights.append("😱 Even double chance couldn't save it")
+                insights.append(get_result_text("dc_even_failed", lang))
 
         # === 5. ADD GOALSCORER INFO ===
         if scorers_home or scorers_away:
-            if lang == "ru":
-                if scorers_home:
-                    insights.append(f"⚽ Голы {home_short}: {', '.join(scorers_home)}")
-                if scorers_away:
-                    insights.append(f"⚽ Голы {away_short}: {', '.join(scorers_away)}")
-            else:
-                if scorers_home:
-                    insights.append(f"⚽ {home_short} goals: {', '.join(scorers_home)}")
-                if scorers_away:
-                    insights.append(f"⚽ {away_short} goals: {', '.join(scorers_away)}")
+            if scorers_home:
+                insights.append(get_result_text("goals_team", lang, team=home_short, scorers=', '.join(scorers_home)))
+            if scorers_away:
+                insights.append(get_result_text("goals_team", lang, team=away_short, scorers=', '.join(scorers_away)))
 
-        # === 6. ADD CONFIDENCE CONTEXT ===
-        if lang == "ru":
-            if is_correct and confidence >= 75:
-                insights.append(f"🎯 Уверенность была {confidence}% — анализ оправдался!")
-            elif not is_correct and confidence >= 75:
-                insights.append(f"📊 Уверенность {confidence}% не помогла — футбол непредсказуем")
-            elif not is_correct and confidence < 65:
-                insights.append(f"⚠️ Уверенность была {confidence}% — это был рискованный прогноз")
-        else:
-            if is_correct and confidence >= 75:
-                insights.append(f"🎯 {confidence}% confidence justified!")
-            elif not is_correct:
-                insights.append(f"📊 Despite {confidence}% confidence — football surprises")
+        # === 6. ADD INJURY CONTEXT (if significant) ===
+        if home_injured_impact > 15:
+            insights.append(get_result_text("injury_impact", lang, team=home_short, impact=home_injured_impact))
+        if away_injured_impact > 15:
+            insights.append(get_result_text("injury_impact", lang, team=away_short, impact=away_injured_impact))
 
         # === 7. FORMAT OUTPUT ===
         if not insights:
@@ -17656,14 +17901,15 @@ async def generate_claude_result_explanation(
         claude_explanation = message.content[0].text.strip()
 
         # === 6. FORMAT OUTPUT ===
-        header = "💡 **Анализ результата:**" if lang == "ru" else "💡 **Result Analysis:**"
+        header = get_result_text("claude_analysis", lang)
         status_emoji = "✅" if is_correct else "❌"
 
         result = f"{header}\n{status_emoji} {bet_type} | {score_str}\n\n{claude_explanation}"
 
         # Add goalscorers if available
-        if scorers_info and lang == "ru":
-            result += f"\n\n⚽ Голы: {', '.join(scorers_info[:4])}"
+        if scorers_info:
+            goals_label = get_result_text("goals_label", lang)
+            result += f"\n\n{goals_label}: {', '.join(scorers_info[:4])}"
 
         return result
 
