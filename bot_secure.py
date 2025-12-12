@@ -12053,7 +12053,15 @@ async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = get_user(update.effective_user.id)
     if not user_data:
         lang = detect_language(update.effective_user)
-        create_user(update.effective_user.id, update.effective_user.username, lang)
+        is_new = create_user(update.effective_user.id, update.effective_user.username, lang)
+        if is_new:
+            await notify_admins_new_user(
+                context.bot,
+                update.effective_user.id,
+                update.effective_user.username,
+                lang,
+                "organic"
+            )
     else:
         lang = user_data.get("language", "ru")
 
@@ -12182,9 +12190,18 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show settings menu"""
     user_id = update.effective_user.id
     user = get_user(user_id)
-    
+
     if not user:
-        create_user(user_id)
+        lang = detect_language(update.effective_user)
+        is_new = create_user(user_id, update.effective_user.username, lang)
+        if is_new:
+            await notify_admins_new_user(
+                context.bot,
+                user_id,
+                update.effective_user.username,
+                lang,
+                "organic"
+            )
         user = get_user(user_id)
     
     lang = user.get("language", "ru")
@@ -15098,14 +15115,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler"""
     user_text = update.message.text.strip()
     user_id = update.effective_user.id
-    
+
     if len(user_text) < 2:
         return
-    
+
     # Ensure user exists
     if not get_user(user_id):
         lang = detect_language(update.effective_user)
-        create_user(user_id, update.effective_user.username, lang)
+        is_new = create_user(user_id, update.effective_user.username, lang)
+        if is_new:
+            await notify_admins_new_user(
+                context.bot,
+                user_id,
+                update.effective_user.username,
+                lang,
+                "organic"
+            )
 
     user = get_user(user_id)
     lang = user.get("language", "ru")
