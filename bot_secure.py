@@ -2254,9 +2254,15 @@ def grant_premium(user_id: int, days: int) -> bool:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        # Get current premium expiry
+        # Check if user exists first
         c.execute("SELECT premium_expires FROM users WHERE user_id = ?", (user_id,))
         row = c.fetchone()
+
+        if row is None:
+            # User doesn't exist - create them first
+            c.execute("INSERT INTO users (user_id, is_premium, daily_requests) VALUES (?, 0, 0)", (user_id,))
+            conn.commit()
+            logger.info(f"Created user {user_id} for premium grant")
 
         now = datetime.now()
         if row and row[0]:
