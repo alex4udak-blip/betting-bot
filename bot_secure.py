@@ -1703,7 +1703,40 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+    # Run migrations for existing databases
+    migrate_database()
+
     logger.info("Database initialized")
+
+
+def migrate_database():
+    """Add missing columns to existing tables (for database upgrades)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Check and add missing columns to player_stats table
+    player_stats_columns = [
+        ("goals_vs_top6", "INTEGER DEFAULT 0"),
+        ("goals_vs_mid", "INTEGER DEFAULT 0"),
+        ("goals_vs_bottom6", "INTEGER DEFAULT 0"),
+        ("games_vs_top6", "INTEGER DEFAULT 0"),
+        ("games_vs_mid", "INTEGER DEFAULT 0"),
+        ("games_vs_bottom6", "INTEGER DEFAULT 0"),
+        ("is_big_game_player", "BOOLEAN DEFAULT 0"),
+        ("is_flat_track_bully", "BOOLEAN DEFAULT 0"),
+    ]
+
+    for col_name, col_type in player_stats_columns:
+        try:
+            c.execute(f"ALTER TABLE player_stats ADD COLUMN {col_name} {col_type}")
+            logger.info(f"Added column {col_name} to player_stats")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    conn.commit()
+    conn.close()
+
 
 def get_user(user_id):
     """Get user settings"""
@@ -16269,10 +16302,17 @@ async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Update progress every 5 matches
         if (i + 1) % 5 == 0 or i == total - 1:
             pct = int((i + 1) / total * 100)
+            # Escape team names for Telegram
+            home_safe = home.replace("_", " ").replace("*", "")[:30]
+            away_safe = away.replace("_", " ").replace("*", "")[:30]
             try:
-                await progress_msg.edit_text(f"⏳ Прогресс: {pct}% ({i+1}/{total})\n├ Сохранено: {results['main_saved']} main + {results['alts_saved']} alts\n└ Последний: {home} vs {away}")
-            except:
-                pass
+                await progress_msg.edit_text(
+                    f"⏳ Прогресс: {pct}% ({i+1}/{total})\n"
+                    f"├ Сохранено: {results['main_saved']} main + {results['alts_saved']} alts\n"
+                    f"└ Последний: {home_safe} vs {away_safe}"
+                )
+            except Exception as e:
+                logger.warning(f"Progress update failed: {e}")
 
         # Delay between analyses to avoid rate limiting
         if i < total - 1:
