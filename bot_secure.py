@@ -15786,6 +15786,280 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(result_text)
 
 
+async def jobstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to check status of background jobs and pending predictions"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Count pending predictions
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NULL")
+    pending_total = c.fetchone()[0]
+
+    # Pending by age
+    c.execute("""SELECT COUNT(*) FROM predictions
+                 WHERE is_correct IS NULL AND predicted_at > datetime('now', '-1 day')""")
+    pending_1d = c.fetchone()[0]
+
+    c.execute("""SELECT COUNT(*) FROM predictions
+                 WHERE is_correct IS NULL AND predicted_at > datetime('now', '-7 days')""")
+    pending_7d = c.fetchone()[0]
+
+    # Count by match_id presence
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NULL AND match_id IS NULL")
+    without_match_id = c.fetchone()[0]
+
+    # Get last checked prediction time
+    c.execute("SELECT MAX(checked_at) FROM predictions WHERE checked_at IS NOT NULL")
+    last_check = c.fetchone()[0] or "Never"
+
+    # Get sample pending matches
+    c.execute("""SELECT DISTINCT match_id, home_team, away_team, predicted_at
+                 FROM predictions
+                 WHERE is_correct IS NULL AND match_id IS NOT NULL
+                 ORDER BY predicted_at DESC LIMIT 5""")
+    sample_matches = c.fetchall()
+
+    # Verified stats
+    c.execute("SELECT COUNT(*) FROM predictions WHERE is_correct IS NOT NULL")
+    verified = c.fetchone()[0]
+
+    c.execute("""SELECT COUNT(*) FROM predictions
+                 WHERE is_correct = 1""")
+    wins = c.fetchone()[0] or 0
+
+    conn.close()
+
+    accuracy = round(wins / verified * 100, 1) if verified > 0 else 0
+
+    text = f"""🔧 **СТАТУС СИСТЕМЫ**
+═══════════════════════════
+
+📊 **Pending Predictions:**
+├ Всего: {pending_total}
+├ За 24ч: {pending_1d}
+├ За 7 дней: {pending_7d} (проверяются автоматически)
+├ Без match_id: {without_match_id} ⚠️
+└ Последняя проверка: {last_check}
+
+✅ **Проверенные:**
+├ Всего: {verified}
+├ Правильных: {wins}
+└ Точность: {accuracy}%
+
+⏰ **Background Jobs:**
+├ check_predictions_results: каждые 20 мин
+├ track_upcoming_odds: каждые 30 мин
+├ check_live_matches: каждые 10 мин
+└ send_daily_digest: каждые 2 часа
+
+"""
+
+    if sample_matches:
+        text += "📋 **Последние pending матчи:**\n"
+        for m in sample_matches:
+            match_id, home, away, pred_at = m
+            text += f"• {home} vs {away}\n  ID: {match_id} | {pred_at[:16]}\n"
+
+    text += f"""
+💡 **Команды:**
+/forcecheck — проверить все pending (без уведомлений)
+/forceresults — проверить И отправить уведомления
+/accuracy — детальная статистика
+"""
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force check results AND send notifications to users (like auto job but manual)"""
+    user_id = update.effective_user.id
+
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Только для администраторов")
+        return
+
+    status_msg = await update.message.reply_text(
+        "🔄 **Принудительная проверка результатов**\n\n"
+        "⏳ Собираю pending predictions...",
+        parse_mode="Markdown"
+    )
+
+    # Get pending predictions (same as auto job)
+    pending = get_pending_predictions()
+
+    if not pending:
+        await status_msg.edit_text("✅ Нет pending predictions для проверки!")
+        return
+
+    # Group by (user_id, match_id)
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    no_match_id = 0
+
+    for pred in pending:
+        if not pred.get("match_id"):
+            no_match_id += 1
+            continue
+        if pred.get("user_id", 0) > 0:
+            key = (pred["user_id"], pred["match_id"])
+            grouped[key].append(pred)
+
+    await status_msg.edit_text(
+        f"🔄 **Принудительная проверка результатов**\n\n"
+        f"📊 Найдено: {len(pending)} predictions\n"
+        f"├ Групп (user+match): {len(grouped)}\n"
+        f"└ Без match_id: {no_match_id}\n\n"
+        f"⏳ Проверяю матчи...",
+        parse_mode="Markdown"
+    )
+
+    headers = {"X-Auth-Token": FOOTBALL_API_KEY}
+    match_results = {}
+
+    processed = 0
+    notified = 0
+    not_finished = 0
+    errors = 0
+
+    for (uid, match_id), preds in list(grouped.items())[:50]:
+        try:
+            # Get match result (cache within this run)
+            if match_id not in match_results:
+                url = f"{FOOTBALL_API_URL}/matches/{match_id}"
+                session = await get_http_session()
+                async with session.get(url, headers=headers) as r:
+                    if r.status == 200:
+                        match_results[match_id] = await r.json()
+                    elif r.status == 429:
+                        await asyncio.sleep(3)
+                        continue
+                    else:
+                        errors += 1
+                        continue
+                await asyncio.sleep(0.3)
+
+            match = match_results.get(match_id)
+            if not match:
+                continue
+
+            if match.get("status") != "FINISHED":
+                not_finished += len(preds)
+                continue
+
+            score = match.get("score", {}).get("fullTime", {})
+            home_score = score.get("home", 0) or 0
+            away_score = score.get("away", 0) or 0
+            result = f"{home_score}-{away_score}"
+
+            # Get user language
+            user_data = get_user(uid)
+            lang = user_data.get("language", "ru") if user_data else "ru"
+
+            # Process predictions and build message
+            preds.sort(key=lambda x: x.get("bet_rank", 1))
+
+            main_line = ""
+            alt_lines = []
+            main_bet_type = None
+            main_is_correct = None
+            main_pred_id = None
+
+            for pred in preds:
+                is_correct = check_bet_result(pred["bet_type"], home_score, away_score)
+
+                if is_correct is True:
+                    db_value = 1
+                    emoji = "✅"
+                elif is_correct is False:
+                    db_value = 0
+                    emoji = "❌"
+                else:
+                    db_value = 2
+                    emoji = "🔄"
+
+                update_prediction_result(pred["id"], result, db_value)
+                processed += 1
+
+                bet_rank = pred.get("bet_rank", 1)
+                if bet_rank == 1:
+                    main_line = f"{emoji} **{pred['bet_type']}** ({pred.get('confidence', 0)}%)"
+                    main_bet_type = pred["bet_type"]
+                    main_is_correct = is_correct
+                    main_pred_id = pred["id"]
+                else:
+                    alt_lines.append(f"{emoji} {pred['bet_type']} ({pred.get('confidence', 0)}%)")
+
+            # Generate Claude explanation
+            explanation = ""
+            if main_bet_type and main_is_correct is not None and main_pred_id:
+                try:
+                    explanation = await generate_claude_result_explanation(
+                        prediction_id=main_pred_id,
+                        match_data=match,
+                        bet_type=main_bet_type,
+                        is_correct=main_is_correct is True,
+                        home_score=home_score,
+                        away_score=away_score,
+                        lang=lang
+                    )
+                except Exception as e:
+                    logger.error(f"Explanation error: {e}")
+
+            # Send notification to user
+            try:
+                msg = f"📊 **Результат матча**\n\n"
+                msg += f"⚽ **{preds[0]['home']}** vs **{preds[0]['away']}**\n"
+                msg += f"📈 Счёт: {result}\n\n"
+
+                if main_line:
+                    msg += f"{main_line}\n"
+                if alt_lines:
+                    msg += "\n".join(alt_lines) + "\n"
+                if explanation:
+                    msg += f"\n{explanation}"
+
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=msg,
+                    parse_mode="Markdown"
+                )
+                notified += 1
+            except Exception as e:
+                logger.warning(f"Failed to notify user {uid}: {e}")
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Force results error: {e}")
+
+        # Progress update
+        if processed > 0 and processed % 20 == 0:
+            await status_msg.edit_text(
+                f"🔄 **Проверка результатов**\n\n"
+                f"⏳ Обработано: {processed}\n"
+                f"📤 Уведомлений: {notified}",
+                parse_mode="Markdown"
+            )
+
+    final_text = f"""✅ **Проверка завершена!**
+
+📊 **Результаты:**
+├ Predictions обновлено: {processed}
+├ Уведомлений отправлено: {notified}
+├ Матчи не завершены: {not_finished}
+├ Ошибок: {errors}
+└ Без match_id: {no_match_id}
+
+💡 /accuracy для статистики"""
+
+    await status_msg.edit_text(final_text, parse_mode="Markdown")
+
+
 async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to analyze ALL today's matches - SAVES everything to DB with ML features"""
     user_id = update.effective_user.id
@@ -19108,6 +19382,8 @@ def main():
     app.add_handler(CommandHandler("train", mltrain_cmd))  # Alias for /mltrain
     app.add_handler(CommandHandler("learnhistory", learnhistory_cmd))  # Learn from historical data
     app.add_handler(CommandHandler("accuracy", accuracy_cmd))  # Detailed accuracy analysis
+    app.add_handler(CommandHandler("jobstatus", jobstatus_cmd))  # Admin: check job status and pending
+    app.add_handler(CommandHandler("forceresults", forceresults_cmd))  # Admin: check results + send notifications
     app.add_handler(CommandHandler("roi", roi_cmd))  # ROI statistics
 
     # Callbacks
