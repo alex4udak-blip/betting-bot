@@ -17245,8 +17245,13 @@ async def generate_smart_result_explanation(
             draw = home_score == away_score
 
             if lang == "ru":
-                insights.append(f"📊 Позиции: {home_short} #{home_pos} vs {away_short} #{away_pos}")
-                insights.append(f"📈 Форма: {home_short} {home_form}% | {away_short} {away_form}%")
+                # Only show positions/form if we have real data (not defaults)
+                has_real_data = (home_pos != 10 or away_pos != 10) and (home_form != 50 or away_form != 50)
+                if has_real_data:
+                    if home_pos != 10 or away_pos != 10:
+                        insights.append(f"📊 Позиции: {home_short} #{home_pos} vs {away_short} #{away_pos}")
+                    if home_form != 50 or away_form != 50:
+                        insights.append(f"📈 Форма: {home_short} {home_form}% | {away_short} {away_form}%")
 
                 # П1 analysis
                 if "п1" in bet_lower or bet_type == "1":
@@ -17284,16 +17289,20 @@ async def generate_smart_result_explanation(
                 # Draw analysis
                 elif "ничья" in bet_lower or bet_lower in ["х", "x"]:
                     if is_correct:
-                        if abs(home_form - away_form) < 15:
+                        # Only show insights if we have real data
+                        if (home_form != 50 or away_form != 50) and abs(home_form - away_form) < 15:
                             insights.append("✅ Равные по силе команды — логичная ничья")
-                        if abs(home_pos - away_pos) <= 3:
+                        if (home_pos != 10 or away_pos != 10) and abs(home_pos - away_pos) <= 3:
                             insights.append("✅ Близкие позиции в таблице = ничейный результат")
                     else:
                         winner = home_short if home_won else away_short
                         insights.append(f"🏆 {winner} оказались сильнее в этот день")
             else:
-                insights.append(f"📊 Positions: {home_short} #{home_pos} vs {away_short} #{away_pos}")
-                insights.append(f"📈 Form: {home_short} {home_form}% | {away_short} {away_form}%")
+                # Only show if not default values
+                if home_pos != 10 or away_pos != 10:
+                    insights.append(f"📊 Positions: {home_short} #{home_pos} vs {away_short} #{away_pos}")
+                if home_form != 50 or away_form != 50:
+                    insights.append(f"📈 Form: {home_short} {home_form}% | {away_short} {away_form}%")
 
         # --- BTTS ANALYSIS ---
         elif "обе забьют" in bet_lower or "btts" in bet_lower:
@@ -17343,19 +17352,17 @@ async def generate_smart_result_explanation(
                 if scorers_away:
                     insights.append(f"⚽ {away_short} goals: {', '.join(scorers_away)}")
 
-        # === 6. ADD CONFIDENCE CONTEXT ===
+        # === 6. ADD INJURY CONTEXT (if significant) ===
         if lang == "ru":
-            if is_correct and confidence >= 75:
-                insights.append(f"🎯 Уверенность была {confidence}% — анализ оправдался!")
-            elif not is_correct and confidence >= 75:
-                insights.append(f"📊 Уверенность {confidence}% не помогла — футбол непредсказуем")
-            elif not is_correct and confidence < 65:
-                insights.append(f"⚠️ Уверенность была {confidence}% — это был рискованный прогноз")
+            if home_injured_impact > 15:
+                insights.append(f"🏥 У {home_short} серьёзные потери из-за травм ({home_injured_impact}% влияние)")
+            if away_injured_impact > 15:
+                insights.append(f"🏥 У {away_short} серьёзные потери из-за травм ({away_injured_impact}% влияние)")
         else:
-            if is_correct and confidence >= 75:
-                insights.append(f"🎯 {confidence}% confidence justified!")
-            elif not is_correct:
-                insights.append(f"📊 Despite {confidence}% confidence — football surprises")
+            if home_injured_impact > 15:
+                insights.append(f"🏥 {home_short} had significant injury impact ({home_injured_impact}%)")
+            if away_injured_impact > 15:
+                insights.append(f"🏥 {away_short} had significant injury impact ({away_injured_impact}%)")
 
         # === 7. FORMAT OUTPUT ===
         if not insights:
