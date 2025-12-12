@@ -13578,16 +13578,19 @@ async def mltrain_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if results:
             avg_accuracy = avg_accuracy / len(results) * 100
-            text += f"\n📊 Средняя точность: **{avg_accuracy:.1f}%**"
+            text += f"\n📊 Средняя точность: {avg_accuracy:.1f}%"
             text += f"\n📚 Всего примеров: {total_samples}"
     else:
         text = (
-            "❌ **Недостаточно данных для обучения**\n\n"
+            "❌ Недостаточно данных для обучения\n\n"
             f"Нужно минимум {ML_MIN_SAMPLES} проверенных прогнозов на категорию.\n\n"
             "💡 Продолжайте использовать бота, данные накапливаются автоматически."
         )
 
-    await status_msg.edit_text(text, parse_mode="Markdown")
+    try:
+        await status_msg.edit_text(text, parse_mode="Markdown")
+    except Exception:
+        await status_msg.edit_text(text)
 
 
 async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -15877,19 +15880,28 @@ async def jobstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
 
     if sample_matches:
-        text += "📋 **Последние pending матчи:**\n"
+        text += "📋 Последние pending матчи:\n"
         for m in sample_matches:
             match_id, home, away, pred_at = m
-            text += f"• {home} vs {away}\n  ID: {match_id} | {pred_at[:16]}\n"
+            # Escape underscores for Markdown
+            home_safe = str(home).replace("_", " ") if home else "?"
+            away_safe = str(away).replace("_", " ") if away else "?"
+            pred_at_safe = str(pred_at)[:16] if pred_at else "?"
+            text += f"• {home_safe} vs {away_safe}\n  ID: {match_id} | {pred_at_safe}\n"
 
-    text += f"""
-💡 **Команды:**
+    text += """
+💡 Команды:
 /forcecheck — проверить все pending (без уведомлений)
 /forceresults — проверить И отправить уведомления
 /accuracy — детальная статистика
 """
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    try:
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Markdown error in jobstatus: {e}")
+        # Fallback to plain text
+        await update.message.reply_text(text.replace("**", "").replace("_", ""))
 
 
 async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -16029,8 +16041,12 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Send notification to user
             try:
-                msg = f"📊 **Результат матча**\n\n"
-                msg += f"⚽ **{preds[0]['home']}** vs **{preds[0]['away']}**\n"
+                # Escape team names for Markdown
+                home_safe = str(preds[0].get('home', '?')).replace("_", " ").replace("*", "")
+                away_safe = str(preds[0].get('away', '?')).replace("_", " ").replace("*", "")
+
+                msg = f"📊 Результат матча\n\n"
+                msg += f"⚽ {home_safe} vs {away_safe}\n"
                 msg += f"📈 Счёт: {result}\n\n"
 
                 if main_line:
@@ -16040,11 +16056,18 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if explanation:
                     msg += f"\n{explanation}"
 
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text=msg,
-                    parse_mode="Markdown"
-                )
+                try:
+                    await context.bot.send_message(
+                        chat_id=uid,
+                        text=msg,
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    # Fallback to plain text
+                    await context.bot.send_message(
+                        chat_id=uid,
+                        text=msg.replace("**", "").replace("_", " ")
+                    )
                 notified += 1
             except Exception as e:
                 logger.warning(f"Failed to notify user {uid}: {e}")
@@ -16062,9 +16085,9 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
 
-    final_text = f"""✅ **Проверка завершена!**
+    final_text = f"""✅ Проверка завершена!
 
-📊 **Результаты:**
+📊 Результаты:
 ├ Predictions обновлено: {processed}
 ├ Уведомлений отправлено: {notified}
 ├ Матчи не завершены: {not_finished}
@@ -16073,7 +16096,10 @@ async def forceresults_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 💡 /accuracy для статистики"""
 
-    await status_msg.edit_text(final_text, parse_mode="Markdown")
+    try:
+        await status_msg.edit_text(final_text, parse_mode="Markdown")
+    except Exception:
+        await status_msg.edit_text(final_text)
 
 
 async def analyze_all_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
