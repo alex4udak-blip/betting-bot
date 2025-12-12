@@ -1798,6 +1798,34 @@ def migrate_database():
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+    # Remove duplicate favorite teams (keep only first entry)
+    try:
+        c.execute("""
+            DELETE FROM favorite_teams
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_teams GROUP BY user_id, team_name
+            )
+        """)
+        deleted_teams = c.rowcount
+        if deleted_teams > 0:
+            logger.info(f"Removed {deleted_teams} duplicate favorite teams")
+    except Exception as e:
+        logger.warning(f"Could not clean favorite_teams duplicates: {e}")
+
+    # Remove duplicate favorite leagues (keep only first entry)
+    try:
+        c.execute("""
+            DELETE FROM favorite_leagues
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM favorite_leagues GROUP BY user_id, league_code
+            )
+        """)
+        deleted_leagues = c.rowcount
+        if deleted_leagues > 0:
+            logger.info(f"Removed {deleted_leagues} duplicate favorite leagues")
+    except Exception as e:
+        logger.warning(f"Could not clean favorite_leagues duplicates: {e}")
+
     conn.commit()
     conn.close()
 
@@ -2049,11 +2077,14 @@ def increment_daily_usage(user_id, use_bonus: bool = False):
         logger.info(f"User {user_id}: {current} → {new_count}")
 
 def add_favorite_team(user_id, team_name):
-    """Add favorite team"""
+    """Add favorite team (ignores if already exists)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO favorite_teams (user_id, team_name) VALUES (?, ?)", (user_id, team_name))
-    conn.commit()
+    # Check if already exists
+    c.execute("SELECT 1 FROM favorite_teams WHERE user_id = ? AND team_name = ?", (user_id, team_name))
+    if not c.fetchone():
+        c.execute("INSERT INTO favorite_teams (user_id, team_name) VALUES (?, ?)", (user_id, team_name))
+        conn.commit()
     conn.close()
 
 def remove_favorite_team(user_id, team_name):
@@ -2074,11 +2105,14 @@ def get_favorite_teams(user_id):
     return teams
 
 def add_favorite_league(user_id, league_code):
-    """Add favorite league"""
+    """Add favorite league (ignores if already exists)"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO favorite_leagues (user_id, league_code) VALUES (?, ?)", (user_id, league_code))
-    conn.commit()
+    # Check if already exists
+    c.execute("SELECT 1 FROM favorite_leagues WHERE user_id = ? AND league_code = ?", (user_id, league_code))
+    if not c.fetchone():
+        c.execute("INSERT INTO favorite_leagues (user_id, league_code) VALUES (?, ?)", (user_id, league_code))
+        conn.commit()
     conn.close()
 
 def get_favorite_leagues(user_id):
