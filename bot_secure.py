@@ -15481,7 +15481,15 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         if matches:
             user_tz = user.get("timezone", "Europe/Moscow") if user else "Europe/Moscow"
-            recs = await get_recommendations_enhanced(matches, "Подробный анализ этого матча", user, lang=lang, user_tz=user_tz)
+            # Localized query for match analysis
+            analysis_query = {
+                "ru": "Подробный анализ этого матча",
+                "en": "Detailed analysis of this match",
+                "pt": "Análise detalhada deste jogo",
+                "es": "Análisis detallado de este partido",
+                "id": "Analisis detail pertandingan ini"
+            }.get(lang, "Detailed analysis of this match")
+            recs = await get_recommendations_enhanced(matches, analysis_query, user, lang=lang, user_tz=user_tz)
             keyboard = []
             bet_btn = get_bet_button(user_id, lang)
             if bet_btn:
@@ -18048,17 +18056,38 @@ async def generate_smart_result_explanation(
 
 {"ГОЛЫ: " + ', '.join(scorers_home + scorers_away) if scorers_home or scorers_away else ""}
 """
-                prompt = f"""Объясни коротко (2-3 предложения) почему ставка {'зашла' if is_correct else 'не зашла'}.
+                # Language-specific instructions
+                lang_instructions = {
+                    "ru": "Отвечай на русском языке.",
+                    "en": "Respond in English.",
+                    "pt": "Responda em português.",
+                    "es": "Responde en español.",
+                    "id": "Jawab dalam Bahasa Indonesia."
+                }
+                lang_instruction = lang_instructions.get(lang, lang_instructions["ru"])
+
+                bet_worked = {
+                    "ru": ("зашла", "не зашла"),
+                    "en": ("hit", "missed"),
+                    "pt": ("acertou", "errou"),
+                    "es": ("acertó", "falló"),
+                    "id": ("berhasil", "gagal")
+                }
+                worked, failed = bet_worked.get(lang, bet_worked["ru"])
+                bet_status = worked if is_correct else failed
+
+                prompt = f"""{lang_instruction}
+
+Explain briefly (2-3 sentences) why the bet {bet_status}.
 
 {context_data}
 
-ВАЖНО:
-- НЕ пиши "не хватило гола" или "xG обманул" - это очевидно
-- Объясни РЕАЛЬНЫЕ причины: тактика, форма команд, ключевые моменты
-- Если не зашла - что мы недооценили?
-- Если зашла - какой фактор был решающим?
-- Пиши по-человечески, не шаблонами
-- Язык: русский"""
+IMPORTANT:
+- DON'T write obvious things like "one goal short" or "xG was wrong"
+- Explain REAL reasons: tactics, team form, key moments
+- If bet failed - what did we underestimate?
+- If bet won - what was the decisive factor?
+- Write naturally, not template phrases"""
 
                 message = claude_client.messages.create(
                     model="claude-sonnet-4-20250514",
@@ -18069,10 +18098,11 @@ async def generate_smart_result_explanation(
 
                 result = f"{main_header}\n{why_header}\n\n{claude_text}"
 
-                # Add goalscorers
+                # Add goalscorers with translated label
                 if scorers_home or scorers_away:
                     all_scorers = scorers_home + scorers_away
-                    result += f"\n\n⚽ Голы: {', '.join(all_scorers[:4])}"
+                    goals_label = {"ru": "Голы", "en": "Goals", "pt": "Gols", "es": "Goles", "id": "Gol"}.get(lang, "Goals")
+                    result += f"\n\n⚽ {goals_label}: {', '.join(all_scorers[:4])}"
 
                 return result.strip()
 
@@ -18261,7 +18291,7 @@ async def generate_claude_result_explanation(
 - Если ставка не зашла - объясни что мы недооценили/переоценили
 - Если зашла - объясни какой фактор был решающим
 - Пиши кратко и по делу, без воды
-- Язык: {'русский' if lang == 'ru' else 'английский'}
+- Язык: {{"ru": "русский", "en": "English", "pt": "português", "es": "español", "id": "Bahasa Indonesia"}.get(lang, "русский")}
 
 Формат ответа - только текст объяснения, без заголовков."""
 
