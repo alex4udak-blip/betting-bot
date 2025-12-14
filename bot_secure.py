@@ -18021,7 +18021,7 @@ async def generate_smart_result_explanation(
         if away_injured_impact > 15:
             insights.append(get_result_text("injury_impact", lang, team=away_short, impact=away_injured_impact))
 
-        # === 7. FORMAT OUTPUT ===
+        # === 7. FORMAT OUTPUT - USE CLAUDE IF AVAILABLE ===
         if not insights:
             # Fallback to simple explanation
             return generate_result_explanation(
@@ -18029,6 +18029,58 @@ async def generate_smart_result_explanation(
                 confidence, home_team, away_team, lang
             )
 
+        # Try to use Claude for natural language explanation
+        if claude_client:
+            try:
+                # Build context for Claude
+                context_data = f"""
+МАТЧ: {home_team} vs {away_team}
+СЧЁТ: {score_str} (голов: {total_goals})
+СТАВКА: {bet_type}
+РЕЗУЛЬТАТ: {"✅ ЗАШЛА" if is_correct else "❌ НЕ ЗАШЛА"}
+
+ДАННЫЕ ДО МАТЧА:
+- Форма: {home_team} {home_form}%, {away_team} {away_form}%
+- Позиции: {home_team} #{home_pos}, {away_team} #{away_pos}
+- xG: {home_team} {home_xg:.2f}, {away_team} {away_xg:.2f}
+- Средние голы: {home_team} {home_goals_avg:.1f}, {away_team} {away_goals_avg:.1f}
+- H2H: {home_team} {h2h_home_wins} побед, {away_team} {h2h_away_wins} побед
+
+{"ГОЛЫ: " + ', '.join(scorers_home + scorers_away) if scorers_home or scorers_away else ""}
+"""
+                prompt = f"""Объясни коротко (2-3 предложения) почему ставка {'зашла' if is_correct else 'не зашла'}.
+
+{context_data}
+
+ВАЖНО:
+- НЕ пиши "не хватило гола" или "xG обманул" - это очевидно
+- Объясни РЕАЛЬНЫЕ причины: тактика, форма команд, ключевые моменты
+- Если не зашла - что мы недооценили?
+- Если зашла - какой фактор был решающим?
+- Пиши по-человечески, не шаблонами
+- Язык: русский"""
+
+                message = claude_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                claude_text = message.content[0].text.strip()
+
+                result = f"{main_header}\n{why_header}\n\n{claude_text}"
+
+                # Add goalscorers
+                if scorers_home or scorers_away:
+                    all_scorers = scorers_home + scorers_away
+                    result += f"\n\n⚽ Голы: {', '.join(all_scorers[:4])}"
+
+                return result.strip()
+
+            except Exception as e:
+                logger.warning(f"Claude explanation fallback: {e}")
+                # Fall through to template-based output below
+
+        # Template-based fallback (if Claude unavailable or failed)
         result = f"{main_header}\n{why_header}\n\n"
         for insight in insights[:6]:  # Max 6 insights
             result += f"• {insight}\n"
