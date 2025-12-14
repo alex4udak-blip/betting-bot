@@ -15249,54 +15249,57 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         try:
             learning = get_learning_stats()
 
-            text = "🧠 **СИСТЕМА САМООБУЧЕНИЯ**\n\n"
+            text = "🧠 СИСТЕМА САМООБУЧЕНИЯ\n\n"
 
             # Show totals for diagnostics
             totals = learning.get("totals", {})
-            text += f"📈 **Статус обучения:**\n"
+            text += f"📈 Статус обучения:\n"
             text += f"├ Калибровка: {totals.get('calibration_samples', 0)} примеров в {totals.get('calibration_records', 0)} записях\n"
             text += f"└ Паттерны: {totals.get('pattern_samples', 0)} примеров в {totals.get('pattern_records', 0)} записях\n\n"
 
             # Calibration stats
             if learning["calibrations"]:
-                text += "📊 **Калибровка уверенности:**\n"
+                text += "📊 Калибровка уверенности:\n"
                 for cat, bands in learning["calibrations"].items():
-                    text += f"  *{cat}:*\n"
+                    # Escape underscores to prevent Markdown issues
+                    cat_safe = cat.replace("_", " ")
+                    text += f"  {cat_safe}:\n"
                     for band, data in bands.items():
                         emoji = "✅" if 0.9 <= data["calibration"] <= 1.1 else "⚠️"
-                        text += f"    {band}%: {data['rate']}% факт (x{data['calibration']}) [{data['count']}]\n"
+                        text += f"    {emoji} {band}%: {data['rate']}% факт (x{data['calibration']}) [{data['count']}]\n"
                 text += "\n"
             else:
                 text += "📊 Калибровка: данных пока нет\n\n"
 
             # Best patterns
             if learning["best_patterns"]:
-                text += "🏆 **Лучшие паттерны:**\n"
+                text += "🏆 Лучшие паттерны:\n"
                 for p in learning["best_patterns"][:3]:
-                    pattern_short = p["pattern"].split(">")[0][:30]
-                    text += f"✅ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                    pattern_short = p["pattern"].split(">")[0][:30].replace("_", " ").replace("|", " ")
+                    text += f"✅ {pattern_short} → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
                 text += "\n"
 
             # Worst patterns
             if learning["worst_patterns"]:
-                text += "⚠️ **Худшие паттерны (избегать):**\n"
+                text += "⚠️ Худшие паттерны:\n"
                 for p in learning["worst_patterns"][:3]:
-                    pattern_short = p["pattern"].split(">")[0][:30]
-                    text += f"❌ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                    pattern_short = p["pattern"].split(">")[0][:30].replace("_", " ").replace("|", " ")
+                    text += f"❌ {pattern_short} → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
                 text += "\n"
 
             # Recent learning events
             if learning["recent_learning"]:
-                text += "📚 **Последние события обучения:**\n"
+                text += "📚 Последние события:\n"
                 for e in learning["recent_learning"][:5]:
-                    text += f"• {e['desc'][:50]}...\n"
+                    desc_safe = e['desc'][:50].replace("_", " ").replace("*", "")
+                    text += f"• {desc_safe}...\n"
             else:
                 text += "📚 События обучения: пока нет\n"
 
             text += "\n💡 Система учится с каждым проверенным прогнозом!"
 
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin learning stats error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
