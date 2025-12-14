@@ -3419,6 +3419,24 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
 
     category = categorize_bet(bet_type)
 
+    # QUALITY GATE: Minimum confidence thresholds by bet type
+    # Risky bet types require higher confidence to be saved
+    min_confidence_thresholds = {
+        "outcomes_home": 70,    # П1 - historically 40.5% accuracy, need high confidence
+        "outcomes_away": 70,    # П2 - historically 45.2%
+        "outcomes_draw": 72,    # Ничья - historically 42.9%
+        "totals_under": 68,     # ТМ - historically 45.5%
+        "totals_over": 62,      # ТБ - historically 59.7%, decent
+        "btts": 60,             # BTTS - historically 58.1%
+        "double_chance": 55,    # DC - historically 63%, best performer
+        "handicap": 65,         # Форы - historically 53.3%
+    }
+
+    min_conf = min_confidence_thresholds.get(category, 60)
+    if confidence < min_conf:
+        logger.info(f"QUALITY GATE: Rejected {bet_type} ({category}) with {confidence}% < {min_conf}% minimum for {home} vs {away}")
+        return None  # Don't save low-quality predictions
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
@@ -7291,7 +7309,24 @@ def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
     If 70% predictions actually win only 55% of time, reduce confidence.
     If 70% predictions win 80% of time, increase confidence.
     """
-    band = get_confidence_band(raw_confidence)
+    # HARDCODED PENALTIES based on historical data (updated Dec 2024):
+    # These are applied BEFORE calibration for bet types that historically underperform
+    bet_type_penalties = {
+        "outcomes_home": -15,   # П1: 40.5% actual vs ~55% expected = bad
+        "outcomes_away": -10,   # П2: 45.2% actual
+        "outcomes_draw": -12,   # Ничья: 42.9% actual
+        "totals_under": -8,     # ТМ 2.5: 45.5% actual
+        # These perform well, slight boost:
+        "double_chance": +3,    # 63.0% actual
+        "totals_over": +2,      # 59.7% actual
+        "btts": +1,             # 58.1% actual
+    }
+
+    # Apply penalty first
+    penalty = bet_type_penalties.get(bet_category, 0)
+    confidence = raw_confidence + penalty
+
+    band = get_confidence_band(raw_confidence)  # Use original for lookup
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -7303,16 +7338,14 @@ def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
     row = c.fetchone()
     conn.close()
 
-    if not row or row[1] < 10:  # Need at least 10 samples for calibration
-        return raw_confidence
-
-    calibration = row[0]
-    # Apply calibration (capped at ±20%)
-    calibration = max(0.8, min(1.2, calibration))
-    calibrated = int(raw_confidence * calibration)
+    if row and row[1] >= 10:  # Need at least 10 samples
+        calibration = row[0]
+        # More aggressive calibration (capped at ±35% instead of 20%)
+        calibration = max(0.65, min(1.35, calibration))
+        confidence = int(confidence * calibration)
 
     # Keep within valid range
-    return max(30, min(95, calibrated))
+    return max(30, min(95, confidence))
 
 
 def detect_pattern(features: dict, bet_type: str) -> str:
@@ -12167,13 +12200,20 @@ Analyze these matches with form data and give TOP 3-4 picks:
 {filter_info}
 
 RULES:
-1. DIVERSIFY bet types - include outcomes (1/X/2), totals, BTTS, double chance
-2. For TOP CLUBS - never recommend betting against them
-3. Cup matches = higher upset risk, lower confidence
-4. Consider VALUE: confidence × odds > 1.0
-5. If warnings present - adjust confidence accordingly
-6. CRITICAL: You MUST include the 📅 line with date/time for EVERY match! Copy the date/time exactly from the match data.
-{f'7. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
+1. QUALITY OVER QUANTITY - only recommend bets you're truly confident about
+2. BET TYPE PRIORITY (based on historical accuracy):
+   - PREFER: Double Chance (1X, X2) - our best performer
+   - PREFER: Over 2.5 goals - works well
+   - PREFER: BTTS (both teams score) - good accuracy
+   - AVOID: Home/Away win (П1/П2) unless 80%+ confidence AND clear domination (5+ positions difference, 20%+ form difference)
+   - AVOID: Under 2.5 unless both teams have <1.2 goals avg AND defensive form
+   - AVOID: Draw unless teams are truly equal AND H2H shows draws
+3. For TOP CLUBS - never bet against them, prefer Double Chance including them
+4. Cup matches = higher upset risk, prefer safe bets (DC, BTTS)
+5. VALUE CHECK: confidence × odds must be > 1.15 (15% edge minimum)
+6. If warnings present - lower confidence by 10-15%
+7. CRITICAL: You MUST include the 📅 line with date/time for EVERY match!
+{f'8. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
 
 FORMAT (STRICTLY follow this format, including the 📅 line with date/time):
 🔥 **ТОП СТАВКИ:**
@@ -16957,23 +16997,23 @@ Form: {form_text if form_text else "Limited data"}
 {h2h_warning}
 Odds: {odds_text if odds_text else "Not available"}
 
-CHECK ALL THESE BET TYPES (pick the BEST one):
-1. Match Winner (1X2): Home win, Draw, Away win
-2. Double Chance: 1X, X2, 12
-3. Handicap/Spread: Team with +/- goals advantage
-4. Over/Under 2.5 goals
-5. Over/Under 1.5/3.5 if available
-6. Both Teams To Score (BTTS)
+BET TYPE PRIORITY (based on our historical accuracy):
+1. BEST: Double Chance (1X, X2) - 63% accuracy, always consider first
+2. GOOD: Over 2.5 goals - 60% accuracy, if both teams score 1.3+ avg
+3. GOOD: BTTS - 58% accuracy, if both teams have attacking form
+4. RISKY: Home/Away win - ONLY if 80%+ confident AND 5+ position gap AND 20%+ form difference
+5. RISKY: Under 2.5 - ONLY if both teams avg <1.2 goals AND defensive form
+6. AVOID: Draw - rarely recommend, only if teams truly equal AND H2H shows draws
 
-IMPORTANT RULES:
-- MINIMUM ODDS: Only suggest bets with odds >= 1.60 (avoid very low odds!)
-- If H2H has < 5 matches, IGNORE H2H for totals! Use current form instead.
-- If H2H avg goals > 2.8 AND H2H has 5+ matches → favor Over 2.5
-- If H2H avg goals < 2.2 AND H2H has 5+ matches → favor Under 2.5
-- Expected goals from current form is MORE RELIABLE than small H2H sample
-- Double Chance is good for safer bets with decent odds
+STRICT RULES:
+- MINIMUM ODDS: >= 1.60 (no low odds bets!)
+- MINIMUM EDGE: confidence × odds > 1.15 (15% value minimum)
+- If H2H < 5 matches → IGNORE H2H, use current form only
+- If recommending Home/Away win → MUST have clear domination signals
+- DON'T recommend just because match is upcoming - only if there's REAL value
+- Be SELECTIVE: it's better to say "no good bet" than recommend weak bet
 
-If you find a good bet (70%+ confidence AND odds >= 1.60), respond with JSON:
+If you find a STRONG bet (75%+ confidence AND odds >= 1.60 AND clear value), respond with JSON:
 {{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
 
 If no good bet exists (low confidence OR odds too low), respond: {{"alert": false}}"""
