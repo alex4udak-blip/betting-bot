@@ -18298,6 +18298,8 @@ async def generate_claude_result_explanation(
 
         # === 4. BUILD CLAUDE PROMPT ===
         result_status = "✅ ЗАШЛА" if is_correct else "❌ НЕ ЗАШЛА"
+        lang_names = {"ru": "русский", "en": "English", "pt": "português", "es": "español", "id": "Bahasa Indonesia"}
+        target_lang = lang_names.get(lang, "русский")
 
         prompt = f"""Ты - эксперт по футбольной аналитике. Объясни результат матча и почему ставка {'зашла' if is_correct else 'не зашла'}.
 
@@ -18324,7 +18326,7 @@ async def generate_claude_result_explanation(
 - Если ставка не зашла - объясни что мы недооценили/переоценили
 - Если зашла - объясни какой фактор был решающим
 - Пиши кратко и по делу, без воды
-- Язык: {{"ru": "русский", "en": "English", "pt": "português", "es": "español", "id": "Bahasa Indonesia"}.get(lang, "русский")}
+- Язык: {target_lang}
 
 Формат ответа - только текст объяснения, без заголовков."""
 
