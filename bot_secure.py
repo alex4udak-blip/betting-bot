@@ -7704,6 +7704,27 @@ def get_learning_stats() -> dict:
                  FROM learning_log ORDER BY created_at DESC LIMIT 10""")
     recent_events = [{"type": r[0], "desc": r[1], "time": r[2]} for r in c.fetchall()]
 
+    # ROI by category
+    try:
+        c.execute("""SELECT bet_category, total_bets, wins, losses, roi_percent, avg_odds
+                     FROM roi_analytics
+                     WHERE condition_key = 'overall' AND total_bets >= 5
+                     ORDER BY roi_percent DESC""")
+        roi_by_category = {}
+        for row in c.fetchall():
+            cat, total, wins, losses, roi, avg_odds = row
+            win_rate = wins / total * 100 if total > 0 else 0
+            roi_by_category[cat] = {
+                "total": total,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(win_rate, 1),
+                "roi": round(roi, 1),
+                "avg_odds": round(avg_odds, 2)
+            }
+    except:
+        roi_by_category = {}
+
     conn.close()
 
     return {
@@ -7716,8 +7737,36 @@ def get_learning_stats() -> dict:
             "calibration_samples": int(total_calibration_samples),
             "pattern_records": total_pattern_records,
             "pattern_samples": int(total_pattern_samples)
-        }
+        },
+        "roi_by_category": roi_by_category
     }
+
+
+def get_roi_by_category() -> dict:
+    """Get ROI statistics per bet category."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""SELECT bet_category, total_bets, wins, losses, roi_percent, avg_odds
+                 FROM roi_analytics
+                 WHERE condition_key = 'overall' AND total_bets >= 5
+                 ORDER BY roi_percent DESC""")
+
+    result = {}
+    for row in c.fetchall():
+        cat, total, wins, losses, roi, avg_odds = row
+        win_rate = wins / total * 100 if total > 0 else 0
+        result[cat] = {
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 1),
+            "roi": round(roi, 1),
+            "avg_odds": round(avg_odds, 2)
+        }
+
+    conn.close()
+    return result
 
 
 # ===== SMART FEATURE-BASED LEARNING =====
@@ -8169,7 +8218,7 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             adjustments.append(f"pattern: {'+' if pattern_adj > 0 else ''}{pattern_adj}")
             confidence = new_conf
 
-    # 3. NEW: Apply smart feature-based adjustments
+    # 3. Apply smart feature-based adjustments
     # This is the KEY improvement - learns from specific conditions that cause failures
     if features and category:
         smart_adj, smart_reasons = get_smart_adjustments(category, features)
@@ -8181,11 +8230,83 @@ def apply_learning_adjustments(bet_type: str, raw_confidence: int, features: dic
             for reason in smart_reasons:
                 adjustments.append(f"  └─ {reason}")
 
+    # 4. NEW: Apply ROI-based adjustment
+    # Win rate ≠ profitability! 60% win rate can still lose money at bad odds
+    if category:
+        roi_adj, roi_reason = get_roi_adjustment(category)
+        if roi_adj != 0:
+            old_conf = confidence
+            confidence = max(30, min(95, confidence + roi_adj))
+            adjustments.append(f"roi_learning: {old_conf}→{confidence}")
+            if roi_reason:
+                adjustments.append(f"  └─ {roi_reason}")
+
     return confidence, adjustments
 
 
 # ===== ROI & EXPECTED VALUE TRACKING =====
 # Track profitability, not just win rate
+
+def get_roi_adjustment(bet_category: str) -> tuple:
+    """Get confidence adjustment based on historical ROI for this category.
+
+    ROI-based learning complements win rate calibration:
+    - Win rate tells us HOW OFTEN we win
+    - ROI tells us HOW MUCH we profit
+
+    A category with 60% win rate but -10% ROI is actually losing money!
+    A category with 45% win rate but +15% ROI is profitable!
+
+    Returns: (adjustment: int, reason: str)
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get overall ROI for this category
+    c.execute("""SELECT total_bets, roi_percent, avg_odds, wins, losses
+                 FROM roi_analytics
+                 WHERE bet_category = ? AND condition_key = 'overall'""",
+              (bet_category,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row or row[0] < 15:  # Need at least 15 bets for reliable ROI
+        return 0, None
+
+    total_bets, roi, avg_odds, wins, losses = row
+    win_rate = wins / total_bets * 100 if total_bets > 0 else 50
+
+    # ROI-based adjustment logic:
+    # ROI < -20%: strong penalty (-12)
+    # ROI -20% to -10%: medium penalty (-8)
+    # ROI -10% to 0%: small penalty (-4)
+    # ROI 0% to +10%: small boost (+3)
+    # ROI +10% to +25%: medium boost (+6)
+    # ROI > +25%: strong boost (+10)
+
+    if roi < -20:
+        adjustment = -12
+        reason = f"💸 ROI: {roi:.1f}% ({total_bets} ставок) → -12%"
+    elif roi < -10:
+        adjustment = -8
+        reason = f"📉 ROI: {roi:.1f}% ({total_bets} ставок) → -8%"
+    elif roi < 0:
+        adjustment = -4
+        reason = f"⚠️ ROI: {roi:.1f}% ({total_bets} ставок) → -4%"
+    elif roi < 10:
+        adjustment = 3
+        reason = f"📊 ROI: +{roi:.1f}% ({total_bets} ставок) → +3%"
+    elif roi < 25:
+        adjustment = 6
+        reason = f"📈 ROI: +{roi:.1f}% ({total_bets} ставок) → +6%"
+    else:
+        adjustment = 10
+        reason = f"🚀 ROI: +{roi:.1f}% ({total_bets} ставок) → +10%"
+
+    logger.debug(f"ROI adjustment for {bet_category}: {adjustment} (ROI={roi:.1f}%, n={total_bets})")
+
+    return adjustment, reason
+
 
 def calculate_expected_value(confidence: int, odds: float) -> float:
     """Calculate Expected Value (EV) for a bet.
@@ -15285,6 +15406,19 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
                 for p in learning["worst_patterns"][:3]:
                     pattern_short = p["pattern"].split(">")[0][:30].replace("_", " ").replace("|", " ")
                     text += f"❌ {pattern_short} → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                text += "\n"
+
+            # ROI by category (NEW!)
+            roi_data = learning.get("roi_by_category", {})
+            if roi_data:
+                text += "💰 ROI по категориям:\n"
+                for cat, data in roi_data.items():
+                    cat_safe = cat.replace("_", " ")
+                    roi = data["roi"]
+                    win_rate = data["win_rate"]
+                    total = data["total"]
+                    emoji = "🚀" if roi > 10 else "📈" if roi > 0 else "📉" if roi > -10 else "💸"
+                    text += f"  {emoji} {cat_safe}: ROI {roi:+.1f}% | WR {win_rate:.0f}% | n={total}\n"
                 text += "\n"
 
             # Recent learning events
