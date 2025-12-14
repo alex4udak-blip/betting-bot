@@ -7462,11 +7462,17 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
 
     # Skip push results for learning
     if is_correct == 2:  # Push
+        logger.info(f"📚 LEARN: Skip push result for pred_id={prediction_id}")
         return
+
+    # Log learning event for visibility
+    result_emoji = "✅" if is_win else "❌"
+    logger.info(f"📚 LEARNING: {result_emoji} {bet_category} | conf={confidence}% | pred_id={prediction_id} | features={'yes' if features else 'NO'}")
 
     # 1. Update confidence calibration
     if bet_category:
         update_confidence_calibration(bet_category, confidence, is_win)
+        logger.debug(f"📚 Updated calibration for {bet_category}")
 
     # 2. Update pattern learning
     if features:
@@ -7641,6 +7647,25 @@ def get_learning_stats() -> dict:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
+    # Total counts for diagnostics
+    try:
+        c.execute("SELECT COUNT(*), SUM(predicted_count) FROM confidence_calibration")
+        calib_row = c.fetchone()
+        total_calibration_records = calib_row[0] if calib_row else 0
+        total_calibration_samples = calib_row[1] if calib_row and calib_row[1] else 0
+    except:
+        total_calibration_records = 0
+        total_calibration_samples = 0
+
+    try:
+        c.execute("SELECT COUNT(*), SUM(wins + losses) FROM learning_patterns")
+        pattern_row = c.fetchone()
+        total_pattern_records = pattern_row[0] if pattern_row else 0
+        total_pattern_samples = pattern_row[1] if pattern_row and pattern_row[1] else 0
+    except:
+        total_pattern_records = 0
+        total_pattern_samples = 0
+
     # Calibration stats
     c.execute("""SELECT bet_category, confidence_band, predicted_count, actual_wins, calibration_factor
                  FROM confidence_calibration WHERE predicted_count >= 5
@@ -7685,7 +7710,13 @@ def get_learning_stats() -> dict:
         "calibrations": calibrations,
         "best_patterns": best_patterns,
         "worst_patterns": worst_patterns,
-        "recent_learning": recent_events
+        "recent_learning": recent_events,
+        "totals": {
+            "calibration_records": total_calibration_records,
+            "calibration_samples": int(total_calibration_samples),
+            "pattern_records": total_pattern_records,
+            "pattern_samples": int(total_pattern_samples)
+        }
     }
 
 
@@ -15218,48 +15249,57 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
         try:
             learning = get_learning_stats()
 
-            text = "🧠 **СИСТЕМА САМООБУЧЕНИЯ**\n\n"
+            text = "🧠 СИСТЕМА САМООБУЧЕНИЯ\n\n"
+
+            # Show totals for diagnostics
+            totals = learning.get("totals", {})
+            text += f"📈 Статус обучения:\n"
+            text += f"├ Калибровка: {totals.get('calibration_samples', 0)} примеров в {totals.get('calibration_records', 0)} записях\n"
+            text += f"└ Паттерны: {totals.get('pattern_samples', 0)} примеров в {totals.get('pattern_records', 0)} записях\n\n"
 
             # Calibration stats
             if learning["calibrations"]:
-                text += "📊 **Калибровка уверенности:**\n"
+                text += "📊 Калибровка уверенности:\n"
                 for cat, bands in learning["calibrations"].items():
-                    text += f"  *{cat}:*\n"
+                    # Escape underscores to prevent Markdown issues
+                    cat_safe = cat.replace("_", " ")
+                    text += f"  {cat_safe}:\n"
                     for band, data in bands.items():
                         emoji = "✅" if 0.9 <= data["calibration"] <= 1.1 else "⚠️"
-                        text += f"    {band}%: {data['rate']}% факт (x{data['calibration']}) [{data['count']}]\n"
+                        text += f"    {emoji} {band}%: {data['rate']}% факт (x{data['calibration']}) [{data['count']}]\n"
                 text += "\n"
             else:
                 text += "📊 Калибровка: данных пока нет\n\n"
 
             # Best patterns
             if learning["best_patterns"]:
-                text += "🏆 **Лучшие паттерны:**\n"
+                text += "🏆 Лучшие паттерны:\n"
                 for p in learning["best_patterns"][:3]:
-                    pattern_short = p["pattern"].split(">")[0][:30]
-                    text += f"✅ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                    pattern_short = p["pattern"].split(">")[0][:30].replace("_", " ").replace("|", " ")
+                    text += f"✅ {pattern_short} → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
                 text += "\n"
 
             # Worst patterns
             if learning["worst_patterns"]:
-                text += "⚠️ **Худшие паттерны (избегать):**\n"
+                text += "⚠️ Худшие паттерны:\n"
                 for p in learning["worst_patterns"][:3]:
-                    pattern_short = p["pattern"].split(">")[0][:30]
-                    text += f"❌ {pattern_short}... → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
+                    pattern_short = p["pattern"].split(">")[0][:30].replace("_", " ").replace("|", " ")
+                    text += f"❌ {pattern_short} → {p['rate']}% ({p['wins']}W/{p['losses']}L)\n"
                 text += "\n"
 
             # Recent learning events
             if learning["recent_learning"]:
-                text += "📚 **Последние события обучения:**\n"
+                text += "📚 Последние события:\n"
                 for e in learning["recent_learning"][:5]:
-                    text += f"• {e['desc'][:50]}...\n"
+                    desc_safe = e['desc'][:50].replace("_", " ").replace("*", "")
+                    text += f"• {desc_safe}...\n"
             else:
                 text += "📚 События обучения: пока нет\n"
 
             text += "\n💡 Система учится с каждым проверенным прогнозом!"
 
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="cmd_admin")]]
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Admin learning stats error: {e}")
             await query.edit_message_text(f"❌ Ошибка: {e}")
