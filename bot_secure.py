@@ -3419,23 +3419,19 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
 
     category = categorize_bet(bet_type)
 
-    # QUALITY GATE: Minimum confidence thresholds by bet type
-    # Risky bet types require higher confidence to be saved
-    min_confidence_thresholds = {
-        "outcomes_home": 70,    # П1 - historically 40.5% accuracy, need high confidence
-        "outcomes_away": 70,    # П2 - historically 45.2%
-        "outcomes_draw": 72,    # Ничья - historically 42.9%
-        "totals_under": 68,     # ТМ - historically 45.5%
-        "totals_over": 62,      # ТБ - historically 59.7%, decent
-        "btts": 60,             # BTTS - historically 58.1%
-        "double_chance": 55,    # DC - historically 63%, best performer
-        "handicap": 65,         # Форы - historically 53.3%
-    }
+    # Calculate VALUE score for ROI optimization
+    # VALUE = (confidence/100) × odds
+    # For positive ROI long-term, we want VALUE > 1.0 (edge over bookmaker)
+    try:
+        odds_float = float(odds) if odds else 1.5
+    except:
+        odds_float = 1.5
 
-    min_conf = min_confidence_thresholds.get(category, 60)
-    if confidence < min_conf:
-        logger.info(f"QUALITY GATE: Rejected {bet_type} ({category}) with {confidence}% < {min_conf}% minimum for {home} vs {away}")
-        return None  # Don't save low-quality predictions
+    value_score = (confidence / 100) * odds_float
+    has_value = value_score > 1.0  # Positive expected value
+
+    # Log for analytics - but SAVE ALL predictions for learning
+    logger.info(f"PREDICTION: {bet_type} ({category}) | conf={confidence}% | odds={odds_float:.2f} | VALUE={value_score:.2f} {'✓' if has_value else '✗'} | {home} vs {away}")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -7308,25 +7304,12 @@ def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
 
     If 70% predictions actually win only 55% of time, reduce confidence.
     If 70% predictions win 80% of time, increase confidence.
+
+    No hardcoded penalties - let the calibration system learn from actual data.
+    This allows the model to improve over time for ALL bet types.
     """
-    # HARDCODED PENALTIES based on historical data (updated Dec 2024):
-    # These are applied BEFORE calibration for bet types that historically underperform
-    bet_type_penalties = {
-        "outcomes_home": -15,   # П1: 40.5% actual vs ~55% expected = bad
-        "outcomes_away": -10,   # П2: 45.2% actual
-        "outcomes_draw": -12,   # Ничья: 42.9% actual
-        "totals_under": -8,     # ТМ 2.5: 45.5% actual
-        # These perform well, slight boost:
-        "double_chance": +3,    # 63.0% actual
-        "totals_over": +2,      # 59.7% actual
-        "btts": +1,             # 58.1% actual
-    }
-
-    # Apply penalty first
-    penalty = bet_type_penalties.get(bet_category, 0)
-    confidence = raw_confidence + penalty
-
-    band = get_confidence_band(raw_confidence)  # Use original for lookup
+    band = get_confidence_band(raw_confidence)
+    confidence = raw_confidence
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -7338,7 +7321,7 @@ def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
     row = c.fetchone()
     conn.close()
 
-    if row and row[1] >= 10:  # Need at least 10 samples
+    if row and row[1] >= 10:  # Need at least 10 samples for reliable calibration
         calibration = row[0]
         # More aggressive calibration (capped at ±35% instead of 20%)
         calibration = max(0.65, min(1.35, calibration))
@@ -12200,20 +12183,27 @@ Analyze these matches with form data and give TOP 3-4 picks:
 {filter_info}
 
 RULES:
-1. QUALITY OVER QUANTITY - only recommend bets you're truly confident about
-2. BET TYPE PRIORITY (based on historical accuracy):
-   - PREFER: Double Chance (1X, X2) - our best performer
-   - PREFER: Over 2.5 goals - works well
-   - PREFER: BTTS (both teams score) - good accuracy
-   - AVOID: Home/Away win (П1/П2) unless 80%+ confidence AND clear domination (5+ positions difference, 20%+ form difference)
-   - AVOID: Under 2.5 unless both teams have <1.2 goals avg AND defensive form
-   - AVOID: Draw unless teams are truly equal AND H2H shows draws
-3. For TOP CLUBS - never bet against them, prefer Double Chance including them
-4. Cup matches = higher upset risk, prefer safe bets (DC, BTTS)
-5. VALUE CHECK: confidence × odds must be > 1.15 (15% edge minimum)
+1. VALUE BETTING FOR ROI - find bets where confidence × odds > 1.2 (20% edge)
+   Example: 65% confidence × 2.0 odds = 1.30 VALUE ✓ (good bet)
+   Example: 80% confidence × 1.3 odds = 1.04 VALUE ✗ (waste of confidence)
+
+2. PREFER HIGHER ODDS with solid confidence over "safe" low odds bets
+   - A 60% bet @ 2.2 odds (VALUE=1.32) beats 80% bet @ 1.3 odds (VALUE=1.04)
+   - Target odds range: 1.7 - 3.0 for best ROI potential
+   - Low odds (<1.5) only if confidence is 85%+
+
+3. ANALYZE ALL BET TYPES fairly - each has its place:
+   - П1/П2: good when there's clear class difference + form advantage
+   - Double Chance: safer but need decent odds (1.4+)
+   - Over/Under: check actual goals averages and H2H totals
+   - BTTS: check if both teams score regularly (>60% matches)
+   - Draw: only when teams are truly equal AND low-scoring history
+
+4. For TOP CLUBS - they rarely lose but draws happen, consider 1X or X2
+5. Cup matches = more upsets, adjust confidence down 10%
 6. If warnings present - lower confidence by 10-15%
-7. CRITICAL: You MUST include the 📅 line with date/time for EVERY match!
-{f'8. ONLY recommend bets with {min_confidence}%+ confidence! Skip all bets below this threshold.' if min_confidence > 0 else ''}
+7. CRITICAL: Include 📅 date/time for EVERY match!
+{f'8. ONLY recommend bets with {min_confidence}%+ confidence!' if min_confidence > 0 else ''}
 
 FORMAT (STRICTLY follow this format, including the 📅 line with date/time):
 🔥 **ТОП СТАВКИ:**
@@ -16997,23 +16987,26 @@ Form: {form_text if form_text else "Limited data"}
 {h2h_warning}
 Odds: {odds_text if odds_text else "Not available"}
 
-BET TYPE PRIORITY (based on our historical accuracy):
-1. BEST: Double Chance (1X, X2) - 63% accuracy, always consider first
-2. GOOD: Over 2.5 goals - 60% accuracy, if both teams score 1.3+ avg
-3. GOOD: BTTS - 58% accuracy, if both teams have attacking form
-4. RISKY: Home/Away win - ONLY if 80%+ confident AND 5+ position gap AND 20%+ form difference
-5. RISKY: Under 2.5 - ONLY if both teams avg <1.2 goals AND defensive form
-6. AVOID: Draw - rarely recommend, only if teams truly equal AND H2H shows draws
+VALUE BETTING RULES (for high ROI):
+1. VALUE = confidence × odds - must be > 1.2 (20% edge minimum)
+   Example: 70% × 1.85 = 1.30 ✓ GOOD VALUE
+   Example: 85% × 1.25 = 1.06 ✗ LOW VALUE (don't waste high confidence on low odds)
 
-STRICT RULES:
-- MINIMUM ODDS: >= 1.60 (no low odds bets!)
-- MINIMUM EDGE: confidence × odds > 1.15 (15% value minimum)
-- If H2H < 5 matches → IGNORE H2H, use current form only
-- If recommending Home/Away win → MUST have clear domination signals
-- DON'T recommend just because match is upcoming - only if there's REAL value
-- Be SELECTIVE: it's better to say "no good bet" than recommend weak bet
+2. TARGET ODDS: 1.7 - 2.5 range optimal for ROI
+   - Low odds (<1.5) = low ROI potential even if wins
+   - High odds (>3.0) = need higher confidence
 
-If you find a STRONG bet (75%+ confidence AND odds >= 1.60 AND clear value), respond with JSON:
+3. ANALYZE ALL BET TYPES fairly:
+   - П1/П2: recommend when clear favorite + good odds (1.8+)
+   - Double Chance: good for safety but check odds aren't too low
+   - Over 2.5: check both teams avg goals (need 1.3+ each)
+   - BTTS: both teams must score in >60% of their matches
+   - Under/Draw: rare but valid when data supports
+
+4. If H2H < 5 matches → rely on current form, not H2H
+5. DON'T recommend weak bets - it's OK to say "no value found"
+
+If you find a VALUE bet (confidence × odds > 1.2 AND odds >= 1.60), respond with JSON:
 {{"alert": true, "bet_type": "...", "confidence": 75, "odds": 1.85, "reason_en": "...", "reason_ru": "...", "reason_es": "...", "reason_pt": "..."}}
 
 If no good bet exists (low confidence OR odds too low), respond: {{"alert": false}}"""
