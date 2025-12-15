@@ -1365,9 +1365,17 @@ def format_match_datetime(utc_date_str: str, user_tz: str = "Europe/Moscow", lan
 
 # ===== DATABASE =====
 
+def get_db_connection(timeout: int = 30):
+    """Get database connection with proper settings to avoid locking."""
+    conn = sqlite3.connect(DB_PATH, timeout=timeout)
+    conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for better concurrency
+    conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
+    return conn
+
+
 def init_db():
     """Initialize SQLite database"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     
     # Users table with daily usage tracking
@@ -1828,11 +1836,11 @@ def init_db():
 
 def migrate_database():
     """Add missing columns to existing tables (for database upgrades)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
-    # Check and add missing columns to player_stats table
-    player_stats_columns = [
+    # Check and add missing columns to key_players table (for flat track bully tracking)
+    key_players_columns = [
         ("goals_vs_top6", "INTEGER DEFAULT 0"),
         ("goals_vs_mid", "INTEGER DEFAULT 0"),
         ("goals_vs_bottom6", "INTEGER DEFAULT 0"),
@@ -1843,10 +1851,10 @@ def migrate_database():
         ("is_flat_track_bully", "BOOLEAN DEFAULT 0"),
     ]
 
-    for col_name, col_type in player_stats_columns:
+    for col_name, col_type in key_players_columns:
         try:
-            c.execute(f"ALTER TABLE player_stats ADD COLUMN {col_name} {col_type}")
-            logger.info(f"Added column {col_name} to player_stats")
+            c.execute(f"ALTER TABLE key_players ADD COLUMN {col_name} {col_type}")
+            logger.info(f"Added column {col_name} to key_players")
         except sqlite3.OperationalError:
             pass  # Column already exists
 
@@ -1891,7 +1899,7 @@ def migrate_database():
 
 def get_user(user_id):
     """Get user settings"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row  # Read by column names
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -1922,7 +1930,7 @@ def save_pending_utm(user_id: int, utm_source: str, referrer_id: int = None):
     if utm_source == "organic" and referrer_id is None:
         return  # Don't save default organic
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""INSERT OR REPLACE INTO pending_utm (user_id, utm_source, referrer_id, created_at)
                  VALUES (?, ?, ?, datetime('now'))""",
@@ -1934,7 +1942,7 @@ def save_pending_utm(user_id: int, utm_source: str, referrer_id: int = None):
 
 def get_pending_utm(user_id: int) -> dict:
     """Get pending UTM data for user."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT utm_source, referrer_id FROM pending_utm WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -1947,7 +1955,7 @@ def get_pending_utm(user_id: int) -> dict:
 
 def delete_pending_utm(user_id: int):
     """Delete pending UTM after user is created."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM pending_utm WHERE user_id = ?", (user_id,))
     conn.commit()
@@ -1957,7 +1965,7 @@ def delete_pending_utm(user_id: int):
 def create_user(user_id, username=None, language="ru", source=None):
     """Create new user. Returns True if new user created, False if already exists.
     If source is None, checks pending_utm table for stored UTM source."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Check if user already exists
@@ -1989,7 +1997,7 @@ async def notify_admins_new_user(bot, user_id: int, username: str = None, langua
 
     # Get total user count
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
         total_users = c.fetchone()[0]
@@ -2043,7 +2051,7 @@ ALLOWED_USER_SETTINGS = frozenset({
 
 def update_user_settings(user_id: int, **kwargs) -> None:
     """Update user settings (SQL injection safe)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     for key, value in kwargs.items():
@@ -2137,7 +2145,7 @@ def increment_daily_usage(user_id, use_bonus: bool = False):
 
 def add_favorite_team(user_id, team_name):
     """Add favorite team (ignores if already exists)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     # Check if already exists
     c.execute("SELECT 1 FROM favorite_teams WHERE user_id = ? AND team_name = ?", (user_id, team_name))
@@ -2148,7 +2156,7 @@ def add_favorite_team(user_id, team_name):
 
 def remove_favorite_team(user_id, team_name):
     """Remove favorite team"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM favorite_teams WHERE user_id = ? AND team_name = ?", (user_id, team_name))
     conn.commit()
@@ -2156,7 +2164,7 @@ def remove_favorite_team(user_id, team_name):
 
 def get_favorite_teams(user_id):
     """Get user's favorite teams"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT team_name FROM favorite_teams WHERE user_id = ?", (user_id,))
     teams = [row[0] for row in c.fetchall()]
@@ -2165,7 +2173,7 @@ def get_favorite_teams(user_id):
 
 def add_favorite_league(user_id, league_code):
     """Add favorite league (ignores if already exists)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     # Check if already exists
     c.execute("SELECT 1 FROM favorite_leagues WHERE user_id = ? AND league_code = ?", (user_id, league_code))
@@ -2176,7 +2184,7 @@ def add_favorite_league(user_id, league_code):
 
 def get_favorite_leagues(user_id):
     """Get user's favorite leagues"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT league_code FROM favorite_leagues WHERE user_id = ?", (user_id,))
     leagues = [row[0] for row in c.fetchall()]
@@ -2309,7 +2317,7 @@ def get_user_geo(user_id: int) -> str:
         'DEFAULT' for others
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT source FROM users WHERE user_id = ?", (user_id,))
         row = c.fetchone()
@@ -2408,7 +2416,7 @@ def calculate_premium_days(amount: float, currency: str = "BRL", geo: str = "DEF
 def grant_premium(user_id: int, days: int) -> bool:
     """Grant premium to user for specified days."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if user exists first
@@ -2454,7 +2462,7 @@ def grant_bonus_predictions(user_id: int, count: int = 5) -> bool:
     Stored as negative daily_requests (e.g., -5 means 5 extra requests available).
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get current daily_requests
@@ -2484,7 +2492,7 @@ def grant_bonus_predictions(user_id: int, count: int = 5) -> bool:
 def check_premium_expired(user_id: int) -> bool:
     """Check if user's premium has expired and update status if needed."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT is_premium, premium_expires FROM users WHERE user_id = ?", (user_id,))
         row = c.fetchone()
@@ -2499,7 +2507,7 @@ def check_premium_expired(user_id: int) -> bool:
         expiry = datetime.fromisoformat(row[1])
         if expiry < datetime.now():
             # Premium expired - update status
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (user_id,))
             conn.commit()
@@ -2528,7 +2536,7 @@ def get_referral_link(user_id: int) -> str:
 def save_referral(referrer_id: int, referred_id: int) -> bool:
     """Save referral relationship"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         # Check if already exists
         c.execute("SELECT id FROM referrals WHERE referred_id = ?", (referred_id,))
@@ -2551,7 +2559,7 @@ def save_referral(referrer_id: int, referred_id: int) -> bool:
 def get_referral_stats(user_id: int) -> dict:
     """Get referral statistics for user"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Count total referrals
@@ -2579,7 +2587,7 @@ def get_referral_stats(user_id: int) -> dict:
 def grant_referral_bonus(referred_user_id: int) -> Optional[int]:
     """Grant bonus to referrer when referred user buys premium. Returns referrer_id if bonus granted."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Find referrer and check if bonus already granted
@@ -2621,7 +2629,7 @@ REFERRAL_BONUS_THRESHOLD = 2   # Number of friends needed
 def check_referral_bonus_eligible(user_id: int) -> dict:
     """Check if user is eligible for referral predictions bonus (2 friends = 3 predictions)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get referral count
@@ -2661,7 +2669,7 @@ def claim_referral_bonus(user_id: int) -> bool:
             logger.warning(f"User {user_id} not eligible for referral bonus")
             return False
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Grant bonus predictions and mark as claimed
@@ -2682,7 +2690,7 @@ def claim_referral_bonus(user_id: int) -> bool:
 def grant_new_user_referral_bonus(user_id: int) -> bool:
     """Grant bonus predictions to new user who was referred (friend also gets bonus)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Grant bonus predictions to new user
@@ -2702,7 +2710,7 @@ def grant_new_user_referral_bonus(user_id: int) -> bool:
 def use_bonus_prediction(user_id: int) -> bool:
     """Use one bonus prediction. Returns True if successful."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if user has bonus predictions
@@ -2730,7 +2738,7 @@ def use_bonus_prediction(user_id: int) -> bool:
 def get_bonus_predictions(user_id: int) -> int:
     """Get number of remaining bonus predictions"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT bonus_predictions FROM users WHERE user_id = ?", (user_id,))
         row = c.fetchone()
@@ -2746,7 +2754,7 @@ def get_bonus_predictions(user_id: int) -> int:
 def update_user_streak(user_id: int) -> dict:
     """Update user's daily streak. Returns streak info."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2796,7 +2804,7 @@ def update_user_streak(user_id: int) -> dict:
 def get_user_streak(user_id: int) -> dict:
     """Get user's current streak without updating."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""SELECT streak_days, streak_record FROM users WHERE user_id = ?""", (user_id,))
         row = c.fetchone()
@@ -2815,7 +2823,7 @@ def get_user_streak(user_id: int) -> dict:
 def get_social_stats() -> dict:
     """Get social proof statistics."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2867,7 +2875,7 @@ def get_social_stats() -> dict:
 def get_friend_wins(user_id: int, lang: str = "ru") -> list:
     """Get recent wins from user's referrals (friends)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get user's referrals who won recently
@@ -2948,7 +2956,7 @@ def process_1win_postback(data: dict) -> dict:
             return {"status": "error", "reason": "invalid sub1 (telegram user_id)"}
 
         # Check for duplicate transaction
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT id FROM deposits_1win WHERE transaction_id = ?", (transaction_id,))
         if c.fetchone():
@@ -3072,7 +3080,7 @@ async def create_crypto_invoice(user_id: int, days: int, currency: str = "USDT")
                     invoice_id = str(invoice["invoice_id"])
 
                     # Save to database
-                    conn = sqlite3.connect(DB_PATH)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute("""
                         INSERT INTO crypto_payments (user_id, invoice_id, amount, currency, days, status)
@@ -3126,7 +3134,7 @@ def process_crypto_webhook(data: dict) -> dict:
         days = int(parts[1])
 
         # Check if already processed
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT status FROM crypto_payments WHERE invoice_id = ?", (invoice_id,))
         row = c.fetchone()
@@ -3173,7 +3181,7 @@ def process_crypto_webhook(data: dict) -> dict:
 
 def load_live_subscribers() -> set[int]:
     """Load live subscribers from database"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT user_id FROM live_subscribers")
     subscribers = {row[0] for row in c.fetchall()}
@@ -3184,7 +3192,7 @@ def load_live_subscribers() -> set[int]:
 
 def add_live_subscriber(user_id: int) -> None:
     """Add user to live subscribers in DB"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO live_subscribers (user_id) VALUES (?)", (user_id,))
     conn.commit()
@@ -3193,7 +3201,7 @@ def add_live_subscriber(user_id: int) -> None:
 
 def remove_live_subscriber(user_id: int) -> None:
     """Remove user from live subscribers in DB"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM live_subscribers WHERE user_id = ?", (user_id,))
     conn.commit()
@@ -3433,7 +3441,7 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
     # Log for analytics - but SAVE ALL predictions for learning
     logger.info(f"PREDICTION: {bet_type} ({category}) | conf={confidence}% | odds={odds_float:.2f} | VALUE={value_score:.2f} {'✓' if has_value else '✗'} | {home} vs {away}")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # For MAIN bets: check if ANY main bet exists for this match
@@ -3471,7 +3479,7 @@ def save_prediction(user_id, match_id, home, away, bet_type, confidence, odds, m
         # IMPORTANT: Still save ML data if features provided but not saved before
         if ml_features and category:
             # Check if ML data exists for this prediction
-            conn2 = sqlite3.connect(DB_PATH)
+            conn2 = get_db_connection()
             c2 = conn2.cursor()
             c2.execute("SELECT id FROM ml_training_data WHERE prediction_id = ?", (existing_id,))
             ml_exists = c2.fetchone()
@@ -3513,7 +3521,7 @@ def get_pending_predictions():
     Sorted by match_time (oldest first) for smart result checking -
     matches that should have ended get checked first.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank, match_time
                  FROM predictions
@@ -3534,7 +3542,7 @@ def get_pending_predictions():
 
 def update_prediction_result(pred_id, result, is_correct):
     """Update prediction with result and ML training data + trigger learning"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get prediction details for learning
@@ -3559,7 +3567,7 @@ def update_prediction_result(pred_id, result, is_correct):
         if pred_row:
             bet_category, confidence, bet_type = pred_row
             # Get ML features, user_id, odds, and league_code
-            conn2 = sqlite3.connect(DB_PATH)
+            conn2 = get_db_connection()
             c2 = conn2.cursor()
             c2.execute("SELECT features_json FROM ml_training_data WHERE prediction_id = ?", (pred_id,))
             features_row = c2.fetchone()
@@ -3584,7 +3592,7 @@ def clean_duplicate_predictions() -> dict:
     - Main bet (rank=1): Only ONE per (user_id, match_id) - keep oldest
     - Alternative (rank>1): Only ONE per (user_id, match_id, bet_type) - keep oldest
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     deleted_count = 0
@@ -3647,7 +3655,7 @@ def clean_duplicate_favorites() -> dict:
     Keeps the oldest entry for each (user_id, team_name/league_code) pair.
     Returns count of deleted duplicates.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     deleted_teams = 0
@@ -3697,7 +3705,7 @@ def get_clean_stats() -> dict:
     Different bet types or ranks (main vs alt) are NOT duplicates.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Count unique predictions (first per user+match+bet_type+bet_rank)
@@ -3753,7 +3761,7 @@ def get_clean_stats() -> dict:
 def get_roi_stats(user_id: int = None) -> dict:
     """Calculate ROI (Return on Investment) for predictions.
     Assumes flat betting (1 unit per bet)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     where_clause = "WHERE is_correct IS NOT NULL"
@@ -3799,7 +3807,7 @@ def get_roi_stats(user_id: int = None) -> dict:
 
 def get_streak_info(user_id: int = None) -> dict:
     """Get current streak and best/worst streaks."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     where_clause = "WHERE is_correct IS NOT NULL"
@@ -3863,7 +3871,7 @@ def get_streak_info(user_id: int = None) -> dict:
 
 def get_stats_by_league() -> dict:
     """Get accuracy statistics broken down by league/competition."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -4711,7 +4719,7 @@ def save_key_player(team_id: int, team_name: str, player_id: int, player_name: s
                     league_code: str = None):
     """Save or update a key player in database."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("""
@@ -4743,7 +4751,7 @@ def save_key_player(team_id: int, team_name: str, player_id: int, player_name: s
 def get_team_key_players(team_name: str, team_id: int = None) -> list:
     """Get key players for a team from database."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
@@ -4929,7 +4937,7 @@ def analyze_flat_track_bully(team_name: str, team_id: int = None) -> dict:
     }
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
@@ -5035,7 +5043,7 @@ def update_player_match_performance(player_id: int, player_name: str, team_id: i
     try:
         opponent_class = get_opponent_class(opponent_position)
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Insert match stats
@@ -5439,7 +5447,7 @@ def train_ensemble_models(bet_category: str = "match_result") -> dict:
 
     try:
         # Load training data
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""
             SELECT features_json, target FROM ml_training_data
@@ -5550,7 +5558,7 @@ def save_ensemble_model(model_name: str, bet_category: str, accuracy: float,
                         samples_count: int, feature_importance: dict, model_path: str):
     """Save ensemble model info to database."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("""
@@ -6591,7 +6599,7 @@ def extract_features(home_form: dict, away_form: dict, standings: dict,
 def save_ml_training_data(prediction_id: int, bet_category: str, features: dict, target: int = None, bet_rank: int = 1):
     """Save features for ML training with bet rank (1=MAIN, 2+=ALT)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""INSERT INTO ml_training_data (prediction_id, bet_category, features_json, target, bet_rank)
                      VALUES (?, ?, ?, ?, ?)""",
@@ -6606,7 +6614,7 @@ def save_ml_training_data(prediction_id: int, bet_category: str, features: dict,
 
 def update_ml_training_target(prediction_id: int, target: int):
     """Update target (result) for ML training data"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE ml_training_data SET target = ? WHERE prediction_id = ?", (target, prediction_id))
     conn.commit()
@@ -6619,7 +6627,7 @@ def get_ml_training_data(bet_category: str) -> tuple:
     Uses ML_FEATURE_COLUMNS for consistent feature ordering.
     Automatically uses all defined features - just add to ML_FEATURE_COLUMNS!
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""SELECT features_json, target FROM ml_training_data
                  WHERE bet_category = ? AND target IS NOT NULL""", (bet_category,))
@@ -6701,7 +6709,7 @@ def train_ml_model(bet_category: str) -> Optional[dict]:
     joblib.dump(model, model_path)
 
     # Save metadata
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""INSERT INTO ml_models (model_type, accuracy, samples_count, model_path)
                  VALUES (?, ?, ?, ?)""",
@@ -6901,7 +6909,7 @@ def apply_ml_correction(bet_type: str, claude_confidence: int, ml_features: dict
 
 def check_and_train_models():
     """Check if we have enough data and train models"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Check samples per category
@@ -6927,7 +6935,7 @@ def check_and_train_models():
 
 def get_ml_status() -> dict:
     """Get ML system status"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Training data counts
@@ -7058,7 +7066,7 @@ def analyze_prediction_error(prediction: dict, actual_result: str, features: dic
 def save_prediction_error(prediction_id: int, league_code: str, bet_category: str,
                           error_analysis: dict, features: dict):
     """Save error analysis to database for learning."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     features_json = json.dumps(features) if features else "{}"
@@ -7081,7 +7089,7 @@ def save_prediction_error(prediction_id: int, league_code: str, bet_category: st
 
 def update_league_learning(league_code: str, bet_category: str, is_correct: bool, error_type: str = None):
     """Update league learning stats after each result."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get or create record
@@ -7122,7 +7130,7 @@ def update_league_learning(league_code: str, bet_category: str, is_correct: bool
 
 def get_learning_context(league_code: str, bet_category: str = None) -> str:
     """Get learning context for Claude prompt - what we learned from past errors."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     context_parts = []
@@ -7192,7 +7200,7 @@ def get_learning_context(league_code: str, bet_category: str = None) -> str:
 
 def get_category_learning_context(bet_category: str) -> str:
     """Get learning context for a specific bet category across all leagues."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Overall stats for this category
@@ -7266,7 +7274,7 @@ def update_confidence_calibration(bet_category: str, confidence: int, is_win: bo
     """
     band = get_confidence_band(confidence)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get or create calibration record
@@ -7311,7 +7319,7 @@ def get_calibrated_confidence(bet_category: str, raw_confidence: int) -> int:
     band = get_confidence_band(raw_confidence)
     confidence = raw_confidence
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""SELECT calibration_factor, predicted_count
@@ -7391,7 +7399,7 @@ def detect_pattern(features: dict, bet_type: str) -> str:
 
 def update_pattern(pattern_key: str, is_win: bool):
     """Update pattern win/loss record."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("SELECT id, wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
@@ -7418,7 +7426,7 @@ def get_pattern_adjustment(pattern_key: str) -> int:
     Positive = pattern historically wins
     Negative = pattern historically loses
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("SELECT wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
@@ -7480,7 +7488,7 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
         update_pattern(pattern_key, is_win)
 
         # Log significant patterns
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT wins, losses FROM learning_patterns WHERE pattern_key = ?", (pattern_key,))
         row = c.fetchone()
@@ -7530,7 +7538,7 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
 
     # 6. NEW: Update ROI analytics - track PROFITABILITY not just win rate
     # Get prediction details for ROI calculation
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""SELECT odds, expected_value, stake_percent
                  FROM predictions WHERE id = ?""", (prediction_id,))
@@ -7550,7 +7558,7 @@ def learn_from_result(prediction_id: int, bet_category: str, confidence: int,
                 profit = -stake
 
             # Update prediction with profit
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute("UPDATE predictions SET profit = ? WHERE id = ?", (profit, prediction_id))
             conn.commit()
@@ -7587,7 +7595,7 @@ def should_retrain_model(bet_category: str) -> bool:
     1. New data > 20% more than training data
     2. Recent accuracy significantly lower than model accuracy
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get model info
@@ -7632,7 +7640,7 @@ def should_retrain_model(bet_category: str) -> bool:
 
 def log_learning_event(event_type: str, description: str, data: dict = None):
     """Log a learning event for tracking system improvement."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""INSERT INTO learning_log (event_type, description, data_json)
                  VALUES (?, ?, ?)""",
@@ -7644,7 +7652,7 @@ def log_learning_event(event_type: str, description: str, data: dict = None):
 
 def get_learning_stats() -> dict:
     """Get statistics about system learning progress."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Total counts for diagnostics
@@ -7744,7 +7752,7 @@ def get_learning_stats() -> dict:
 
 def get_roi_by_category() -> dict:
     """Get ROI statistics per bet category."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""SELECT bet_category, total_bets, wins, losses, roi_percent, avg_odds
@@ -7860,7 +7868,7 @@ def update_feature_pattern(bet_category: str, condition: str, is_win: bool, conf
     """Update feature-based error pattern after a result."""
     condition_key = get_condition_key(bet_category, condition)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""SELECT id, total_predictions, wins, losses, avg_confidence_when_failed
@@ -7916,7 +7924,7 @@ def get_smart_adjustments(bet_category: str, features: dict) -> tuple:
     if not conditions:
         return 0, []
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     adjustments = []
@@ -7965,7 +7973,7 @@ def get_risky_conditions(bet_category: str, features: dict) -> list:
     if not conditions:
         return risky
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     for condition in conditions:
@@ -8028,7 +8036,7 @@ def suggest_alternative_bet(bet_category: str, features: dict, risky_conditions:
         best_alt = None
         best_win_rate = 0
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         for alt in alternatives[bet_category]:
@@ -8075,7 +8083,7 @@ def get_smart_learning_context_for_claude(features: dict, league_code: str = Non
     if not features:
         return ""
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     context_parts = []
@@ -8259,7 +8267,7 @@ def get_roi_adjustment(bet_category: str) -> tuple:
 
     Returns: (adjustment: int, reason: str)
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get overall ROI for this category
@@ -8357,7 +8365,7 @@ def update_roi_analytics(bet_category: str, condition_key: str, is_win: bool,
 
     Tracks total ROI by category and condition for learning.
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Calculate profit/loss
@@ -8418,7 +8426,7 @@ def get_roi_based_recommendations(features: dict) -> str:
     if not features:
         return ""
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     context_parts = []
@@ -8502,7 +8510,7 @@ def get_roi_based_recommendations(features: dict) -> str:
 
 def get_overall_roi_stats() -> dict:
     """Get overall ROI statistics for admin dashboard."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Overall stats
@@ -8581,7 +8589,7 @@ def update_user_bet_stats(user_id: int, bet_category: str, is_correct: bool, odd
     if is_correct == 2:  # Push
         return
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get or create user stats for this category
@@ -8623,7 +8631,7 @@ def update_user_bet_stats(user_id: int, bet_category: str, is_correct: bool, odd
 
 def get_user_personalization(user_id: int) -> dict:
     """Get personalized insights for user based on their betting history"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user's stats by category
@@ -8703,7 +8711,7 @@ def get_user_personalization(user_id: int) -> dict:
 
 def get_personalized_advice(user_id: int, bet_category: str, lang: str = "ru") -> Optional[str]:
     """Get personalized advice for a specific bet type based on user's history"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""SELECT total_bets, wins, losses, roi
@@ -8801,7 +8809,7 @@ def get_personalized_advice(user_id: int, bet_category: str, lang: str = "ru") -
 
 def get_user_stats(user_id, page: int = 0, per_page: int = 7):
     """Get user's prediction statistics with categories and pagination"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("SELECT COUNT(*) FROM predictions WHERE user_id = ?", (user_id,))
@@ -10296,7 +10304,7 @@ async def get_coach_from_api(team_id: int, team_name: str) -> Optional[dict]:
                 is_new_coach = False
                 matches_tracked = 0
 
-                conn = sqlite3.connect(DB_PATH)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 # Get previous coach record for this team
@@ -11019,7 +11027,7 @@ def calculate_value_bet(confidence: float, odds: float) -> dict:
 
 def get_bot_accuracy_stats() -> dict:
     """Analyze historical predictions to find what works best"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     stats = {
@@ -11262,7 +11270,7 @@ async def get_team_squad(team_id: int) -> Optional[dict]:
 def save_odds_history(match_key: str, bookmaker: str, odds_data: dict):
     """Save odds to history for line movement tracking"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         for market_outcome, price in odds_data.items():
             # Parse market and outcome from key like "Over_2.5" or "Home"
@@ -11285,7 +11293,7 @@ def get_line_movement(match_key: str, current_odds: dict) -> dict:
     """
     movements = {"_has_history": False, "_hours_tracked": 0}
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get oldest and count of records for this match
@@ -13295,7 +13303,7 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif arg.isdigit():
             limit = min(int(arg), 50)  # Max 50
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
@@ -13384,7 +13392,7 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Get stats
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Total users
@@ -13497,7 +13505,7 @@ async def accuracy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("📊 Собираю статистику...")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Check for pending predictions first
@@ -13783,7 +13791,7 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = " ".join(context.args)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT user_id FROM users")
     users = c.fetchall()
@@ -13863,7 +13871,7 @@ async def removepremium_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_id = int(context.args[0])
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE users SET is_premium = 0 WHERE user_id = ?", (target_id,))
     affected = c.rowcount
@@ -13887,7 +13895,7 @@ async def cleanfavs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Get status BEFORE cleanup
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Count total favorite entries
@@ -13961,7 +13969,7 @@ async def userinfo_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     target_id = int(context.args[0])
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id = ?", (target_id,))
@@ -14169,7 +14177,7 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text("🧠 Запускаю обучение на исторических данных...")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get all verified predictions with their ML features
@@ -14239,7 +14247,7 @@ async def learnhistory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Error processing prediction {pred_id}: {e}")
 
     # Get stats about learned patterns
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""SELECT COUNT(*),
                  SUM(CASE WHEN suggested_adjustment < -5 THEN 1 ELSE 0 END),
@@ -14724,7 +14732,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
     elif data.startswith("history_"):
         # History filter callbacks
         filter_type = data.replace("history_", "")
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
@@ -14886,7 +14894,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             return
 
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Get recent users
@@ -14924,7 +14932,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             return
 
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Get stats by source
@@ -14972,7 +14980,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         try:
             source_filter = data.replace("admin_users_src_", "")
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Get users by source
@@ -15009,7 +15017,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             await query.edit_message_text("⛔ Только для администраторов")
             return
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Stats by bet type
@@ -15102,7 +15110,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
 
         await query.edit_message_text("📊 Собираю статистику точности...")
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         text = "📊 **АНАЛИЗ ТОЧНОСТИ**\n" + "=" * 30 + "\n\n"
@@ -15192,7 +15200,7 @@ _{get_text('change_in_settings', selected_lang)}_{referral_msg}"""
             return
 
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Total ML training samples
@@ -15731,7 +15739,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Update user activity and streak
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("UPDATE users SET last_active = datetime('now') WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -16331,7 +16339,7 @@ async def force_check_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Запускаю полную проверку ВСЕХ pending predictions...")
 
     # Get ALL pending predictions (no time limit)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""SELECT id, user_id, match_id, home_team, away_team, bet_type, confidence, odds, bet_rank,
                         predicted_at
@@ -16469,7 +16477,7 @@ async def jobstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Только для администраторов")
         return
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Count pending predictions
@@ -18039,7 +18047,7 @@ async def generate_smart_result_explanation(
         score_str = f"{home_score}:{away_score}"
 
         # === 1. GET ORIGINAL PREDICTION DATA ===
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get prediction features
@@ -18370,7 +18378,7 @@ async def generate_claude_result_explanation(
         score_str = f"{home_score}:{away_score}"
 
         # === 1. GET PREDICTION FEATURES FROM DB ===
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("""
@@ -18900,7 +18908,7 @@ def get_marketing_stats(days: int = 1) -> dict:
     emphasizing positive results to engage users.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get stats for the period
@@ -18994,7 +19002,7 @@ async def send_evening_digest(context: ContextTypes.DEFAULT_TYPE):
 
     # Get all users
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT user_id, language FROM users WHERE last_active >= datetime('now', '-30 days')")
         all_users = c.fetchall()
@@ -19111,7 +19119,7 @@ async def send_morning_alert(context: ContextTypes.DEFAULT_TYPE):
 
     # Get all users
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT user_id, language FROM users WHERE last_active >= datetime('now', '-14 days')")
         all_users = c.fetchall()
@@ -19169,7 +19177,7 @@ async def send_inactive_user_alerts(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Checking inactive users...")
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         # Users who were active 3-14 days ago (not too old, not too recent)
         c.execute("""SELECT user_id, language FROM users
@@ -19243,7 +19251,7 @@ async def send_weekly_report(context: ContextTypes.DEFAULT_TYPE):
 
     # Get all users
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT user_id, language FROM users WHERE last_active >= datetime('now', '-30 days')")
         all_users = c.fetchall()
@@ -19498,7 +19506,7 @@ async def send_new_user_onboarding(context: ContextTypes.DEFAULT_TYPE, user_id: 
 def user_has_made_prediction(user_id: int) -> bool:
     """Check if user has made at least one prediction request"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT daily_requests FROM users WHERE user_id = ?", (user_id,))
         row = c.fetchone()
@@ -19700,7 +19708,7 @@ async def send_reengagement_alerts(context: ContextTypes.DEFAULT_TYPE):
 
     for hours_min, hours_max, alert_type in time_windows:
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             c = conn.cursor()
             # Get users who were active but became inactive in this window
             c.execute("""SELECT user_id, language FROM users
@@ -19814,7 +19822,7 @@ SUCCESS_TRIGGER_MESSAGES = {
 def get_recent_prediction_stats() -> dict:
     """Get recent prediction statistics for trigger calculations."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Today's stats
@@ -19908,7 +19916,7 @@ def get_inactive_users_for_triggers(min_hours: int = 6, max_hours: int = 168) ->
         max_hours: Maximum hours of inactivity (default 7 days)
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""
             SELECT user_id, language FROM users
@@ -20109,7 +20117,7 @@ async def send_marketing_notifications(context: ContextTypes.DEFAULT_TYPE):
 
     # Get all active users
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""SELECT user_id, language FROM users
                      WHERE last_active >= datetime('now', '-7 days')""")
@@ -20192,7 +20200,7 @@ async def check_streak_milestones(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Checking streak milestones...")
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         # Users with notable streaks who haven't been notified today
         c.execute("""SELECT user_id, language, streak_days FROM users
